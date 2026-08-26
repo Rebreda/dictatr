@@ -39,7 +39,17 @@ so "what did I say about X" works. Disable with `recall = false`.
 
 The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
 warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
-to 15-45 s.
+to 15-45 s. `dictatr ask --quiet` skips TTS and notifications and delivers
+the answer like a dictation.
+
+Ask mode can also use local tools instead of guessing: current time
+(`date`), file search in your home directory (`find`, read-only), your
+local calendar (khal/calcurse when installed), and `remember` — lasting
+facts land in `memories.jsonl` in the archive and are loaded into every
+future ask. Archived dictations additionally get LLM-extracted concept
+tags (work, code, todo, ...) written into the manifest's listenr
+`categories` field plus an aggregate `cache/concepts.json` index;
+`dictatr tag` backfills older rows.
 
 ## Dependencies
 

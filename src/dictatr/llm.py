@@ -1,4 +1,4 @@
-"""Ask-mode helpers: chat completion and spoken answers via Lemonade.
+"""Ask-mode helpers: chat completion, tool calling, spoken answers.
 
 Mirrors listenr's llm_processor shape (Lemonade OpenAI-compatible HTTP) so a
 future `listenr dictate` merge can swap these for listenr's own client.
@@ -10,12 +10,18 @@ import subprocess
 import tempfile
 import urllib.request
 
+from . import tools as toolbox
 from .settings import settings
 
 SYSTEM_PROMPT = (
     "You are a concise local voice assistant. The user is speaking, not "
     "typing. Answer briefly in plain text: no markdown, no lists unless "
-    "asked, at most a few sentences."
+    "asked, at most a few sentences.\n"
+    "You have tools. ALWAYS call a tool instead of guessing when the "
+    "question involves the current time or date (current_time), files on "
+    "this computer (find_files), upcoming events (calendar), or when the "
+    "user tells you something worth keeping for the future (remember). "
+    "Never invent times, dates or file paths."
 )
 
 
@@ -39,32 +45,65 @@ def complete(system: str, user: str, max_tokens: int = 512,
         return (json.load(r)["choices"][0]["message"]["content"] or "").strip()
 
 
-def chat(question: str, context: list[dict] | None = None) -> str:
-    # One merged system message: some chat templates (gpt-oss) mishandle or
-    # drop a second system entry. Thinking is disabled for latency — voice
-    # answers need seconds, not a hidden reasoning chain (templates without
-    # an enable_thinking knob simply ignore the kwarg).
+def _post_chat(payload: dict, timeout: float = 180.0) -> dict:
+    req = urllib.request.Request(
+        f"{settings.whisper.api_base}/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)["choices"][0]["message"]
+
+
+def _system_prompt(context: list[dict] | None) -> str:
     system = SYSTEM_PROMPT
+    memories = toolbox.load_memories()
+    if memories:
+        system += ("\nLasting facts you remembered about the user:\n"
+                   + "\n".join(f"- {m}" for m in memories))
     if context:
         notes = "\n".join(f"- [{c['date']}] {c['text']}" for c in context)
         system += (
             "\nYou can consult entries the user previously dictated on this "
             "machine; use them when relevant:\n" + notes)
-    req = urllib.request.Request(
-        f"{settings.whisper.api_base}/chat/completions",
-        data=json.dumps({
+    return system
+
+
+def chat(question: str, context: list[dict] | None = None) -> str:
+    """Tool-calling conversation loop: the model may consult local tools
+    (time, file search, calendar, remember) before answering."""
+    schemas, executors = toolbox.registry()
+    messages = [
+        {"role": "system", "content": _system_prompt(context)},
+        {"role": "user", "content": question},
+    ]
+    for _ in range(4):
+        msg = _post_chat({
             "model": settings.llm.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": question},
-            ],
+            "messages": messages,
+            "tools": schemas,
             "max_tokens": 2048,
             "chat_template_kwargs": {"enable_thinking": False},
-        }).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=180) as r:
-        return (json.load(r)["choices"][0]["message"]["content"] or "").strip()
+        })
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return (msg.get("content") or "").strip()
+        messages.append({"role": "assistant",
+                         "content": msg.get("content") or "",
+                         "tool_calls": calls})
+        for call in calls:
+            fn = call.get("function", {})
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = (executors[name](args) if name in executors
+                      else f"(unknown tool {name})")
+            messages.append({"role": "tool",
+                             "tool_call_id": call.get("id", ""),
+                             "content": result})
+    return "(tool loop did not converge)"
 
 
 def speak(text: str) -> None:
