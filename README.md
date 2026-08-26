@@ -10,7 +10,13 @@ Every accepted dictation is archived in
 (`audio/YYYY-MM-DD/clip_*.wav` + append-only `manifest.jsonl`), so daily
 dictation doubles as ASR fine-tuning data. The package mirrors listenr's
 module layout (settings / storage / batch / realtime client) so it can be
-merged into listenr as a `listenr dictate` subcommand later.
+merged into listenr as a `listenr dictate` subcommand later. (listenr itself
+is not required — dictatr just writes a listenr-compatible archive.)
+
+<p align="center">
+  <img src="docs/menu.png" width="400" alt="Floating radial menu: six round action bubbles around a mic hub">
+  <img src="docs/settings.png" width="330" alt="Settings window: model pickers, VAD timing, TTS and archive toggles">
+</p>
 
 ## How it decides when you stopped talking
 
