@@ -57,38 +57,47 @@ tags (work, code, todo, ...) written into the manifest's listenr
 `categories` field plus an aggregate `cache/concepts.json` index;
 `dictatr tag` backfills older rows.
 
-## Dependencies
-
-Python (managed by `uv sync`, pinned in `pyproject.toml`):
-
-- `websockets` — the realtime client. That's the only one.
-
-System tools (all standard distro packages):
-
-| Tool | Package (Fedora) | Used for | Required? |
-|---|---|---|---|
-| `pw-record` | pipewire-utils | mic capture | yes |
-| `wl-copy` | wl-clipboard | clipboard delivery | yes (Wayland) |
-| `notify-send` | libnotify | status feedback | yes |
-| GTK4 + PyGObject | gtk4, python3-gobject | floating menu | menu only |
-| `ydotool` (+ daemon) | ydotool | type at cursor | optional |
-| `uv` | uv | env management | install only |
-
-The engine itself is portable to any desktop (mic, HTTP, clipboard,
-notifications are all desktop-agnostic); the hotkey registration in
-`install.sh` is KDE-specific, and on GNOME/Hyprland you bind the same two
-commands in your own shortcut settings.
-
 ## Install
 
+**1. Lemonade** — the local inference server everything runs on. Install
+[Lemonade Server](https://lemonade-server.ai), make sure it's running, and
+pull the models you want:
+
 ```bash
-./install.sh   # uv sync, symlinks, .desktop entries, KDE shortcut bindings
+lemonade pull Moonshine-Medium-Streaming   # dictation (ASR) — required
+lemonade pull Qwen3.5-4B-GGUF              # ask mode (optional)
+lemonade pull nomic-embed-text-v1-GGUF     # ask-mode recall (optional)
+lemonade pull kokoro-v1                    # spoken answers, TTS (optional)
+lemonade status                            # verify the server is up
 ```
 
-Assign/verify the shortcuts in System Settings → Shortcuts ("Dictate") —
-left-hand defaults: Ctrl+Alt+D dictate toggle, Ctrl+Alt+Space menu,
-Ctrl+Alt+C cancel. (Plasma loads shortcut config at login.) For type-at-cursor:
-`sudo dnf install ydotool && systemctl --user enable --now ydotool`.
+**2. Distro packages** (Fedora names — adapt for your distro):
+
+```bash
+sudo dnf install pipewire-utils wl-clipboard libnotify   # mic, clipboard, notifications
+sudo dnf install gtk4 python3-gobject gtk4-layer-shell   # optional: floating menu
+sudo dnf install ydotool && sudo systemctl enable --now ydotool   # optional: type at cursor
+```
+
+Without ydotool, transcripts go to the clipboard instead of typing at the
+cursor. Without gtk4-layer-shell the menu still works as a centered window
+(GNOME has no layer-shell protocol).
+
+**3. dictatr:**
+
+```bash
+./install.sh   # uv sync, symlinks into ~/.local/bin, .desktop entries, KDE hotkeys
+```
+
+[uv](https://docs.astral.sh/uv/) manages the env; `websockets` is the only
+Python dependency.
+
+**4. Hotkeys** — on KDE, `install.sh` binds Ctrl+Alt+D (dictate toggle),
+Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel); Plasma loads them at next login,
+or assign them now in System Settings → Shortcuts ("Dictate"). On other
+desktops bind `dictate type`, `dictate-menu`, and `dictate cancel` in your
+own shortcut settings — everything but the hotkey registration is
+desktop-agnostic.
 
 ## Usage
 
@@ -102,8 +111,7 @@ dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
 
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE/wlroots compositors; click anywhere
-outside to dismiss): `sudo dnf install gtk4-layer-shell`. Without it (GNOME
-has no layer-shell) it is a small centered window.
+outside to dismiss); without it, a small centered window.
 
 ## Configuration (environment variables)
 
