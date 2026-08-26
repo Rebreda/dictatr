@@ -177,3 +177,28 @@ def main() -> int:
         return asyncio.run(_run())
     finally:
         runstate.LISTEN_PID.unlink(missing_ok=True)
+
+
+def toggle() -> int:
+    """Hotkey/menu entry point: flip the always-on listener on or off.
+
+    Off just SIGTERMs whatever runs it — a clean exit, so a systemd unit
+    (Restart=on-failure) stays down too. On spawns a detached listener
+    logging to $XDG_RUNTIME_DIR/dictatr/listen.log."""
+    import os
+    import signal as _signal
+    import subprocess
+
+    from . import deliver as dlv
+
+    if pid := runstate.live_pid(runstate.LISTEN_PID):
+        os.kill(pid, _signal.SIGTERM)
+        dlv.notify("Always-on capture: off", 2500)
+        return 0
+    runstate.RUN.mkdir(parents=True, exist_ok=True)
+    with open(runstate.RUN / "listen.log", "ab") as log:
+        subprocess.Popen([sys.executable, "-m", "dictatr.cli", "listen"],
+                         start_new_session=True, stdout=log,
+                         stderr=subprocess.STDOUT)
+    dlv.notify("Always-on capture: on 🎙 (everything is archived)", 4000)
+    return 0

@@ -32,6 +32,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
 sys.path.insert(0, str(REPO / "src"))
+from dictatr import runstate  # noqa: E402
 from dictatr.settings import CONFIG_PATH, settings  # noqa: E402
 
 # (icon, tooltip, action) — action: list = dictate args, str = internal
@@ -40,6 +41,8 @@ ACTIONS = [
     ("edit-copy-symbolic", "Dictate to clipboard", ["clip"]),
     ("folder-music-symbolic", "Transcribe audio file…", "file"),
     ("user-available-symbolic", "Ask the AI (speak a question)", ["ask"]),
+    ("media-record-symbolic", "Always-on capture (toggle)",
+     ["listen", "--toggle"]),
     ("emblem-system-symbolic", "Settings", "settings"),
     ("process-stop-symbolic", "Cancel recording", ["cancel"]),
 ]
@@ -67,6 +70,8 @@ window { background: transparent; }
   background: alpha(#8ab4f8, 0.28);
   border-color: alpha(#8ab4f8, 0.6);
 }
+.bubble.on { background: alpha(#81c995, 0.25); border-color: alpha(#81c995, 0.6); }
+.bubble.on image { color: #81c995; }
 .hub:hover { background: alpha(#f28b82, 0.25); }
 .settings-box { padding: 18px; }
 """
@@ -141,9 +146,12 @@ class Radial(Gtk.ApplicationWindow):
 
         # Satellites first (behind the hub), stacked at the center, hidden.
         self.bubbles = []
-        for i, (icon, tip, _) in enumerate(ACTIONS):
+        for i, (icon, tip, action) in enumerate(ACTIONS):
             b = Gtk.Button(icon_name=icon, tooltip_text=f"{tip}  [{i + 1}]")
             b.add_css_class("bubble")
+            if action == ["listen", "--toggle"] and \
+                    runstate.live_pid(runstate.LISTEN_PID):
+                b.add_css_class("on")  # listener is live: show it green
             b.set_size_request(BUBBLE, BUBBLE)
             b.set_opacity(0.0)
             b.connect("clicked", self.on_action, i)

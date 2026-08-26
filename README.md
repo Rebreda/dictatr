@@ -54,7 +54,8 @@ cursor. Without gtk4-layer-shell the menu still works as a centered window
 Python dependency.
 
 **4. Hotkeys** — on KDE, `install.sh` binds Ctrl+Alt+D (dictate toggle),
-Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel); Plasma loads them at next login,
+Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel), Ctrl+Alt+A (always-on capture
+toggle); Plasma loads them at next login,
 or assign them now in System Settings → Shortcuts ("Dictate"). On other
 desktops bind `dictate type`, `dictate-menu`, and `dictate cancel` in your
 own shortcut settings — everything but the hotkey registration is
@@ -82,9 +83,12 @@ outside to dismiss); without it, a small centered window.
 hears — no typing, no clipboard, just the listenr-format archive filling up
 with fine-tuning data and recall context. It pauses automatically while a
 hotkey dictation is active (no duplicate rows), and if Lemonade is down the
-audio is archived untranscribed and backfilled on the next start. Opt in
-via systemd (`install.sh` installs the units but never enables them —
-an always-hot mic is your call):
+audio is archived untranscribed and backfilled on the next start.
+
+Toggle it with Ctrl+Alt+A, the record bubble in the menu (green while
+live), or `dictate listen --toggle`. To have it on from login instead, use
+the systemd units (`install.sh` installs them but never enables them — an
+always-hot mic is your call):
 
 ```bash
 systemctl --user enable --now dictatr-listen

@@ -177,8 +177,11 @@ def main() -> None:
     sub.add_parser("tag", help="backfill concept tags for untagged archive rows")
     f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
     f.add_argument("path")
-    sub.add_parser("listen", help="always-on: archive every utterance until "
-                                  "stopped (pauses during hotkey sessions)")
+    ls = sub.add_parser("listen", help="always-on: archive every utterance "
+                                       "until stopped (pauses during hotkey "
+                                       "sessions)")
+    ls.add_argument("--toggle", action="store_true",
+                    help="start detached, or stop the running listener")
     g = sub.add_parser("gc", help="quarantine junk archive clips, purge old trash")
     g.add_argument("--dry-run", action="store_true",
                    help="report what would be quarantined, touch nothing")
@@ -204,7 +207,7 @@ def main() -> None:
         sys.exit(cmd_file(args.path))
     if args.cmd == "listen":
         from . import listen
-        sys.exit(listen.main())
+        sys.exit(listen.toggle() if args.toggle else listen.main())
     if args.cmd == "gc":
         from . import cleanup
         if args.restore:

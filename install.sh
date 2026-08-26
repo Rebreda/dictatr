@@ -11,11 +11,12 @@ command -v uv >/dev/null || { echo "uv is required (https://docs.astral.sh/uv/)"
 ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
 
-for name in dictate dictate-menu dictate-cancel; do
+for name in dictate dictate-menu dictate-cancel dictate-listen; do
     case $name in
     dictate) label="Dictate (toggle)" exec="$HOME/.local/bin/dictate type" ;;
     dictate-menu) label="Dictate menu" exec="$HOME/.local/bin/dictate-menu" ;;
     dictate-cancel) label="Dictate cancel" exec="$HOME/.local/bin/dictate cancel" ;;
+    dictate-listen) label="Dictate always-on (toggle)" exec="$HOME/.local/bin/dictate listen --toggle" ;;
     esac
     cat >~/.local/share/applications/$name.desktop <<EOF
 [Desktop Entry]
@@ -34,6 +35,8 @@ kwriteconfig6 --file kglobalshortcutsrc --group services \
     --group dictate-menu.desktop --key _launch "Ctrl+Alt+Space"
 kwriteconfig6 --file kglobalshortcutsrc --group services \
     --group dictate-cancel.desktop --key _launch "Ctrl+Alt+C"
+kwriteconfig6 --file kglobalshortcutsrc --group services \
+    --group dictate-listen.desktop --key _launch "Ctrl+Alt+A"
 
 # Systemd user units for always-on capture + daily archive gc. Installed
 # but never enabled here: an always-hot mic must be an explicit choice.
