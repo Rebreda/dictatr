@@ -18,45 +18,6 @@ is not required — dictatr just writes a listenr-compatible archive.)
   <img src="docs/settings.png" width="330" alt="Settings window: model pickers, VAD timing, TTS and archive toggles">
 </p>
 
-## How it decides when you stopped talking
-
-With the default Moonshine streaming model, Lemonade's `/realtime` WebSocket
-does the VAD server-side with the model's bundled neural TEN-VAD
-([src/dictatr/engine.py](src/dictatr/engine.py)) — robust against keyboard
-clicks and mic auto-gain, with word-level streaming deltas.
-
-Non-streaming models (Whisper) automatically fall back to client-side
-adaptive VAD + batch transcription ([src/dictatr/vad.py](src/dictatr/vad.py)):
-whisper.cpp's realtime VAD over-segments mid-sentence and hallucinates on
-breath segments (measured on real recordings), while batch transcription of
-the client-detected utterance is flawless. Force a mode with
-`DICTATE_MODE=realtime|batch`.
-
-## Ask mode
-
-The ask bubble (or `dictatr ask`) captures a spoken question and answers it
-with a local LLM via Lemonade — answer on the clipboard, notification
-preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings or
-`speak_answers = false`). Before answering, the question is semantically
-matched against your dictation archive (listenr's embed-once-and-cache
-approach, via Lemonade's `/embeddings` endpoint and the 75 MB
-nomic-embed-text model) and relevant past dictations are given to the LLM —
-so "what did I say about X" works. Disable with `recall = false`.
-
-The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
-warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
-to 15-45 s. `dictatr ask --quiet` skips TTS and notifications and delivers
-the answer like a dictation.
-
-Ask mode can also use local tools instead of guessing: current time
-(`date`), file search in your home directory (`find`, read-only), your
-local calendar (khal/calcurse when installed), and `remember` — lasting
-facts land in `memories.jsonl` in the archive and are loaded into every
-future ask. Archived dictations additionally get LLM-extracted concept
-tags (work, code, todo, ...) written into the manifest's listenr
-`categories` field plus an aggregate `cache/concepts.json` index;
-`dictatr tag` backfills older rows.
-
 ## Install
 
 **1. Lemonade** — the local inference server everything runs on. Install
@@ -112,6 +73,45 @@ dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE/wlroots compositors; click anywhere
 outside to dismiss); without it, a small centered window.
+
+## How it decides when you stopped talking
+
+With the default Moonshine streaming model, Lemonade's `/realtime` WebSocket
+does the VAD server-side with the model's bundled neural TEN-VAD
+([src/dictatr/engine.py](src/dictatr/engine.py)) — robust against keyboard
+clicks and mic auto-gain, with word-level streaming deltas.
+
+Non-streaming models (Whisper) automatically fall back to client-side
+adaptive VAD + batch transcription ([src/dictatr/vad.py](src/dictatr/vad.py)):
+whisper.cpp's realtime VAD over-segments mid-sentence and hallucinates on
+breath segments (measured on real recordings), while batch transcription of
+the client-detected utterance is flawless. Force a mode with
+`DICTATE_MODE=realtime|batch`.
+
+## Ask mode
+
+The ask bubble (or `dictatr ask`) captures a spoken question and answers it
+with a local LLM via Lemonade — answer on the clipboard, notification
+preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings or
+`speak_answers = false`). Before answering, the question is semantically
+matched against your dictation archive (listenr's embed-once-and-cache
+approach, via Lemonade's `/embeddings` endpoint and the 75 MB
+nomic-embed-text model) and relevant past dictations are given to the LLM —
+so "what did I say about X" works. Disable with `recall = false`.
+
+The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
+warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
+to 15-45 s. `dictatr ask --quiet` skips TTS and notifications and delivers
+the answer like a dictation.
+
+Ask mode can also use local tools instead of guessing: current time
+(`date`), file search in your home directory (`find`, read-only), your
+local calendar (khal/calcurse when installed), and `remember` — lasting
+facts land in `memories.jsonl` in the archive and are loaded into every
+future ask. Archived dictations additionally get LLM-extracted concept
+tags (work, code, todo, ...) written into the manifest's listenr
+`categories` field plus an aggregate `cache/concepts.json` index;
+`dictatr tag` backfills older rows.
 
 ## Configuration (environment variables)
 
