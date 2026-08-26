@@ -54,8 +54,9 @@ commands in your own shortcut settings.
 ./install.sh   # uv sync, symlinks, .desktop entries, KDE shortcut bindings
 ```
 
-Assign/verify the shortcuts in System Settings → Shortcuts ("Dictate"):
-Ctrl+Alt+D dictate toggle, Ctrl+Alt+M menu. For type-at-cursor:
+Assign/verify the shortcuts in System Settings → Shortcuts ("Dictate") —
+left-hand defaults: Ctrl+Alt+D dictate toggle, Ctrl+Alt+Space menu,
+Ctrl+Alt+C cancel. (Plasma loads shortcut config at login.) For type-at-cursor:
 `sudo dnf install ydotool && systemctl --user enable --now ydotool`.
 
 ## Usage
