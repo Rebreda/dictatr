@@ -15,17 +15,43 @@ import subprocess
 import sys
 from pathlib import Path
 
-import gi  # noqa: F401  (ensures PyGObject; no GTK is loaded here)
-from gi.repository import Gio, GLib
+import gi
+
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf, Gio, GLib  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
+ICONS = REPO / "ui" / "icons"
 sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
 
 BUS_NAME = "io.github.rebreda.dictatr.tray"
+# Theme-icon fallbacks, used only if the bundled pixmaps fail to load.
 ICON_IDLE = "audio-input-microphone"
 ICON_LIVE = "media-record"
+
+
+def load_pixmaps(name: str) -> list:
+    """PNG -> SNI IconPixmap entries: (w, h, ARGB32 network byte order)."""
+    out = []
+    for size in (24, 48):
+        try:
+            pb = GdkPixbuf.Pixbuf.new_from_file(str(ICONS / f"{name}-{size}.png"))
+        except GLib.Error:
+            return []
+        if not pb.get_has_alpha():
+            pb = pb.add_alpha(False, 0, 0, 0)
+        w, h, stride = pb.get_width(), pb.get_height(), pb.get_rowstride()
+        data = pb.get_pixels()
+        argb = bytearray()
+        for y in range(h):
+            row = data[y * stride:y * stride + w * 4]
+            for x in range(0, w * 4, 4):
+                r, g, b, a = row[x:x + 4]
+                argb += bytes((a, r, g, b))
+        out.append((w, h, bytes(argb)))
+    return out
 
 SNI_XML = """<node>
  <interface name="org.kde.StatusNotifierItem">
@@ -34,6 +60,7 @@ SNI_XML = """<node>
   <property name="Title" type="s" access="read"/>
   <property name="Status" type="s" access="read"/>
   <property name="IconName" type="s" access="read"/>
+  <property name="IconPixmap" type="a(iiay)" access="read"/>
   <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
   <property name="Menu" type="o" access="read"/>
   <property name="ItemIsMenu" type="b" access="read"/>
@@ -94,6 +121,8 @@ class Tray:
         self.loop = loop
         self.live = self._listener_live()
         self.revision = 1
+        self.pixmaps = {"idle": load_pixmaps("tray-idle"),
+                        "live": load_pixmaps("tray-live")}
         for xml, path, handler in ((SNI_XML, "/StatusNotifierItem", self.on_sni),
                                    (MENU_XML, "/MenuBar", self.on_menu)):
             iface = Gio.DBusNodeInfo.new_for_xml(xml).interfaces[0]
@@ -128,8 +157,14 @@ class Tray:
 
     # --- properties ----------------------------------------------------
     def on_get_prop(self, _bus, _sender, _path, _iface, name):
+        state = "live" if self.live else "idle"
         if name == "IconName":
+            # Empty when we serve pixmaps: hosts prefer a non-empty name.
+            if self.pixmaps[state]:
+                return GLib.Variant("s", "")
             return GLib.Variant("s", ICON_LIVE if self.live else ICON_IDLE)
+        if name == "IconPixmap":
+            return GLib.Variant("a(iiay)", self.pixmaps[state])
         if name == "ToolTip":
             state = ("Always-on capture is LIVE" if self.live
                      else "Voice dictation")
