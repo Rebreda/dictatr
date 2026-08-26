@@ -19,7 +19,8 @@ def make_wav(path, utterances=1):
         w.setsampwidth(2)
         w.setframerate(RATE)
         for _ in range(utterances):
-            w.writeframes(silence * 5 + tone * 12 + silence * 50)
+            # 16 tone chunks = 480ms: over listen's min_speech_ms (400)
+            w.writeframes(silence * 5 + tone * 16 + silence * 50)
 
 
 def rows(base):

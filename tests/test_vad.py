@@ -43,3 +43,15 @@ def test_single_click_is_not_speech():
     # one isolated loud chunk (a keyboard click) must be rejected
     chunks = [silence_chunk()] * 5 + [tone_chunk()] + [silence_chunk()] * 50
     assert run(chunks) is None
+
+
+def test_listen_abs_min_rejects_ambient_bed():
+    # rms ~0.034: above the close-mic trigger, below the listen floor
+    quiet = [silence_chunk()] * 5 + [tone_chunk(1100)] * 30 + \
+        [silence_chunk()] * 50
+
+    async def with_floor():
+        return await capture_utterance(_gen(quiet), asyncio.Event(),
+                                       abs_min=0.05, min_speech_ms=400)
+    assert run(quiet) is not None          # dictation would take it
+    assert asyncio.run(with_floor()) is None  # listen mode rejects it

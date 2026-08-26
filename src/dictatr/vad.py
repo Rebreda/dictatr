@@ -48,15 +48,23 @@ class Utterance:
     speech_ms: int
 
 
-async def capture_utterance(chunks, stop_now, on_state=lambda s: None):
+async def capture_utterance(chunks, stop_now, on_state=lambda s: None, *,
+                            abs_min=None, min_speech_ms=None):
     """Consume an async PCM16 chunk stream until one utterance ends.
 
     Returns an Utterance, or None if no (sufficient) speech arrived before
     settings.vad.max_wait_s / the stream ended. When *stop_now* is set the
     capture ends immediately with whatever has been collected.
+
+    *abs_min* / *min_speech_ms* override the close-mic defaults; listen
+    mode passes stricter values so an ambient noise bed (fan, typing)
+    sitting near the dictation threshold can't trigger or drag segments.
     """
     vad = settings.vad
-    abs_min = min(vad.threshold, ABS_MIN_DEFAULT) if vad.threshold else ABS_MIN_DEFAULT
+    if abs_min is None:
+        abs_min = min(vad.threshold, ABS_MIN_DEFAULT) if vad.threshold \
+            else ABS_MIN_DEFAULT
+    min_speech = MIN_SPEECH_MS if min_speech_ms is None else min_speech_ms
     silence_ms_limit = vad.silence_duration_ms
     preroll = deque(maxlen=max(1, vad.prefix_padding_ms // CHUNK_MS))
 
@@ -78,7 +86,11 @@ async def capture_utterance(chunks, stop_now, on_state=lambda s: None):
         if in_speech:
             frames.append(chunk)
             peak = max(rms, peak * PEAK_DECAY)
-            hold = max(floor * HOLD_RATIO, peak * PEAK_FRACTION)
+            # abs_min also floors the hold level: without it a noise bed
+            # sitting just above the adaptive floor keeps resetting the
+            # silence countdown and segments drag on for 15-20s.
+            hold = max(floor * HOLD_RATIO, peak * PEAK_FRACTION,
+                       abs_min * 0.7)
             if rms < hold:
                 silent_ms += CHUNK_MS
                 above_run = 0
@@ -111,6 +123,6 @@ async def capture_utterance(chunks, stop_now, on_state=lambda s: None):
         if stop_now.is_set():
             break
 
-    if not in_speech or speech_ms < MIN_SPEECH_MS:
+    if not in_speech or speech_ms < min_speech:
         return None
     return Utterance(pcm=b"".join(frames), speech_ms=speech_ms)

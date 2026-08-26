@@ -163,7 +163,10 @@ async def _run() -> int:
                   if settings.input_file else mic.mic_chunks(cycle_stop))
         try:
             while not cycle_stop.is_set():
-                utt = await capture_utterance(source, cycle_stop)
+                utt = await capture_utterance(
+                    source, cycle_stop,
+                    abs_min=settings.listen.vad_threshold,
+                    min_speech_ms=settings.listen.min_speech_ms)
                 if utt is None:
                     if settings.input_file:  # test stream exhausted
                         stopping.set()

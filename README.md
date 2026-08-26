@@ -175,6 +175,8 @@ tags (work, code, todo, ...) written into the manifest's listenr
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_LISTEN_MODEL` | auto | batch ASR for `listen`; Whisper-Large-v3-Turbo when the main model is streaming |
+| `DICTATE_LISTEN_VAD` | `0.04` | listen-mode speech floor (RMS); raise in noisy rooms, lower for distant mics |
+| `DICTATE_LISTEN_MIN_SPEECH_MS` | `400` | listen-mode minimum sustained speech; rejects coughs/typing |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
 | `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |
