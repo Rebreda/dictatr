@@ -107,3 +107,7 @@ has no layer-shell) it is a small centered window.
 | `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
