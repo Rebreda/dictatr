@@ -1,0 +1,6 @@
+[Unit]
+Description=dictatr archive gc (quarantine junk clips, purge old trash)
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/.venv/bin/dictatr gc

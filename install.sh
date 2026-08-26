@@ -35,5 +35,17 @@ kwriteconfig6 --file kglobalshortcutsrc --group services \
 kwriteconfig6 --file kglobalshortcutsrc --group services \
     --group dictate-cancel.desktop --key _launch "Ctrl+Alt+C"
 
+# Systemd user units for always-on capture + daily archive gc. Installed
+# but never enabled here: an always-hot mic must be an explicit choice.
+mkdir -p ~/.config/systemd/user
+for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer; do
+    sed "s|@REPO@|$here|" "$here/systemd/$unit" >~/.config/systemd/user/$unit
+done
+command -v systemctl >/dev/null && systemctl --user daemon-reload || true
+
 echo "Installed. Shortcuts load at next login, or assign them now in"
 echo "System Settings -> Shortcuts (search \"Dictate\")."
+echo
+echo "Optional — always-on capture (archives everything you say; opt-in):"
+echo "  systemctl --user enable --now dictatr-listen"
+echo "  systemctl --user enable --now dictatr-gc.timer   # daily junk sweep"

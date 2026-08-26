@@ -64,7 +64,7 @@ def _manifest_rows(base: Path) -> list[dict]:
                     continue
                 text = (r.get("corrected_transcription")
                         or r.get("raw_transcription") or "").strip()
-                if text:
+                if text and not r.get("gc"):  # skip quarantined/purged rows
                     rows.append({"text": text,
                                  "date": (r.get("timestamp") or "")[:10],
                                  "uuid": r.get("uuid", ""),

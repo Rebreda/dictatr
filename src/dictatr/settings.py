@@ -90,11 +90,31 @@ class LLMSettings:
 
 
 @dataclass
+class ListenSettings:
+    # Always-on mode (dictatr listen). Tagging every ambient utterance keeps
+    # the LLM warm around the clock, so it's opt-in unlike interactive rows.
+    tag: bool = _s("DICTATE_LISTEN_TAG", "listen_tag", "false").lower() in (
+        "1", "true", "yes", "on")
+
+
+@dataclass
+class GCSettings:
+    # dictatr gc: listen-mode rows shorter than min_duration_s AND fewer
+    # words than min_words are quarantined; trash older than purge_days is
+    # deleted for good.
+    min_duration_s: float = _f("DICTATE_GC_MIN_SEC", "gc_min_sec", 1.0)
+    min_words: int = _i("DICTATE_GC_MIN_WORDS", "gc_min_words", 2)
+    purge_days: float = _f("DICTATE_GC_PURGE_DAYS", "gc_purge_days", 30.0)
+
+
+@dataclass
 class Settings:
     whisper: WhisperSettings = field(default_factory=WhisperSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     vad: VADSettings = field(default_factory=VADSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)
+    listen: ListenSettings = field(default_factory=ListenSettings)
+    gc: GCSettings = field(default_factory=GCSettings)
     # Audio source override for tests: a wav file streamed instead of the mic.
     input_file: str | None = os.environ.get("DICTATE_INPUT") or None
 

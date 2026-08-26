@@ -1,0 +1,11 @@
+[Unit]
+Description=dictatr always-on capture (archives every utterance; gc cleans up)
+Documentation=https://github.com/Rebreda/dictatr
+
+[Service]
+ExecStart=@REPO@/.venv/bin/dictatr listen
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

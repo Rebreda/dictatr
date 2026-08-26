@@ -68,11 +68,37 @@ dictate clip       same, deliver to clipboard
 dictate cancel     abort without transcribing
 dictate file PATH  transcribe an audio file to the clipboard
 dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
+dictate listen     always-on capture into the archive (see below)
+dictate gc         quarantine junk archive clips, purge old trash
 ```
 
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE/wlroots compositors; click anywhere
 outside to dismiss); without it, a small centered window.
+
+## Always-on capture
+
+`dictate listen` keeps the mic open and archives every utterance the VAD
+hears — no typing, no clipboard, just the listenr-format archive filling up
+with fine-tuning data and recall context. It pauses automatically while a
+hotkey dictation is active (no duplicate rows), and if Lemonade is down the
+audio is archived untranscribed and backfilled on the next start. Opt in
+via systemd (`install.sh` installs the units but never enables them —
+an always-hot mic is your call):
+
+```bash
+systemctl --user enable --now dictatr-listen
+systemctl --user enable --now dictatr-gc.timer   # daily junk sweep
+```
+
+Unattended capture archives junk too — breath-trigger clips, whisper's
+"Thank you." hallucinations, a TV repeating itself. `dictate gc` sweeps the
+archive: junk rows are *quarantined* (audio moved to `trash/`, manifest row
+marked and excluded from recall), not deleted — a false positive would be
+unrecoverable — and trash older than 30 days is purged for good.
+Interactive dictations get gentle rules (only empty or degenerate rows);
+listen-mode rows get the aggressive ones. `dictate gc --dry-run` previews,
+`dictate gc --restore UID` brings a clip back.
 
 ## How it decides when you stopped talking
 
@@ -131,6 +157,10 @@ tags (work, code, todo, ...) written into the manifest's listenr
 | `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
+| `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
+| `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
+| `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
+| `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |
 
 ## License
 

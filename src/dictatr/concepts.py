@@ -81,7 +81,7 @@ def sweep(limit: int = 25) -> int:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if record.get("categories"):
+        if record.get("categories") or record.get("gc"):
             continue
         try:
             if annotate(record):

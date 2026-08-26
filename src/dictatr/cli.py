@@ -21,21 +21,14 @@ from . import recall
 from . import mic
 from .batch import pcm_to_wav_bytes, transcribe_bytes, transcribe_file
 from .engine import dictate_once, ensure_asr_loaded
+from .runstate import DICTATE_PID as PIDFILE, live_pid, write_pid
 from .settings import settings
 from .storage import save_recording
 from .vad import capture_utterance
 
-RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dictatr"
-PIDFILE = RUN / "pid"
-
 
 def _live_pid() -> int | None:
-    try:
-        pid = int(PIDFILE.read_text())
-        os.kill(pid, 0)
-        return pid
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        return None
+    return live_pid(PIDFILE)
 
 
 async def _listen(prefer_typing: bool, ask: bool = False,
@@ -148,8 +141,7 @@ def cmd_toggle(prefer_typing: bool, ask: bool = False,
     if pid := _live_pid():
         os.kill(pid, signal.SIGUSR1)
         return 0
-    RUN.mkdir(parents=True, exist_ok=True)
-    PIDFILE.write_text(str(os.getpid()))
+    write_pid(PIDFILE)
     try:
         return asyncio.run(_listen(prefer_typing, ask, quiet))
     finally:
@@ -185,6 +177,15 @@ def main() -> None:
     sub.add_parser("tag", help="backfill concept tags for untagged archive rows")
     f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
     f.add_argument("path")
+    sub.add_parser("listen", help="always-on: archive every utterance until "
+                                  "stopped (pauses during hotkey sessions)")
+    g = sub.add_parser("gc", help="quarantine junk archive clips, purge old trash")
+    g.add_argument("--dry-run", action="store_true",
+                   help="report what would be quarantined, touch nothing")
+    g.add_argument("--purge-days", type=float, default=None,
+                   help="override gc_purge_days for this run (0 = purge all trash now)")
+    g.add_argument("--restore", metavar="UID",
+                   help="move a quarantined clip back into the archive")
     args = p.parse_args()
 
     if args.cmd in (None, "toggle"):
@@ -201,6 +202,19 @@ def main() -> None:
         sys.exit(0)
     if args.cmd == "file":
         sys.exit(cmd_file(args.path))
+    if args.cmd == "listen":
+        from . import listen
+        sys.exit(listen.main())
+    if args.cmd == "gc":
+        from . import cleanup
+        if args.restore:
+            sys.exit(0 if cleanup.restore(args.restore) else 1)
+        summary = cleanup.sweep(dry_run=args.dry_run,
+                                purge_days=args.purge_days)
+        q = summary["quarantined"]
+        print(f"kept {summary['kept']}, quarantined "
+              f"{sum(q.values())} ({q or 'none'}), purged {summary['purged']}")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
