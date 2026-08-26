@@ -14,17 +14,17 @@ merged into listenr as a `listenr dictate` subcommand later.
 
 ## How it decides when you stopped talking
 
-Client-side adaptive VAD ([src/dictatr/vad.py](src/dictatr/vad.py)): the noise
-floor is tracked continuously (mic auto-gain can't fake speech), an utterance
-ends after a configurable pause, and captures with under 250 ms of speech are
-discarded (Whisper hallucinates on breath noise). The whole utterance then
-goes to Lemonade's batch `/audio/transcriptions` endpoint.
+With the default Moonshine streaming model, Lemonade's `/realtime` WebSocket
+does the VAD server-side with the model's bundled neural TEN-VAD
+([src/dictatr/engine.py](src/dictatr/engine.py)) — robust against keyboard
+clicks and mic auto-gain, with word-level streaming deltas.
 
-Lemonade's `/realtime` WebSocket VAD is also implemented
-([src/dictatr/engine.py](src/dictatr/engine.py), `DICTATE_MODE=realtime`) but
-is not the default: measured on real recordings it over-segments mid-sentence
-and hallucinates on breath segments, while batch transcription of the full
-utterance is flawless.
+Non-streaming models (Whisper) automatically fall back to client-side
+adaptive VAD + batch transcription ([src/dictatr/vad.py](src/dictatr/vad.py)):
+whisper.cpp's realtime VAD over-segments mid-sentence and hallucinates on
+breath segments (measured on real recordings), while batch transcription of
+the client-detected utterance is flawless. Force a mode with
+`DICTATE_MODE=realtime|batch`.
 
 ## Dependencies
 
@@ -65,15 +65,20 @@ dictate            listen, auto-stop on silence, type at cursor
 dictate clip       same, deliver to clipboard
 dictate cancel     abort without transcribing
 dictate file PATH  transcribe an audio file to the clipboard
-dictate-menu       floating action palette (1-4, arrows+Enter, Esc)
+dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
 ```
+
+The menu appears at the cursor via a transparent layer-shell overlay when
+`gtk4-layer-shell` is installed (KDE/wlroots compositors; click anywhere
+outside to dismiss): `sudo dnf install gtk4-layer-shell`. Without it (GNOME
+has no layer-shell) it is a small centered window.
 
 ## Configuration (environment variables)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `LEMONADE_URL` | `http://localhost:8080/api/v1` | Lemonade API base |
-| `DICTATE_MODEL` | `Whisper-Large-v3-Turbo` | Whisper model name |
+| `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (streaming models use realtime mode) |
 | `DICTATE_ARCHIVE` | `~/.listenr/dictation` | listenr-format archive dir, `off` to disable |
 | `DICTATE_VAD_THRESHOLD` | `0.02` | speech trigger floor (matches listenr tuning) |
 | `DICTATE_VAD_SILENCE_MS` | `1200` | pause that ends the utterance |

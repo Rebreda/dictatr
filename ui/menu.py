@@ -1,44 +1,56 @@
 #!/usr/bin/env python3
-"""Floating radial menu for dictatr — a circle of round action bubbles, in
-the spirit of Android's floating assistant ball.
+"""Floating radial menu for dictatr — round action bubbles that twirl out
+from the cursor point, in the spirit of Android's floating assistant ball.
 
 GTK4 + PyGObject only (system packages on Fedora/GNOME, fine on KDE, macOS
 via Homebrew). Single-instance via GApplication: launching it again while
 open closes it, so the hotkey toggles the menu instead of stacking copies.
 
-Positioning: Wayland compositors don't let normal apps place windows at the
-global cursor, so by default the circle appears centered. If the optional
-KDE-specific helpers are present, it anchors at the pointer instead:
-    sudo dnf install gtk4-layer-shell kdotool
-(kdotool reads the cursor position from KWin; gtk4-layer-shell lets the
-window place itself. Both are skipped silently when missing — e.g. GNOME.)
+Cursor positioning without any cursor-query tool: with gtk4-layer-shell the
+window is a fullscreen transparent overlay — the compositor reports the
+pointer position to it, the bubbles spiral out from exactly there, and a
+click anywhere outside dismisses. Without layer-shell (GNOME) the menu is a
+small centered window with the same animation.
+
+`dictate-menu --settings` opens the settings window directly.
 """
 
+import json
 import math
-import re
 import subprocess
 import sys
+import threading
+import urllib.request
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-DICTATE = str(Path(__file__).resolve().parent.parent / "bin" / "dictate")
+REPO = Path(__file__).resolve().parent.parent
+DICTATE = str(REPO / "bin" / "dictate")
+sys.path.insert(0, str(REPO / "src"))
+from dictatr.settings import CONFIG_PATH, settings  # noqa: E402
 
-# (icon, tooltip, dictate args; None = file picker)
+# (icon, tooltip, action) — action: list = dictate args, str = internal
 ACTIONS = [
     ("audio-input-microphone-symbolic", "Dictate (type at cursor)", ["type"]),
     ("edit-copy-symbolic", "Dictate to clipboard", ["clip"]),
-    ("folder-music-symbolic", "Transcribe audio file…", None),
+    ("folder-music-symbolic", "Transcribe audio file…", "file"),
+    ("emblem-system-symbolic", "Settings", "settings"),
     ("process-stop-symbolic", "Cancel recording", ["cancel"]),
 ]
 
-SIZE = 230          # window edge
+SIZE = 250          # circle bounding box
 BUBBLE = 52         # satellite diameter
-CENTER_BUBBLE = 60  # hub diameter
-RADIUS = 78         # orbit radius
+CENTER_BUBBLE = 58  # hub diameter
+RADIUS = 84         # orbit radius
+
+ANIM_S = 0.45       # total twirl duration
+STAGGER_S = 0.05    # per-bubble delay
+TWIRL_RAD = 2.2     # how much extra rotation unwinds during the twirl
 
 CSS = b"""
 window { background: transparent; }
@@ -55,45 +67,28 @@ window { background: transparent; }
   border-color: alpha(#8ab4f8, 0.6);
 }
 .hub:hover { background: alpha(#f28b82, 0.25); }
+.settings-box { padding: 18px; }
 """
 
 
-def cursor_position():
-    """Global pointer position via kdotool (KWin only); None elsewhere."""
-    try:
-        out = subprocess.run(["kdotool", "getmouselocation", "--shell"],
-                             capture_output=True, text=True, timeout=2).stdout
-        x = int(re.search(r"X=(\d+)", out)[1])
-        y = int(re.search(r"Y=(\d+)", out)[1])
-        return x, y
-    except Exception:
-        return None
-
-
-def try_anchor_at_cursor(win):
-    """Place *win* at the pointer using gtk4-layer-shell, if available."""
-    pos = cursor_position()
-    if pos is None:
-        return False
+def layer_shell():
     try:
         gi.require_version("Gtk4LayerShell", "1.0")
         from gi.repository import Gtk4LayerShell as LS
+        return LS
     except (ValueError, ImportError):
-        return False
-    LS.init_for_window(win)
-    LS.set_layer(win, LS.Layer.OVERLAY)
-    LS.set_keyboard_mode(win, LS.KeyboardMode.ON_DEMAND)
-    for edge in (LS.Edge.TOP, LS.Edge.LEFT):
-        LS.set_anchor(win, edge, True)
-    LS.set_margin(win, LS.Edge.LEFT, max(0, pos[0] - SIZE // 2))
-    LS.set_margin(win, LS.Edge.TOP, max(0, pos[1] - SIZE // 2))
-    return True
+        return None
+
+
+def _ease_out(p):
+    return 1 - (1 - p) ** 3
 
 
 class Radial(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, decorated=False, resizable=False)
-        self.set_default_size(SIZE, SIZE)
+        # NB: resizable must stay True — a non-resizable window rejects the
+        # compositor's fullscreen configure, breaking the layer-shell overlay.
+        super().__init__(application=app, decorated=False)
 
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
@@ -101,40 +96,138 @@ class Radial(Gtk.ApplicationWindow):
             Gdk.Display.get_default(), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-        fixed = Gtk.Fixed()
-        cx = cy = SIZE // 2
+        self.circle = self._build_circle()
+        self.placed = False
 
-        hub = Gtk.Button(icon_name="audio-input-microphone-symbolic",
-                         tooltip_text="Close")
-        hub.add_css_class("hub")
-        hub.set_size_request(CENTER_BUBBLE, CENTER_BUBBLE)
-        hub.connect("clicked", lambda *_: self.close())
-        fixed.put(hub, cx - CENTER_BUBBLE / 2, cy - CENTER_BUBBLE / 2)
+        ls = layer_shell()
+        if ls is not None:
+            ls.init_for_window(self)
+            ls.set_layer(self, ls.Layer.OVERLAY)
+            ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
+            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
+                         ls.Edge.RIGHT):
+                ls.set_anchor(self, edge, True)
+            self.canvas = Gtk.Fixed()
+            self.set_child(self.canvas)
 
-        self.buttons = []
-        for i, (icon, tip, _) in enumerate(ACTIONS):
-            angle = -math.pi / 2 + i * (2 * math.pi / len(ACTIONS))
-            bx = cx + RADIUS * math.cos(angle) - BUBBLE / 2
-            by = cy + RADIUS * math.sin(angle) - BUBBLE / 2
-            b = Gtk.Button(icon_name=icon, tooltip_text=f"{tip}  [{i + 1}]")
-            b.add_css_class("bubble")
-            b.set_size_request(BUBBLE, BUBBLE)
-            b.connect("clicked", self.on_action, i)
-            fixed.put(b, bx, by)
-            self.buttons.append(b)
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self.on_pointer)
+            motion.connect("motion", self.on_pointer)
+            self.add_controller(motion)
+            # KWin doesn't send pointer-enter until the mouse moves, so ask
+            # the surface for the pointer position once we're mapped.
+            self._polls = 0
+            GLib.timeout_add(50, self.poll_pointer)
 
-        self.revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.CROSSFADE,
-            transition_duration=140, child=fixed)
-        self.set_child(self.revealer)
-        GLib.idle_add(self.revealer.set_reveal_child, True)
+            outside = Gtk.GestureClick()
+            outside.connect("pressed", self.on_outside_click)
+            self.canvas.add_controller(outside)
+        else:
+            self.set_default_size(SIZE, SIZE)
+            self.canvas = None
+            self.set_child(self.circle)
+            self.connect("map", lambda *_: GLib.idle_add(self.start_twirl))
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.add_controller(keys)
 
-        try_anchor_at_cursor(self)
+    def _build_circle(self):
+        fixed = Gtk.Fixed()
+        fixed.set_size_request(SIZE, SIZE)
+        cx = cy = SIZE // 2
+        self._center = (cx, cy)
 
+        # Satellites first (behind the hub), stacked at the center, hidden.
+        self.bubbles = []
+        for i, (icon, tip, _) in enumerate(ACTIONS):
+            b = Gtk.Button(icon_name=icon, tooltip_text=f"{tip}  [{i + 1}]")
+            b.add_css_class("bubble")
+            b.set_size_request(BUBBLE, BUBBLE)
+            b.set_opacity(0.0)
+            b.connect("clicked", self.on_action, i)
+            angle = -math.pi / 2 + i * (2 * math.pi / len(ACTIONS))
+            fixed.put(b, cx - BUBBLE / 2, cy - BUBBLE / 2)
+            self.bubbles.append((b, angle))
+
+        hub = Gtk.Button(icon_name="audio-input-microphone-symbolic",
+                         tooltip_text="Close")
+        hub.add_css_class("hub")
+        hub.set_size_request(CENTER_BUBBLE, CENTER_BUBBLE)
+        hub.set_opacity(0.0)
+        hub.connect("clicked", lambda *_: self.close())
+        fixed.put(hub, cx - CENTER_BUBBLE / 2, cy - CENTER_BUBBLE / 2)
+        self.hub = hub
+        return fixed
+
+    # --- twirl animation ----------------------------------------------
+    def start_twirl(self):
+        self._anim_t0 = None
+        self.add_tick_callback(self._tick)
+        return False
+
+    def _tick(self, _w, clock):
+        now = clock.get_frame_time() / 1e6
+        if self._anim_t0 is None:
+            self._anim_t0 = now
+        t = now - self._anim_t0
+        cx, cy = self._center
+        span = ANIM_S - (len(self.bubbles) - 1) * STAGGER_S
+
+        self.hub.set_opacity(min(1.0, t / 0.15))
+        done = t >= ANIM_S
+        for i, (b, final_angle) in enumerate(self.bubbles):
+            p = min(max((t - i * STAGGER_S) / span, 0.0), 1.0)
+            e = _ease_out(p)
+            angle = final_angle + (1 - e) * TWIRL_RAD
+            r = RADIUS * e
+            self.circle.move(b, cx + r * math.cos(angle) - BUBBLE / 2,
+                             cy + r * math.sin(angle) - BUBBLE / 2)
+            b.set_opacity(e)
+        return not done
+
+    # --- overlay-mode placement ---------------------------------------
+    def place_at(self, x, y):
+        if self.placed or self.canvas is None:
+            return
+        self.placed = True
+        w = self.get_width() or SIZE
+        h = self.get_height() or SIZE
+        x = min(max(x - SIZE / 2, 0), max(w - SIZE, 0))
+        y = min(max(y - SIZE / 2, 0), max(h - SIZE, 0))
+        self.canvas.put(self.circle, x, y)
+        self.start_twirl()
+
+    def on_pointer(self, _c, x, y):
+        self.place_at(x, y)
+
+    def poll_pointer(self):
+        if self.placed:
+            return False
+        surface = self.get_surface()
+        if surface is not None and self.get_width() > 0:
+            seat = Gdk.Display.get_default().get_default_seat()
+            ok, x, y, _mask = surface.get_device_position(seat.get_pointer())
+            if ok and (x or y):
+                self.place_at(x, y)
+                return False
+        self._polls += 1
+        if self._polls > 20 and self.get_width() > 0:
+            # Pointer is on another output (or query unsupported): center.
+            self.place_at(self.get_width() / 2, self.get_height() / 2)
+            return False
+        return True
+
+    def on_outside_click(self, _g, _n, x, y):
+        # A press outside the circle's buttons dismisses the menu.
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while target is not None:
+            if isinstance(target, Gtk.Button):
+                return  # the button handles it
+            target = target.get_parent()
+        self.close()
+
+    # --- actions -------------------------------------------------------
     def on_key(self, _c, keyval, _code, _state):
         if keyval == Gdk.KEY_Escape:
             self.close()
@@ -145,12 +238,15 @@ class Radial(Gtk.ApplicationWindow):
         return False
 
     def on_action(self, _btn, index):
-        args = ACTIONS[index][2]
-        if args is None:
+        action = ACTIONS[index][2]
+        if action == "file":
             self.pick_file()
-            return
-        subprocess.Popen([DICTATE, *args])
-        self.close()
+        elif action == "settings":
+            SettingsWindow(self.get_application()).present()
+            self.close()
+        else:
+            subprocess.Popen([DICTATE, *action])
+            self.close()
 
     def pick_file(self):
         dialog = Gtk.FileDialog(title="Transcribe audio file")
@@ -173,12 +269,101 @@ class Radial(Gtk.ApplicationWindow):
         dialog.open(self, None, done)
 
 
+class SettingsWindow(Gtk.Window):
+    """Edit ~/.config/dictatr/config.toml (env vars still override)."""
+
+    def __init__(self, app):
+        super().__init__(application=app, title="Dictate settings",
+                         default_width=380, resizable=False)
+
+        grid = Gtk.Grid(row_spacing=12, column_spacing=12)
+        grid.add_css_class("settings-box")
+
+        def row(y, label, widget):
+            lab = Gtk.Label(label=label, xalign=0.0)
+            grid.attach(lab, 0, y, 1, 1)
+            widget.set_hexpand(True)
+            grid.attach(widget, 1, y, 1, 1)
+
+        self.model_dd = Gtk.DropDown.new_from_strings([settings.whisper.model])
+        row(0, "Model", self.model_dd)
+        threading.Thread(target=self._load_models, daemon=True).start()
+
+        self.silence = Gtk.SpinButton.new_with_range(300, 3000, 100)
+        self.silence.set_value(settings.vad.silence_duration_ms)
+        row(1, "End after pause (ms)", self.silence)
+
+        self.archive_sw = Gtk.Switch(
+            halign=Gtk.Align.START, active=settings.storage.enabled)
+        row(2, "Archive recordings", self.archive_sw)
+
+        self.archive_dir = Gtk.Entry()
+        self.archive_dir.set_text(
+            settings.storage.base if settings.storage.enabled
+            else str(Path.home() / ".listenr" / "dictation"))
+        row(3, "Archive folder", self.archive_dir)
+
+        note = Gtk.Label(
+            label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
+            xalign=0.0)
+        note.add_css_class("dim-label")
+        grid.attach(note, 0, 4, 2, 1)
+
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", self.on_save)
+        grid.attach(save, 1, 5, 1, 1)
+
+        self.set_child(grid)
+
+    def _load_models(self):
+        try:
+            url = f"{settings.whisper.api_base}/models"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.load(r)["data"]
+            ids = [m["id"] for m in data
+                   if "transcription" in (m.get("labels") or [])]
+        except Exception:
+            return
+        if settings.whisper.model not in ids:
+            ids.insert(0, settings.whisper.model)
+        GLib.idle_add(self._set_models, ids)
+
+    def _set_models(self, ids):
+        self.model_dd.set_model(Gtk.StringList.new(ids))
+        self.model_dd.set_selected(ids.index(settings.whisper.model))
+        return False
+
+    def on_save(self, _btn):
+        model = self.model_dd.get_selected_item().get_string()
+        archive = (self.archive_dir.get_text().strip()
+                   if self.archive_sw.get_active() else "off")
+        cfg = {
+            "model": model,
+            "silence_ms": int(self.silence.get_value()),
+            "archive": archive,
+        }
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for k, v in cfg.items():
+            lines.append(f'{k} = {v}' if isinstance(v, int)
+                         else f'{k} = "{v}"')
+        CONFIG_PATH.write_text("\n".join(lines) + "\n")
+        subprocess.run(["notify-send", "-a", "Dictate", "-t", "2500",
+                        "Dictate", f"Settings saved ({model})"], check=False)
+        self.close()
+
+
 class MenuApp(Gtk.Application):
-    def __init__(self):
+    def __init__(self, settings_only=False):
         super().__init__(application_id="ca.qxg.dictatr.menu")
         self.win = None
+        self.settings_only = settings_only
 
     def do_activate(self):
+        if self.settings_only:
+            SettingsWindow(self).present()
+            return
         # Single instance + toggle: a second hotkey press lands here in the
         # primary process; close the open menu instead of stacking another.
         if self.win is not None:
@@ -195,7 +380,9 @@ class MenuApp(Gtk.Application):
 
 
 def main():
-    sys.exit(MenuApp().run(None))
+    settings_only = "--settings" in sys.argv
+    sys.exit(MenuApp(settings_only).run(
+        [a for a in sys.argv if a != "--settings"]))
 
 
 if __name__ == "__main__":
