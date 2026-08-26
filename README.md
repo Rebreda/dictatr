@@ -1,4 +1,4 @@
-# dictatr
+# <img src="docs/logo.svg" width="40" align="top" alt=""> dictatr
 
 Hotkey voice dictation for Linux desktops, backed by a local
 [Lemonade](https://lemonade-server.ai) Whisper server. Press a hotkey, speak,
