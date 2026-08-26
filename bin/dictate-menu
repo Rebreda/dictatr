@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Hotkey shim: launch (or toggle) the floating radial menu.
+# If gtk4-layer-shell is installed, preload it so the menu can anchor at the
+# cursor (the library must load before GTK's wayland connection).
+here=$(dirname "$(readlink -f "$0")")
+for lib in /usr/lib64/libgtk4-layer-shell.so.0 /usr/lib/libgtk4-layer-shell.so.0; do
+    [[ -e $lib ]] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+done
+exec python3 "$here/../ui/menu.py"

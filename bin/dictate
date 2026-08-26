@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Hotkey shim: maps the historical dictate CLI onto the dictatr package.
+#   dictate [type] | clip | cancel | file PATH
+set -u
+here=$(dirname "$(readlink -f "$0")")
+dictatr="$here/../.venv/bin/dictatr"
+if [[ ! -x $dictatr ]]; then
+    notify-send -a Dictate "Dictate" "Not installed: run install.sh (uv sync) in $(dirname "$here")"
+    exit 1
+fi
+case ${1:-type} in
+type) exec "$dictatr" toggle ;;
+clip) exec "$dictatr" toggle --clip ;;
+cancel) exec "$dictatr" cancel ;;
+file) shift; exec "$dictatr" file "$@" ;;
+*) exec "$dictatr" "$@" ;;
+esac

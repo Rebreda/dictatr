@@ -1,0 +1,156 @@
+"""dictatr command-line interface.
+
+Commands (hotkey-oriented, single instance coordinated via a pidfile):
+  toggle [--clip]   start listening; if already listening, stop now (commit)
+  cancel            abort the current listening session, no transcription
+  file PATH         transcribe an audio file via the batch HTTP API
+"""
+
+import asyncio
+import argparse
+import os
+import signal
+import sys
+from pathlib import Path
+
+from . import deliver as dlv
+from . import mic
+from .batch import pcm_to_wav_bytes, transcribe_bytes, transcribe_file
+from .engine import dictate_once
+from .settings import settings
+from .storage import save_recording
+from .vad import capture_utterance
+
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dictatr"
+PIDFILE = RUN / "pid"
+
+
+def _live_pid() -> int | None:
+    try:
+        pid = int(PIDFILE.read_text())
+        os.kill(pid, 0)
+        return pid
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        return None
+
+
+async def _listen(prefer_typing: bool) -> int:
+    stop_now = asyncio.Event()
+    cancelled = False
+
+    def on_stop(*_):  # hotkey pressed again -> commit and finish
+        stop_now.set()
+
+    def on_cancel(*_):
+        nonlocal cancelled
+        cancelled = True
+        stop_now.set()
+
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGUSR1, on_stop)
+    loop.add_signal_handler(signal.SIGTERM, on_cancel)
+
+    states = {
+        "listening": "🎙 Listening… speak (hotkey again = stop now)",
+        "speech": None,  # no notification churn mid-speech
+        "transcribing": "Transcribing…",
+    }
+
+    def on_state(state):
+        text = states.get(state)
+        if text:
+            dlv.notify(text, 15000)
+
+    source = (
+        mic.file_chunks(settings.input_file, stop_now)
+        if settings.input_file
+        else mic.mic_chunks(stop_now)
+    )
+    try:
+        # Streaming models (Moonshine + TEN-VAD) get proper server-side VAD
+        # via /realtime; non-streaming models fall back to client VAD + batch
+        # (Whisper's realtime VAD misbehaves — see vad.py).
+        mode = os.environ.get("DICTATE_MODE") or (
+            "realtime" if "streaming" in settings.whisper.model.lower() else "batch"
+        )
+        if mode == "realtime":
+            text, pcm = await dictate_once(source, stop_now, on_state)
+        else:
+            utt = await capture_utterance(source, stop_now, on_state)
+            text, pcm = None, b""
+            if utt is not None and not cancelled:
+                pcm = utt.pcm
+                on_state("transcribing")
+                text = await asyncio.to_thread(
+                    transcribe_bytes, pcm_to_wav_bytes(pcm)
+                )
+    except (ConnectionError, OSError) as e:
+        dlv.notify(f"Lemonade unreachable: {e}", 6000)
+        return 1
+
+    if cancelled:
+        dlv.notify("Cancelled", 1500)
+        return 0
+    if not text:
+        dlv.notify("No speech detected")
+        return 0
+
+    dlv.deliver(text, prefer_typing)
+    if settings.storage.enabled and pcm:
+        save_recording(
+            pcm, text,
+            storage_base=Path(settings.storage.base).expanduser(),
+            whisper_model=settings.whisper.model,
+        )
+    return 0
+
+
+def cmd_toggle(prefer_typing: bool) -> int:
+    if pid := _live_pid():
+        os.kill(pid, signal.SIGUSR1)
+        return 0
+    RUN.mkdir(parents=True, exist_ok=True)
+    PIDFILE.write_text(str(os.getpid()))
+    try:
+        return asyncio.run(_listen(prefer_typing))
+    finally:
+        PIDFILE.unlink(missing_ok=True)
+
+
+def cmd_cancel() -> int:
+    if pid := _live_pid():
+        os.kill(pid, signal.SIGTERM)
+    return 0
+
+
+def cmd_file(path: str) -> int:
+    text = transcribe_file(path)
+    if not text:
+        dlv.notify(f"No speech detected in {path}")
+        return 1
+    dlv.deliver(text, prefer_typing=False)
+    return 0
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="dictatr", description=__doc__)
+    sub = p.add_subparsers(dest="cmd")
+    t = sub.add_parser("toggle", help="start listening / stop current recording")
+    t.add_argument("--clip", action="store_true",
+                   help="deliver to clipboard even if ydotool is available")
+    sub.add_parser("cancel", help="abort without transcribing")
+    f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
+    f.add_argument("path")
+    args = p.parse_args()
+
+    if args.cmd in (None, "toggle"):
+        clip = getattr(args, "clip", False)
+        sys.exit(cmd_toggle(prefer_typing=not clip))
+    if args.cmd == "cancel":
+        sys.exit(cmd_cancel())
+    if args.cmd == "file":
+        sys.exit(cmd_file(args.path))
+
+
+if __name__ == "__main__":
+    main()
