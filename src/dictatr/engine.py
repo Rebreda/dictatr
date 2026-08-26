@@ -102,32 +102,41 @@ async def dictate_once(
 
 
 async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
+    """Multi-segment dictation: the server's VAD ends a *segment* at every
+    decent pause, so treating the first transcript as the whole dictation
+    cuts speakers off mid-thought. Instead transcripts accumulate; the
+    dictation ends when the hotkey fires, or when idle_s passes after the
+    last transcript with no new speech."""
     await ws.send(json.dumps(session_update))
     on_state("listening")
 
+    loop = asyncio.get_running_loop()
     captured = bytearray()
     speech_seen = asyncio.Event()
-    result: dict = {}
-    done = asyncio.Event()
+    transcripts: list[str] = []
+    state = {"speech_active": False, "last_done": None, "error": None,
+             "mic_ended": False}
 
     async def send_audio():
         sent_s = 0.0
-        async for chunk in audio_stream:
-            captured.extend(chunk)
-            sent_s += len(chunk) / 2 / 16000
-            await ws.send(json.dumps({
-                "type": "input_audio_buffer.append",
-                "audio": base64.b64encode(chunk).decode(),
-            }))
-            if stop_now.is_set():
-                break
-            if speech_seen.is_set() and sent_s >= settings.vad.max_segment_s:
-                break
-        # Mic ended or stop requested: force transcription of what remains.
         try:
+            async for chunk in audio_stream:
+                captured.extend(chunk)
+                sent_s += len(chunk) / 2 / 16000
+                await ws.send(json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": base64.b64encode(chunk).decode(),
+                }))
+                if stop_now.is_set():
+                    break
+                if sent_s >= settings.vad.max_segment_s:
+                    break
+            # Mic ended or stop requested: force out what remains.
             await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
         except websockets.exceptions.ConnectionClosed:
             pass
+        finally:
+            state["mic_ended"] = True
 
     async def recv_events():
         async for raw in ws:
@@ -135,16 +144,20 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
             t = msg.get("type", "")
             if t == SPEECH_STARTED:
                 speech_seen.set()
+                state["speech_active"] = True
                 on_state("speech")
             elif t == SPEECH_STOPPED:
+                state["speech_active"] = False
                 on_state("transcribing")
             elif t == COMPLETED:
-                result["text"] = (msg.get("transcript") or "").strip()
-                done.set()
-                return
+                text = (msg.get("transcript") or "").strip()
+                if text and text not in (".", "[BLANK_AUDIO]"):
+                    transcripts.append(text)
+                state["speech_active"] = False
+                state["last_done"] = loop.time()
+                on_state("listening" if not stop_now.is_set() else "transcribing")
             elif t == "error":
-                result["error"] = msg.get("error")
-                done.set()
+                state["error"] = msg.get("error")
                 return
 
     sender = asyncio.ensure_future(send_audio())
@@ -154,13 +167,26 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
         try:
             await asyncio.wait_for(speech_seen.wait(), settings.vad.max_wait_s)
         except asyncio.TimeoutError:
-            stop_now.set()
             return None, bytes(captured)
-        # Speech happened: wait for the transcript (VAD commits on silence,
-        # send_audio commits on stop/max-segment).
-        await asyncio.wait_for(done.wait(), settings.vad.max_segment_s + 30)
-    except asyncio.TimeoutError:
-        return None, bytes(captured)
+
+        deadline_after_stop = None
+        while state["error"] is None:
+            await asyncio.sleep(0.1)
+            now = loop.time()
+            if stop_now.is_set() or state["mic_ended"]:
+                # Hotkey/mic end: give the final commit a moment to land —
+                # a transcript may still be in flight for the tail audio.
+                if deadline_after_stop is None:
+                    deadline_after_stop = now + 8.0
+                settled = (state["last_done"] is not None
+                           and not state["speech_active"]
+                           and now - state["last_done"] >= 1.2)
+                if settled or now >= deadline_after_stop:
+                    break
+            elif (transcripts and not state["speech_active"]
+                    and state["last_done"] is not None
+                    and now - state["last_done"] >= settings.vad.idle_s):
+                break  # spoke, finished, and stayed quiet: dictation over
     finally:
         stop_now.set()  # stops the mic generator
         for t in (sender, receiver):
@@ -171,9 +197,6 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
             except (asyncio.CancelledError, Exception):
                 pass
 
-    if "error" in result:
-        raise RuntimeError(f"Lemonade realtime error: {result['error']}")
-    text = result.get("text") or None
-    if text in (".", "[BLANK_AUDIO]"):
-        text = None
-    return text, bytes(captured)
+    if state["error"] is not None:
+        raise RuntimeError(f"Lemonade realtime error: {state['error']}")
+    return (" ".join(transcripts) or None), bytes(captured)

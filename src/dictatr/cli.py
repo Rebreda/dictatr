@@ -65,7 +65,8 @@ async def _listen(prefer_typing: bool, ask: bool = False) -> int:
             dlv.notify(text, 15000)
 
     source = (
-        mic.file_chunks(settings.input_file, stop_now)
+        mic.file_chunks(settings.input_file, stop_now,
+                        realtime=os.environ.get("DICTATE_INPUT_PACED") == "1")
         if settings.input_file
         else mic.mic_chunks(stop_now)
     )

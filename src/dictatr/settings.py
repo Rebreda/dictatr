@@ -49,9 +49,13 @@ class VADSettings:
     threshold: float = _f("DICTATE_VAD_THRESHOLD", "vad_threshold", 0.02)
     silence_duration_ms: int = _i("DICTATE_VAD_SILENCE_MS", "silence_ms", 1200)
     prefix_padding_ms: int = _i("DICTATE_VAD_PREFIX_MS", "prefix_ms", 250)
-    max_segment_s: float = _f("DICTATE_MAX_SEC", "max_sec", 25.0)
+    max_segment_s: float = _f("DICTATE_MAX_SEC", "max_sec", 90.0)
     # Client-side: give up if the server reports no speech for this long.
     max_wait_s: float = _f("DICTATE_MAX_WAIT", "max_wait", 20.0)
+    # Realtime mode: how long after the last transcript, with no new speech,
+    # the dictation is considered finished. Pauses shorter than this just
+    # become segment boundaries and the transcripts are joined.
+    idle_s: float = _f("DICTATE_IDLE_S", "idle_s", 3.0)
 
 
 @dataclass

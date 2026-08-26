@@ -295,32 +295,37 @@ class SettingsWindow(Gtk.Window):
 
         self.silence = Gtk.SpinButton.new_with_range(300, 3000, 100)
         self.silence.set_value(settings.vad.silence_duration_ms)
-        row(2, "End after pause (ms)", self.silence)
+        row(2, "Segment pause (ms)", self.silence)
+
+        self.idle = Gtk.SpinButton.new_with_range(1.0, 8.0, 0.5)
+        self.idle.set_digits(1)
+        self.idle.set_value(settings.vad.idle_s)
+        row(3, "Finish after quiet (s)", self.idle)
 
         self.speak_sw = Gtk.Switch(
             halign=Gtk.Align.START, active=settings.llm.speak)
-        row(3, "Speak answers aloud", self.speak_sw)
+        row(4, "Speak answers aloud", self.speak_sw)
 
         self.archive_sw = Gtk.Switch(
             halign=Gtk.Align.START, active=settings.storage.enabled)
-        row(4, "Archive recordings", self.archive_sw)
+        row(5, "Archive recordings", self.archive_sw)
 
         self.archive_dir = Gtk.Entry()
         self.archive_dir.set_text(
             settings.storage.base if settings.storage.enabled
             else str(Path.home() / ".listenr" / "dictation"))
-        row(5, "Archive folder", self.archive_dir)
+        row(6, "Archive folder", self.archive_dir)
 
         note = Gtk.Label(
             label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
             xalign=0.0)
         note.add_css_class("dim-label")
-        grid.attach(note, 0, 6, 2, 1)
+        grid.attach(note, 0, 7, 2, 1)
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
         save.connect("clicked", self.on_save)
-        grid.attach(save, 1, 7, 1, 1)
+        grid.attach(save, 1, 8, 1, 1)
 
         self.set_child(grid)
 
@@ -357,6 +362,7 @@ class SettingsWindow(Gtk.Window):
             "model": model,
             "llm_model": self.llm_dd.get_selected_item().get_string(),
             "silence_ms": int(self.silence.get_value()),
+            "idle_s": round(self.idle.get_value(), 1),
             "speak_answers": self.speak_sw.get_active(),
             "archive": archive,
         }
@@ -365,7 +371,7 @@ class SettingsWindow(Gtk.Window):
         for k, v in cfg.items():
             if isinstance(v, bool):
                 lines.append(f"{k} = {str(v).lower()}")
-            elif isinstance(v, int):
+            elif isinstance(v, (int, float)):
                 lines.append(f"{k} = {v}")
             else:
                 lines.append(f'{k} = "{v}"')
