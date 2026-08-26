@@ -16,9 +16,10 @@ from pathlib import Path
 
 from . import deliver as dlv
 from . import llm
+from . import recall
 from . import mic
 from .batch import pcm_to_wav_bytes, transcribe_bytes, transcribe_file
-from .engine import dictate_once
+from .engine import dictate_once, ensure_asr_loaded
 from .settings import settings
 from .storage import save_recording
 from .vad import capture_utterance
@@ -76,6 +77,7 @@ async def _listen(prefer_typing: bool, ask: bool = False) -> int:
             "realtime" if "streaming" in settings.whisper.model.lower() else "batch"
         )
         if mode == "realtime":
+            await asyncio.to_thread(ensure_asr_loaded)
             text, pcm = await dictate_once(source, stop_now, on_state)
         else:
             utt = await capture_utterance(source, stop_now, on_state)
@@ -86,8 +88,8 @@ async def _listen(prefer_typing: bool, ask: bool = False) -> int:
                 text = await asyncio.to_thread(
                     transcribe_bytes, pcm_to_wav_bytes(pcm)
                 )
-    except (ConnectionError, OSError) as e:
-        dlv.notify(f"Lemonade unreachable: {e}", 6000)
+    except (ConnectionError, OSError, RuntimeError) as e:
+        dlv.notify(f"Lemonade error: {e}", 6000)
         return 1
 
     if cancelled:
@@ -99,8 +101,14 @@ async def _listen(prefer_typing: bool, ask: bool = False) -> int:
 
     if ask:
         dlv.notify(f"You: {text}", 3000)
+        context = []
+        if settings.llm.recall and settings.storage.enabled:
+            try:
+                context = await asyncio.to_thread(recall.search, text)
+            except OSError:
+                pass  # no embedding model available; answer without recall
         try:
-            answer = await asyncio.to_thread(llm.chat, text)
+            answer = await asyncio.to_thread(llm.chat, text, context)
         except OSError as e:
             dlv.notify(f"LLM unreachable: {e}", 6000)
             return 1

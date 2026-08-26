@@ -70,11 +70,16 @@ class StorageSettings:
 @dataclass
 class LLMSettings:
     # Ask mode: chat model and spoken answers (Kokoro TTS), all via Lemonade.
-    model: str = _s("DICTATE_LLM_MODEL", "llm_model", "gpt-oss-120b-mxfp-GGUF")
+    model: str = _s("DICTATE_LLM_MODEL", "llm_model", "Qwen3.5-4B-GGUF")
     speak: bool = _s("DICTATE_SPEAK", "speak_answers", "true").lower() in (
         "1", "true", "yes", "on")
     tts_model: str = _s("DICTATE_TTS_MODEL", "tts_model", "kokoro-v1")
     tts_voice: str = _s("DICTATE_TTS_VOICE", "tts_voice", "af_heart")
+    # Ask-mode recall: semantic search over the dictation archive.
+    recall: bool = _s("DICTATE_RECALL", "recall", "true").lower() in (
+        "1", "true", "yes", "on")
+    embed_model: str = _s("DICTATE_EMBED_MODEL", "embed_model",
+                          "nomic-embed-text-v1-GGUF")
 
 
 @dataclass

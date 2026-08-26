@@ -19,16 +19,27 @@ SYSTEM_PROMPT = (
 )
 
 
-def chat(question: str) -> str:
+def chat(question: str, context: list[dict] | None = None) -> str:
+    # One merged system message: some chat templates (gpt-oss) mishandle or
+    # drop a second system entry. Thinking is disabled for latency — voice
+    # answers need seconds, not a hidden reasoning chain (templates without
+    # an enable_thinking knob simply ignore the kwarg).
+    system = SYSTEM_PROMPT
+    if context:
+        notes = "\n".join(f"- [{c['date']}] {c['text']}" for c in context)
+        system += (
+            "\nYou can consult entries the user previously dictated on this "
+            "machine; use them when relevant:\n" + notes)
     req = urllib.request.Request(
         f"{settings.whisper.api_base}/chat/completions",
         data=json.dumps({
             "model": settings.llm.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system},
                 {"role": "user", "content": question},
             ],
             "max_tokens": 2048,
+            "chat_template_kwargs": {"enable_thinking": False},
         }).encode(),
         headers={"Content-Type": "application/json"},
     )

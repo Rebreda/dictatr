@@ -26,6 +26,21 @@ breath segments (measured on real recordings), while batch transcription of
 the client-detected utterance is flawless. Force a mode with
 `DICTATE_MODE=realtime|batch`.
 
+## Ask mode
+
+The ask bubble (or `dictatr ask`) captures a spoken question and answers it
+with a local LLM via Lemonade — answer on the clipboard, notification
+preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings or
+`speak_answers = false`). Before answering, the question is semantically
+matched against your dictation archive (listenr's embed-once-and-cache
+approach, via Lemonade's `/embeddings` endpoint and the 75 MB
+nomic-embed-text model) and relevant past dictations are given to the LLM —
+so "what did I say about X" works. Disable with `recall = false`.
+
+The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
+warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
+to 15-45 s.
+
 ## Dependencies
 
 Python (managed by `uv sync`, pinned in `pyproject.toml`):
@@ -87,4 +102,8 @@ has no layer-shell) it is a small centered window.
 | `DICTATE_MAX_SEC` | `25` | hard cap on utterance length |
 | `DICTATE_MAX_WAIT` | `20` | give up when no speech for this many seconds |
 | `DICTATE_MODE` | batch | `realtime` = Lemonade server-side VAD |
+| `DICTATE_LLM_MODEL` | `Qwen3.5-4B-GGUF` | ask-mode chat model |
+| `DICTATE_RECALL` | `true` | ask-mode semantic recall over the archive |
+| `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
+| `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |

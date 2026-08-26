@@ -43,6 +43,27 @@ def health_ws_url() -> str:
     return f"ws://localhost:{port}/realtime?model={settings.whisper.model}"
 
 
+def ensure_asr_loaded() -> None:
+    """The /realtime endpoint doesn't auto-load models (the batch endpoint
+    does), and other models can evict the ASR model from Lemonade's memory.
+    Pre-flight: if it isn't loaded, a tiny batch request loads it."""
+    root = settings.whisper.api_base.split("/api/")[0]
+    try:
+        with urllib.request.urlopen(f"{root}/v1/health", timeout=5) as r:
+            loaded = {m.get("model_name")
+                      for m in json.load(r).get("all_models_loaded", [])}
+        if settings.whisper.model in loaded:
+            return
+    except Exception:
+        return  # no health endpoint; let the session try its luck
+    from .batch import pcm_to_wav_bytes, transcribe_bytes
+    try:
+        log.info("loading %s via batch warmup", settings.whisper.model)
+        transcribe_bytes(pcm_to_wav_bytes(b"\x00" * 3200))
+    except Exception as e:
+        log.warning("ASR warmup failed: %s", e)
+
+
 async def dictate_once(
     audio_stream,
     stop_now: asyncio.Event,
