@@ -383,7 +383,7 @@ class SettingsWindow(Gtk.Window):
 
 class MenuApp(Gtk.Application):
     def __init__(self, settings_only=False):
-        super().__init__(application_id="ca.qxg.dictatr.menu")
+        super().__init__(application_id="io.github.rebreda.dictatr.menu")
         self.win = None
         self.settings_only = settings_only
 

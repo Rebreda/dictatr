@@ -66,7 +66,9 @@ def _manifest_rows(base: Path) -> list[dict]:
                         or r.get("raw_transcription") or "").strip()
                 if text:
                     rows.append({"text": text,
-                                 "date": (r.get("timestamp") or "")[:10]})
+                                 "date": (r.get("timestamp") or "")[:10],
+                                 "uuid": r.get("uuid", ""),
+                                 "categories": r.get("categories") or []})
     except OSError:
         pass
     return rows
@@ -95,9 +97,16 @@ def search(query: str, k: int = 4, min_score: float = 0.45) -> list[dict]:
         cache_file.write_text(json.dumps(cache))
 
     qvec = embed([query])[0]
-    scored = [
-        {**r, "score": _cosine(qvec, cache[_key(r["text"])])}
-        for r in rows if _key(r["text"]) in cache
-    ]
+    # Concept boost: rows whose LLM-extracted tags appear in the query get a
+    # nudge, so the concept index shapes results without a second search.
+    qwords = set(re.findall(r"[a-z0-9-]+", query.lower()))
+    scored = []
+    for r in rows:
+        if _key(r["text"]) not in cache:
+            continue
+        score = _cosine(qvec, cache[_key(r["text"])])
+        if qwords & set(r["categories"]):
+            score += 0.12
+        scored.append({**r, "score": score})
     scored.sort(key=lambda r: r["score"], reverse=True)
     return [r for r in scored[:k] if r["score"] >= min_score]

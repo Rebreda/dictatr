@@ -12,6 +12,8 @@ Layout:
 """
 
 import json
+import platform
+import socket
 import uuid
 import wave
 from datetime import datetime, timezone
@@ -26,6 +28,7 @@ def save_recording(
     storage_base: Path,
     asr_rate: int = 16000,
     whisper_model: str = "",
+    meta: dict | None = None,
 ) -> dict:
     if not pcm_bytes:
         raise ValueError("Refusing to save a clip with no audio.")
@@ -57,9 +60,46 @@ def save_recording(
         "duration_s": round(len(pcm_bytes) / 2 / asr_rate, 3),
         "sample_rate": asr_rate,
         "source": "dictatr",
+        "meta": {
+            "os": platform.platform(terse=True),
+            "host": socket.gethostname(),
+            **(meta or {}),
+        },
     }
 
     manifest = storage_base / "manifest.jsonl"
     with open(manifest, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return record
+
+
+def patch_manifest_record(manifest_path: Path, uid: str, fields: dict) -> bool:
+    """Update fields on an existing manifest record identified by *uid*.
+    Port of listenr's storage.patch_manifest_record: rewrites atomically,
+    returns True when the record was found."""
+    try:
+        lines = manifest_path.read_text(encoding="utf-8").splitlines(
+            keepends=True)
+    except OSError:
+        return False
+    found = False
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped:
+            try:
+                record = json.loads(stripped)
+            except json.JSONDecodeError:
+                out.append(line)
+                continue
+            if record.get("uuid") == uid:
+                record.update(fields)
+                out.append(json.dumps(record, ensure_ascii=False) + "\n")
+                found = True
+                continue
+        out.append(line)
+    if found:
+        tmp = manifest_path.with_suffix(".jsonl.tmp")
+        tmp.write_text("".join(out), encoding="utf-8")
+        tmp.replace(manifest_path)
+    return found

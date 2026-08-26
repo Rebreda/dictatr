@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import concepts
 from . import deliver as dlv
 from . import llm
 from . import recall
@@ -37,7 +38,8 @@ def _live_pid() -> int | None:
         return None
 
 
-async def _listen(prefer_typing: bool, ask: bool = False) -> int:
+async def _listen(prefer_typing: bool, ask: bool = False,
+                  quiet: bool = False) -> int:
     stop_now = asyncio.Event()
     cancelled = False
 
@@ -113,29 +115,43 @@ async def _listen(prefer_typing: bool, ask: bool = False) -> int:
         except OSError as e:
             dlv.notify(f"LLM unreachable: {e}", 6000)
             return 1
-        subprocess.run(["wl-copy"], input=answer.encode(), check=False)
-        dlv.notify(f"{answer[:400]}", 15000)
-        if settings.llm.speak:
-            await asyncio.to_thread(llm.speak, answer)
+        PIDFILE.unlink(missing_ok=True)  # session over; free the hotkey
+        if quiet:
+            dlv.deliver(answer, prefer_typing)
+        else:
+            subprocess.run(["wl-copy"], input=answer.encode(), check=False)
+            dlv.notify(f"{answer[:400]}", 15000)
+            if settings.llm.speak:
+                await asyncio.to_thread(llm.speak, answer)
     else:
+        PIDFILE.unlink(missing_ok=True)  # session over; free the hotkey
         dlv.deliver(text, prefer_typing)
     if settings.storage.enabled and pcm:
-        save_recording(
+        record = save_recording(
             pcm, text,
             storage_base=Path(settings.storage.base).expanduser(),
             whisper_model=settings.whisper.model,
+            meta={"mode": "ask" if ask else "dictate"},
         )
+        if settings.llm.concepts:
+            try:
+                await asyncio.to_thread(concepts.annotate, record)
+                if ask:  # LLM is warm anyway: backfill older rows too
+                    await asyncio.to_thread(concepts.sweep, 10)
+            except Exception as e:  # best-effort, never blocks the user
+                print(f"concept tagging failed: {e!r}", file=sys.stderr)
     return 0
 
 
-def cmd_toggle(prefer_typing: bool, ask: bool = False) -> int:
+def cmd_toggle(prefer_typing: bool, ask: bool = False,
+               quiet: bool = False) -> int:
     if pid := _live_pid():
         os.kill(pid, signal.SIGUSR1)
         return 0
     RUN.mkdir(parents=True, exist_ok=True)
     PIDFILE.write_text(str(os.getpid()))
     try:
-        return asyncio.run(_listen(prefer_typing, ask))
+        return asyncio.run(_listen(prefer_typing, ask, quiet))
     finally:
         PIDFILE.unlink(missing_ok=True)
 
@@ -161,8 +177,12 @@ def main() -> None:
     t = sub.add_parser("toggle", help="start listening / stop current recording")
     t.add_argument("--clip", action="store_true",
                    help="deliver to clipboard even if ydotool is available")
-    sub.add_parser("ask", help="speak a question, get an LLM answer (spoken + clipboard)")
+    a = sub.add_parser("ask", help="speak a question, get an LLM answer (spoken + clipboard)")
+    a.add_argument("--quiet", action="store_true",
+                   help="no TTS or notification chatter; deliver the answer "
+                        "like a dictation (typed at cursor, else clipboard)")
     sub.add_parser("cancel", help="abort without transcribing")
+    sub.add_parser("tag", help="backfill concept tags for untagged archive rows")
     f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
     f.add_argument("path")
     args = p.parse_args()
@@ -171,9 +191,14 @@ def main() -> None:
         clip = getattr(args, "clip", False)
         sys.exit(cmd_toggle(prefer_typing=not clip))
     if args.cmd == "ask":
-        sys.exit(cmd_toggle(prefer_typing=False, ask=True))
+        quiet = getattr(args, "quiet", False)
+        sys.exit(cmd_toggle(prefer_typing=quiet, ask=True, quiet=quiet))
     if args.cmd == "cancel":
         sys.exit(cmd_cancel())
+    if args.cmd == "tag":
+        n = concepts.sweep(limit=200)
+        print(f"tagged {n} recordings")
+        sys.exit(0)
     if args.cmd == "file":
         sys.exit(cmd_file(args.path))
 

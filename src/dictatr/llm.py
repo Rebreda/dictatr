@@ -19,6 +19,26 @@ SYSTEM_PROMPT = (
 )
 
 
+def complete(system: str, user: str, max_tokens: int = 512,
+             timeout: float = 60.0) -> str:
+    """One-shot completion with thinking disabled (latency)."""
+    req = urllib.request.Request(
+        f"{settings.whisper.api_base}/chat/completions",
+        data=json.dumps({
+            "model": settings.llm.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return (json.load(r)["choices"][0]["message"]["content"] or "").strip()
+
+
 def chat(question: str, context: list[dict] | None = None) -> str:
     # One merged system message: some chat templates (gpt-oss) mishandle or
     # drop a second system entry. Thinking is disabled for latency — voice

@@ -84,6 +84,9 @@ class LLMSettings:
         "1", "true", "yes", "on")
     embed_model: str = _s("DICTATE_EMBED_MODEL", "embed_model",
                           "nomic-embed-text-v1-GGUF")
+    # Tag archived dictations with LLM-extracted concepts.
+    concepts: bool = _s("DICTATE_CONCEPTS", "concepts", "true").lower() in (
+        "1", "true", "yes", "on")
 
 
 @dataclass
