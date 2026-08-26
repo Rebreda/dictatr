@@ -10,10 +10,12 @@ import asyncio
 import argparse
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
 from . import deliver as dlv
+from . import llm
 from . import mic
 from .batch import pcm_to_wav_bytes, transcribe_bytes, transcribe_file
 from .engine import dictate_once
@@ -34,7 +36,7 @@ def _live_pid() -> int | None:
         return None
 
 
-async def _listen(prefer_typing: bool) -> int:
+async def _listen(prefer_typing: bool, ask: bool = False) -> int:
     stop_now = asyncio.Event()
     cancelled = False
 
@@ -95,7 +97,19 @@ async def _listen(prefer_typing: bool) -> int:
         dlv.notify("No speech detected")
         return 0
 
-    dlv.deliver(text, prefer_typing)
+    if ask:
+        dlv.notify(f"You: {text}", 3000)
+        try:
+            answer = await asyncio.to_thread(llm.chat, text)
+        except OSError as e:
+            dlv.notify(f"LLM unreachable: {e}", 6000)
+            return 1
+        subprocess.run(["wl-copy"], input=answer.encode(), check=False)
+        dlv.notify(f"{answer[:400]}", 15000)
+        if settings.llm.speak:
+            await asyncio.to_thread(llm.speak, answer)
+    else:
+        dlv.deliver(text, prefer_typing)
     if settings.storage.enabled and pcm:
         save_recording(
             pcm, text,
@@ -105,14 +119,14 @@ async def _listen(prefer_typing: bool) -> int:
     return 0
 
 
-def cmd_toggle(prefer_typing: bool) -> int:
+def cmd_toggle(prefer_typing: bool, ask: bool = False) -> int:
     if pid := _live_pid():
         os.kill(pid, signal.SIGUSR1)
         return 0
     RUN.mkdir(parents=True, exist_ok=True)
     PIDFILE.write_text(str(os.getpid()))
     try:
-        return asyncio.run(_listen(prefer_typing))
+        return asyncio.run(_listen(prefer_typing, ask))
     finally:
         PIDFILE.unlink(missing_ok=True)
 
@@ -138,6 +152,7 @@ def main() -> None:
     t = sub.add_parser("toggle", help="start listening / stop current recording")
     t.add_argument("--clip", action="store_true",
                    help="deliver to clipboard even if ydotool is available")
+    sub.add_parser("ask", help="speak a question, get an LLM answer (spoken + clipboard)")
     sub.add_parser("cancel", help="abort without transcribing")
     f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
     f.add_argument("path")
@@ -146,6 +161,8 @@ def main() -> None:
     if args.cmd in (None, "toggle"):
         clip = getattr(args, "clip", False)
         sys.exit(cmd_toggle(prefer_typing=not clip))
+    if args.cmd == "ask":
+        sys.exit(cmd_toggle(prefer_typing=False, ask=True))
     if args.cmd == "cancel":
         sys.exit(cmd_cancel())
     if args.cmd == "file":

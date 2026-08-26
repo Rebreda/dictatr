@@ -39,6 +39,7 @@ ACTIONS = [
     ("audio-input-microphone-symbolic", "Dictate (type at cursor)", ["type"]),
     ("edit-copy-symbolic", "Dictate to clipboard", ["clip"]),
     ("folder-music-symbolic", "Transcribe audio file…", "file"),
+    ("user-available-symbolic", "Ask the AI (speak a question)", ["ask"]),
     ("emblem-system-symbolic", "Settings", "settings"),
     ("process-stop-symbolic", "Cancel recording", ["cancel"]),
 ]
@@ -286,33 +287,40 @@ class SettingsWindow(Gtk.Window):
             grid.attach(widget, 1, y, 1, 1)
 
         self.model_dd = Gtk.DropDown.new_from_strings([settings.whisper.model])
-        row(0, "Model", self.model_dd)
+        row(0, "Dictation model", self.model_dd)
+
+        self.llm_dd = Gtk.DropDown.new_from_strings([settings.llm.model])
+        row(1, "Ask model", self.llm_dd)
         threading.Thread(target=self._load_models, daemon=True).start()
 
         self.silence = Gtk.SpinButton.new_with_range(300, 3000, 100)
         self.silence.set_value(settings.vad.silence_duration_ms)
-        row(1, "End after pause (ms)", self.silence)
+        row(2, "End after pause (ms)", self.silence)
+
+        self.speak_sw = Gtk.Switch(
+            halign=Gtk.Align.START, active=settings.llm.speak)
+        row(3, "Speak answers aloud", self.speak_sw)
 
         self.archive_sw = Gtk.Switch(
             halign=Gtk.Align.START, active=settings.storage.enabled)
-        row(2, "Archive recordings", self.archive_sw)
+        row(4, "Archive recordings", self.archive_sw)
 
         self.archive_dir = Gtk.Entry()
         self.archive_dir.set_text(
             settings.storage.base if settings.storage.enabled
             else str(Path.home() / ".listenr" / "dictation"))
-        row(3, "Archive folder", self.archive_dir)
+        row(5, "Archive folder", self.archive_dir)
 
         note = Gtk.Label(
             label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
             xalign=0.0)
         note.add_css_class("dim-label")
-        grid.attach(note, 0, 4, 2, 1)
+        grid.attach(note, 0, 6, 2, 1)
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
         save.connect("clicked", self.on_save)
-        grid.attach(save, 1, 5, 1, 1)
+        grid.attach(save, 1, 7, 1, 1)
 
         self.set_child(grid)
 
@@ -321,17 +329,24 @@ class SettingsWindow(Gtk.Window):
             url = f"{settings.whisper.api_base}/models"
             with urllib.request.urlopen(url, timeout=5) as r:
                 data = json.load(r)["data"]
-            ids = [m["id"] for m in data
+            asr = [m["id"] for m in data
                    if "transcription" in (m.get("labels") or [])]
+            llms = [m["id"] for m in data
+                    if "transcription" not in (m.get("labels") or [])
+                    and "kokoro" not in m["id"].lower()]
         except Exception:
             return
-        if settings.whisper.model not in ids:
-            ids.insert(0, settings.whisper.model)
-        GLib.idle_add(self._set_models, ids)
+        if settings.whisper.model not in asr:
+            asr.insert(0, settings.whisper.model)
+        if settings.llm.model not in llms:
+            llms.insert(0, settings.llm.model)
+        GLib.idle_add(self._set_models, asr, llms)
 
-    def _set_models(self, ids):
-        self.model_dd.set_model(Gtk.StringList.new(ids))
-        self.model_dd.set_selected(ids.index(settings.whisper.model))
+    def _set_models(self, asr, llms):
+        self.model_dd.set_model(Gtk.StringList.new(asr))
+        self.model_dd.set_selected(asr.index(settings.whisper.model))
+        self.llm_dd.set_model(Gtk.StringList.new(llms))
+        self.llm_dd.set_selected(llms.index(settings.llm.model))
         return False
 
     def on_save(self, _btn):
@@ -340,14 +355,20 @@ class SettingsWindow(Gtk.Window):
                    if self.archive_sw.get_active() else "off")
         cfg = {
             "model": model,
+            "llm_model": self.llm_dd.get_selected_item().get_string(),
             "silence_ms": int(self.silence.get_value()),
+            "speak_answers": self.speak_sw.get_active(),
             "archive": archive,
         }
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         lines = []
         for k, v in cfg.items():
-            lines.append(f'{k} = {v}' if isinstance(v, int)
-                         else f'{k} = "{v}"')
+            if isinstance(v, bool):
+                lines.append(f"{k} = {str(v).lower()}")
+            elif isinstance(v, int):
+                lines.append(f"{k} = {v}")
+            else:
+                lines.append(f'{k} = "{v}"')
         CONFIG_PATH.write_text("\n".join(lines) + "\n")
         subprocess.run(["notify-send", "-a", "Dictate", "-t", "2500",
                         "Dictate", f"Settings saved ({model})"], check=False)
