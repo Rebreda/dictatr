@@ -19,12 +19,11 @@ from . import deliver as dlv
 from . import llm
 from . import recall
 from . import mic
-from .batch import pcm_to_wav_bytes, transcribe_bytes, transcribe_file
+from .batch import transcribe_file
 from .engine import dictate_once, ensure_asr_loaded
 from .runstate import DICTATE_PID as PIDFILE, live_pid, write_pid
 from .settings import settings
 from .storage import save_recording
-from .vad import capture_utterance
 
 
 def _live_pid() -> int | None:
@@ -66,24 +65,10 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         else mic.mic_chunks(stop_now)
     )
     try:
-        # Streaming models (Moonshine + TEN-VAD) get proper server-side VAD
-        # via /realtime; non-streaming models fall back to client VAD + batch
-        # (Whisper's realtime VAD misbehaves — see vad.py).
-        mode = os.environ.get("DICTATE_MODE") or (
-            "realtime" if "streaming" in settings.whisper.model.lower() else "batch"
-        )
-        if mode == "realtime":
-            await asyncio.to_thread(ensure_asr_loaded)
-            text, pcm = await dictate_once(source, stop_now, on_state)
-        else:
-            utt = await capture_utterance(source, stop_now, on_state)
-            text, pcm = None, b""
-            if utt is not None and not cancelled:
-                pcm = utt.pcm
-                on_state("transcribing")
-                text = await asyncio.to_thread(
-                    transcribe_bytes, pcm_to_wav_bytes(pcm)
-                )
+        # Server-side VAD (Moonshine + TEN-VAD) via /realtime, always.
+        # The batch endpoint is only for `dictate file`.
+        await asyncio.to_thread(ensure_asr_loaded)
+        text, pcm = await dictate_once(source, stop_now, on_state)
     except (ConnectionError, OSError, RuntimeError) as e:
         dlv.notify(f"Lemonade error: {e}", 6000)
         return 1

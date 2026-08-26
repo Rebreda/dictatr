@@ -1,37 +1,37 @@
-"""Always-on capture: VAD-segment the mic continuously, archive every
-utterance. No typing, no clipboard, no notification churn — the archive
-(and `dictatr gc`, which sweeps out the inevitable junk) is the product.
+"""Always-on capture over Lemonade's /realtime session (server-side VAD).
+
+One persistent websocket, Moonshine's bundled TEN-VAD segmenting speech
+server-side, transcripts arriving live — the same engine the hotkey path
+uses, running forever. Every transcribed segment is archived; segments
+the server hears as nothing are dropped, never archived. No typing, no
+clipboard, no notification churn — the archive (and `dictatr gc`) is the
+product.
 
 Runs foreground (`dictatr listen`, or the systemd unit in systemd/). While
 a hotkey dictation session is live (runstate.DICTATE_PID) the listener
-releases the microphone and discards any half-captured utterance — the
-interactive session archives its own audio, so this avoids duplicate rows.
-
-Always the client-VAD + batch path, never /realtime: each utterance is a
-complete clip and batch transcription of complete clips is the reliable
-path (see vad.py). If Lemonade is down the clip is still archived, with
-meta.pending_transcription set; the next `dictatr listen` start (or
-`dictatr gc`) retries those rather than losing audio.
+releases the microphone and its session — the interactive session archives
+its own audio, so this avoids duplicate rows. On startup the ASR model is
+pinned in Lemonade (`lemonade load --pinned`) so other models can't evict
+it mid-day; if Lemonade goes down the listener just reconnects with
+backoff — capture depends on the server, by design.
 """
 
 import asyncio
 import contextlib
-import json
+import shutil
 import signal
+import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
 from . import mic, runstate
-from .batch import pcm_to_wav_bytes, transcribe_bytes
+from .engine import ensure_asr_loaded, stream_utterances
 from .settings import settings
-from .storage import patch_manifest_record, save_recording
-from .vad import capture_utterance
+from .storage import save_recording
 
-POLL_S = 1.0          # dictate-pidfile poll while paused
-RETRY_DELAYS = (5, 20)  # transcription retries before archiving untranscribed
-MAX_INFLIGHT = 4      # transcriptions allowed behind the capture loop
+POLL_S = 1.0                     # dictate-pidfile poll while paused
+BACKOFF_S = (5, 15, 30, 60)      # reconnect ladder while Lemonade is down
 
 
 def _log(msg: str) -> None:
@@ -39,94 +39,37 @@ def _log(msg: str) -> None:
           flush=True)
 
 
-def batch_model() -> str:
-    """ASR model for listen's batch transcriptions. Streaming models only
-    work over /realtime (the batch endpoint returns "" for them, measured
-    2026-08), so fall back to a batch-capable Whisper unless overridden."""
-    if settings.listen.model:
-        return settings.listen.model
-    m = settings.whisper.model
-    return "Whisper-Large-v3-Turbo" if "streaming" in m.lower() else m
-
-
-def _transcribe_retry(pcm: bytes) -> str | None:
-    """Transcribe, retrying briefly. None = Lemonade unreachable."""
-    for delay in (0, *RETRY_DELAYS):
-        if delay:
-            time.sleep(delay)
+def pin_model() -> None:
+    """Keep the ASR model resident: pinned via the lemonade CLI when
+    available, else the batch-warmup fallback. Eviction by another model
+    was a real always-on failure mode."""
+    if shutil.which("lemonade"):
         try:
-            return transcribe_bytes(pcm_to_wav_bytes(pcm), model=batch_model())
-        except OSError:
-            continue
-    return None
-
-
-def retry_pending(limit: int = 50) -> int:
-    """Re-transcribe rows archived while Lemonade was down, plus listen
-    rows whose transcript came back empty (once — e.g. rows written before
-    the streaming-model batch fallback existed). Returns rows completed."""
-    base = Path(settings.storage.base).expanduser()
-    manifest = base / "manifest.jsonl"
-    try:
-        lines = manifest.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return 0
-    done = 0
-    for line in lines:
-        if done >= limit:
-            break
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        meta = row.get("meta") or {}
-        empty_listen = (meta.get("mode") == "listen"
-                        and not (row.get("raw_transcription") or "").strip()
-                        and not meta.get("retranscribed")
-                        and not row.get("gc"))
-        if not (meta.get("pending_transcription") or empty_listen):
-            continue
-        try:
-            wav = Path(row["audio_path"]).read_bytes()
-            text = transcribe_bytes(wav, model=batch_model())
-        except OSError:
-            break  # still unreachable; keep the flags for next time
-        patch_manifest_record(manifest, row["uuid"], {
-            "raw_transcription": text,
-            "corrected_transcription": text,
-            "whisper_model": batch_model(),
-            "meta": {**meta, "pending_transcription": False,
-                     "retranscribed": True},
-        })
-        done += 1
-    return done
-
-
-async def _archive(pcm: bytes, sem: asyncio.Semaphore) -> None:
-    async with sem:
-        text = await asyncio.to_thread(_transcribe_retry, pcm)
-        meta = {"mode": "listen"}
-        if text is None:
-            meta["pending_transcription"] = True
-        try:
-            record = save_recording(
-                pcm, text or "",
-                storage_base=Path(settings.storage.base).expanduser(),
-                whisper_model=batch_model(),
-                meta=meta,
-            )
-        except (OSError, ValueError) as e:
-            _log(f"archive failed: {e!r}")
+            subprocess.run(
+                ["lemonade", "load", settings.whisper.model, "--pinned"],
+                capture_output=True, timeout=300)
+            _log(f"pinned {settings.whisper.model} in Lemonade")
             return
-        secs = record["duration_s"]
-        if text is None:
-            _log(f"archived {secs}s clip untranscribed (Lemonade down)")
-        else:
-            _log(f"archived {secs}s: {text[:80] or '(no speech recognized)'}")
-        if text and settings.listen.tag:
-            from . import concepts
-            with contextlib.suppress(Exception):  # best-effort, like cli
-                await asyncio.to_thread(concepts.annotate, record)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    ensure_asr_loaded()
+
+
+def archive(text: str, pcm: bytes) -> dict | None:
+    if not (settings.storage.enabled and pcm and text):
+        return None
+    try:
+        record = save_recording(
+            pcm, text,
+            storage_base=Path(settings.storage.base).expanduser(),
+            whisper_model=settings.whisper.model,
+            meta={"mode": "listen"},
+        )
+    except (OSError, ValueError) as e:
+        _log(f"archive failed: {e!r}")
+        return None
+    _log(f"archived {record['duration_s']}s: {text[:80]}")
+    return record
 
 
 async def _run() -> int:
@@ -135,20 +78,16 @@ async def _run() -> int:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stopping.set)
 
-    sem = asyncio.Semaphore(MAX_INFLIGHT)
-    tasks: set[asyncio.Task] = set()
-    n = await asyncio.to_thread(retry_pending)
-    if n:
-        _log(f"transcribed {n} clip(s) archived while Lemonade was down")
-    _log("listening (always-on); pauses while a hotkey session is active")
+    await asyncio.to_thread(pin_model)
+    _log("listening (always-on, server VAD); pauses while a hotkey "
+         "session is active")
+    failures = 0
 
     while not stopping.is_set():
         if runstate.live_pid(runstate.DICTATE_PID):
             await asyncio.sleep(POLL_S)
             continue
 
-        # One mic stream per cycle; a cycle ends on shutdown or when a
-        # hotkey session starts (watcher trips cycle_stop, mic is released).
         cycle_stop = asyncio.Event()
 
         async def watch(cycle_stop=cycle_stop):
@@ -162,28 +101,34 @@ async def _run() -> int:
         source = (mic.file_chunks(settings.input_file, cycle_stop)
                   if settings.input_file else mic.mic_chunks(cycle_stop))
         try:
-            while not cycle_stop.is_set():
-                utt = await capture_utterance(
-                    source, cycle_stop,
-                    abs_min=settings.listen.vad_threshold,
-                    min_speech_ms=settings.listen.min_speech_ms)
-                if utt is None:
-                    if settings.input_file:  # test stream exhausted
-                        stopping.set()
-                        cycle_stop.set()
-                    continue  # mic: max_wait quiet spell; keep listening
+            async for text, pcm in stream_utterances(source, cycle_stop):
+                failures = 0
                 if runstate.live_pid(runstate.DICTATE_PID):
                     continue  # hotkey session owns this utterance
-                task = asyncio.create_task(_archive(utt.pcm, sem))
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
+                task = asyncio.to_thread(archive, text, pcm)
+                if settings.listen.tag:
+                    record = await task
+                    if record:
+                        from . import concepts
+                        with contextlib.suppress(Exception):
+                            await asyncio.to_thread(concepts.annotate, record)
+                else:
+                    await task
+        except ConnectionError as e:
+            failures += 1
+            wait = BACKOFF_S[min(failures, len(BACKOFF_S)) - 1]
+            _log(f"Lemonade unreachable ({e}); retrying in {wait}s")
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stopping.wait(), wait)
+        except RuntimeError as e:
+            _log(f"realtime session error: {e}; reconnecting")
         finally:
             cycle_stop.set()
             watcher.cancel()
             await source.aclose()
+        if settings.input_file:
+            stopping.set()  # test stream is one-shot
 
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
     _log("stopped")
     return 0
 
@@ -206,13 +151,11 @@ def toggle() -> int:
     (Restart=on-failure) stays down too. On spawns a detached listener
     logging to $XDG_RUNTIME_DIR/dictatr/listen.log."""
     import os
-    import signal as _signal
-    import subprocess
 
     from . import deliver as dlv
 
     if pid := runstate.live_pid(runstate.LISTEN_PID):
-        os.kill(pid, _signal.SIGTERM)
+        os.kill(pid, signal.SIGTERM)
         dlv.notify("Always-on capture: off", 2500)
         return 0
     runstate.RUN.mkdir(parents=True, exist_ok=True)

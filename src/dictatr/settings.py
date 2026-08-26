@@ -95,19 +95,6 @@ class ListenSettings:
     # the LLM warm around the clock, so it's opt-in unlike interactive rows.
     tag: bool = _s("DICTATE_LISTEN_TAG", "listen_tag", "false").lower() in (
         "1", "true", "yes", "on")
-    # Batch ASR model for listen mode. Streaming models only speak the
-    # /realtime websocket — the batch endpoint answers them with "" — so
-    # when unset and the main model is streaming, listen.py falls back to
-    # Whisper-Large-v3-Turbo.
-    model: str = _s("DICTATE_LISTEN_MODEL", "listen_model", "")
-    # Stricter VAD than close-mic dictation: measured (2026-08) an ambient
-    # noise bed of ~0.03 RMS triggered constant junk clips at the dictation
-    # threshold. 0.04 still catches soft/distant speech (0.05 dropped it);
-    # the junk that slips through arrives short enough for gc's sparse
-    # rule. Longer min_speech rejects coughs and typing bursts.
-    vad_threshold: float = _f("DICTATE_LISTEN_VAD", "listen_vad", 0.04)
-    min_speech_ms: int = _i("DICTATE_LISTEN_MIN_SPEECH_MS",
-                            "listen_min_speech_ms", 400)
 
 
 @dataclass

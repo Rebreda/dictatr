@@ -26,7 +26,7 @@ pull the models you want:
 
 ```bash
 lemonade pull Moonshine-Medium-Streaming   # dictation (ASR) — required
-lemonade pull Whisper-Large-v3-Turbo       # always-on capture (optional)
+lemonade pull Whisper-Large-v3-Turbo       # `dictate file` transcription (optional)
 lemonade pull Qwen3.5-4B-GGUF              # ask mode (optional)
 lemonade pull nomic-embed-text-v1-GGUF     # ask-mode recall (optional)
 lemonade pull kokoro-v1                    # spoken answers, TTS (optional)
@@ -87,14 +87,14 @@ outside to dismiss); without it, a small centered window.
 
 ## Always-on capture
 
-`dictate listen` keeps the mic open and archives every utterance the VAD
-hears — no typing, no clipboard, just the listenr-format archive filling up
-with fine-tuning data and recall context. It pauses automatically while a
-hotkey dictation is active (no duplicate rows), and if Lemonade is down the
-audio is archived untranscribed and backfilled on the next start. Listen
-transcribes via the batch endpoint, which streaming models don't support —
-with the default Moonshine it falls back to Whisper-Large-v3-Turbo
-(override with `DICTATE_LISTEN_MODEL`).
+`dictate listen` holds a persistent `/realtime` session — the same
+Moonshine + server-side TEN-VAD engine the hotkey uses, running forever.
+Segments the server transcribes are archived the moment the transcript
+arrives; segments it hears as noise are dropped and never touch disk. It
+pauses automatically while a hotkey dictation is active (no duplicate
+rows), pins the ASR model in Lemonade at startup (`lemonade load
+--pinned`) so other models can't evict it, and reconnects with backoff if
+the server goes away.
 
 Toggle it with Ctrl+Alt+A, the record bubble in the menu (green while
 live), the tray icon (middle-click, or the menu checkbox), or
@@ -107,8 +107,8 @@ systemctl --user enable --now dictatr-listen
 systemctl --user enable --now dictatr-gc.timer   # daily junk sweep
 ```
 
-Unattended capture archives junk too — breath-trigger clips, whisper's
-"Thank you." hallucinations, a TV repeating itself. `dictate gc` sweeps the
+Unattended capture still archives some junk — ASR hallucinations on
+breaths ("Thank you."), a TV repeating itself. `dictate gc` sweeps the
 archive: junk rows are *quarantined* (audio moved to `trash/`, manifest row
 marked and excluded from recall), not deleted — a false positive would be
 unrecoverable — and trash older than 30 days is purged for good.
@@ -118,17 +118,14 @@ listen-mode rows get the aggressive ones. `dictate gc --dry-run` previews,
 
 ## How it decides when you stopped talking
 
-With the default Moonshine streaming model, Lemonade's `/realtime` WebSocket
-does the VAD server-side with the model's bundled neural TEN-VAD
-([src/dictatr/engine.py](src/dictatr/engine.py)) — robust against keyboard
-clicks and mic auto-gain, with word-level streaming deltas.
-
-Non-streaming models (Whisper) automatically fall back to client-side
-adaptive VAD + batch transcription ([src/dictatr/vad.py](src/dictatr/vad.py)):
-whisper.cpp's realtime VAD over-segments mid-sentence and hallucinates on
-breath segments (measured on real recordings), while batch transcription of
-the client-detected utterance is flawless. Force a mode with
-`DICTATE_MODE=realtime|batch`.
+All microphone paths — hotkey dictation, ask, always-on — speak Lemonade's
+`/realtime` WebSocket, where the streaming model's bundled neural TEN-VAD
+segments speech server-side ([src/dictatr/engine.py](src/dictatr/engine.py)) —
+robust against keyboard clicks and mic auto-gain, with word-level streaming
+deltas. There is deliberately no client-side VAD: energy thresholds need
+per-room tuning and still misfire (measured, repeatedly). The batch
+endpoint is used only for `dictate file`, with a Whisper fallback since
+streaming models don't serve it.
 
 ## Ask mode
 
@@ -160,23 +157,19 @@ tags (work, code, todo, ...) written into the manifest's listenr
 | Variable | Default | Meaning |
 |---|---|---|
 | `LEMONADE_URL` | `http://localhost:8080/api/v1` | Lemonade API base |
-| `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (streaming models use realtime mode) |
+| `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (a streaming model; drives all mic paths) |
 | `DICTATE_ARCHIVE` | `~/.listenr/dictation` | listenr-format archive dir, `off` to disable |
 | `DICTATE_VAD_THRESHOLD` | `0.02` | speech trigger floor (matches listenr tuning) |
 | `DICTATE_VAD_SILENCE_MS` | `1200` | pause that ends the utterance |
 | `DICTATE_VAD_PREFIX_MS` | `250` | pre-roll kept before the first word |
 | `DICTATE_MAX_SEC` | `25` | hard cap on utterance length |
 | `DICTATE_MAX_WAIT` | `20` | give up when no speech for this many seconds |
-| `DICTATE_MODE` | batch | `realtime` = Lemonade server-side VAD |
 | `DICTATE_LLM_MODEL` | `Qwen3.5-4B-GGUF` | ask-mode chat model |
 | `DICTATE_RECALL` | `true` | ask-mode semantic recall over the archive |
 | `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
-| `DICTATE_LISTEN_MODEL` | auto | batch ASR for `listen`; Whisper-Large-v3-Turbo when the main model is streaming |
-| `DICTATE_LISTEN_VAD` | `0.04` | listen-mode speech floor (RMS); raise in noisy rooms, lower for distant mics |
-| `DICTATE_LISTEN_MIN_SPEECH_MS` | `400` | listen-mode minimum sustained speech; rejects coughs/typing |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
 | `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |

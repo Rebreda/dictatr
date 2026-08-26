@@ -64,6 +64,132 @@ def ensure_asr_loaded() -> None:
         log.warning("ASR warmup failed: %s", e)
 
 
+def _session_update() -> dict:
+    vad = settings.vad
+    return {
+        "type": "session.update",
+        "session": {
+            "model": settings.whisper.model,
+            "turn_detection": {
+                "threshold": vad.threshold,
+                "silence_duration_ms": vad.silence_duration_ms,
+                "prefix_padding_ms": vad.prefix_padding_ms,
+            },
+        },
+    }
+
+
+async def stream_utterances(audio_stream, stop: asyncio.Event,
+                            on_state=lambda s: None):
+    """Yield (text, pcm) per server-VAD segment, indefinitely, over one
+    /realtime session — the always-on flavor of dictate_once. Segments the
+    server transcribes to nothing are dropped, not yielded. Ends when
+    *stop* is set or the connection dies (websockets.ConnectionClosed
+    ends the generator; caller owns the reconnect policy). Raises
+    ConnectionError when no endpoint accepts the connection."""
+    last_err = None
+    for url in (realtime_ws_url(), health_ws_url()):
+        try:
+            conn = await websockets.connect(url, max_size=10 * 1024 * 1024)
+        except (OSError, websockets.exceptions.InvalidStatus) as e:
+            last_err = e
+            log.warning("realtime connect failed for %s: %s", url, e)
+            continue
+        async with conn as ws:
+            async for item in _segment_stream(ws, audio_stream, stop,
+                                              on_state):
+                yield item
+        return
+    raise ConnectionError(f"no Lemonade /realtime endpoint reachable: {last_err}")
+
+
+async def _segment_stream(ws, audio_stream, stop, on_state):
+    await ws.send(json.dumps(_session_update()))
+    on_state("listening")
+
+    prefix = 32000 * settings.vad.prefix_padding_ms // 1000  # bytes
+    max_seg = int(32000 * settings.vad.max_segment_s)
+    buf = bytearray()
+    base = 0            # absolute stream offset of buf[0]
+    mark = {"at": None}  # absolute offset where the live segment starts
+    out: asyncio.Queue = asyncio.Queue()
+    END = object()
+
+    def trim(keep_from: int):
+        nonlocal base
+        drop = keep_from - base
+        if drop > 0:
+            del buf[:drop]
+            base = keep_from
+
+    async def send_audio():
+        try:
+            async for chunk in audio_stream:
+                buf.extend(chunk)
+                await ws.send(json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": base64.b64encode(chunk).decode(),
+                }))
+                if stop.is_set():
+                    break
+                if mark["at"] is None:
+                    trim(base + max(0, len(buf) - 2 * prefix))
+                elif base + len(buf) - mark["at"] > max_seg:
+                    trim(mark["at"] + max_seg // 2)  # runaway-segment guard
+                    mark["at"] = base
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            await out.put(END)
+
+    async def recv_events():
+        try:
+            async for raw in ws:
+                msg = json.loads(raw)
+                t = msg.get("type", "")
+                if t == SPEECH_STARTED:
+                    mark["at"] = base + max(0, len(buf) - prefix)
+                    on_state("speech")
+                elif t == SPEECH_STOPPED:
+                    on_state("transcribing")
+                elif t == COMPLETED:
+                    text = (msg.get("transcript") or "").strip()
+                    start = mark["at"] if mark["at"] is not None else base
+                    pcm = bytes(buf[start - base:])
+                    mark["at"] = None
+                    trim(base + len(buf))
+                    if text and text not in (".", "[BLANK_AUDIO]"):
+                        await out.put((text, pcm))
+                    on_state("listening")
+                elif t == "error":
+                    await out.put(RuntimeError(
+                        f"Lemonade realtime error: {msg.get('error')}"))
+                    return
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            await out.put(END)
+
+    sender = asyncio.ensure_future(send_audio())
+    receiver = asyncio.ensure_future(recv_events())
+    try:
+        while True:
+            item = await out.get()
+            if item is END:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        for t in (sender, receiver):
+            t.cancel()
+        for t in (sender, receiver):
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
 async def dictate_once(
     audio_stream,
     stop_now: asyncio.Event,

@@ -42,5 +42,14 @@ def transcribe_bytes(wav_bytes: bytes, filename: str = "clip.wav",
     return text
 
 
+def batch_model() -> str:
+    """A batch-capable model for `dictate file`: streaming models only
+    speak /realtime (the batch endpoint answers them with "", measured
+    2026-08), so fall back to Whisper for one-shot file transcription."""
+    m = settings.whisper.model
+    return "Whisper-Large-v3-Turbo" if "streaming" in m.lower() else m
+
+
 def transcribe_file(path: str) -> str:
-    return transcribe_bytes(Path(path).read_bytes(), Path(path).name)
+    return transcribe_bytes(Path(path).read_bytes(), Path(path).name,
+                            model=batch_model())
