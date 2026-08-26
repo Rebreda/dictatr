@@ -10,6 +10,19 @@ command -v uv >/dev/null || { echo "uv is required (https://docs.astral.sh/uv/)"
 
 ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
+ln -sf "$here/bin/dictate-tray" ~/.local/bin/dictate-tray
+
+# Tray icon: autostart at login, and start it now (single-instance safe).
+mkdir -p ~/.config/autostart
+cat >~/.config/autostart/dictatr-tray.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Dictate tray
+Exec=$HOME/.local/bin/dictate-tray
+Icon=audio-input-microphone
+X-KDE-StartupNotify=false
+EOF
+nohup "$HOME/.local/bin/dictate-tray" >/dev/null 2>&1 &
 
 for name in dictate dictate-menu dictate-cancel dictate-listen; do
     case $name in

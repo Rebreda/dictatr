@@ -72,7 +72,14 @@ dictate file PATH  transcribe an audio file to the clipboard
 dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
 dictate listen     always-on capture into the archive (see below)
 dictate gc         quarantine junk archive clips, purge old trash
+dictate-tray       tray icon: state at a glance, quick actions (autostarts)
 ```
+
+The tray icon (a StatusNotifierItem, implemented over plain DBus — works
+on Plasma and most Wayland bars; GNOME needs its AppIndicator extension)
+shows a record icon while always-on capture is live. Left-click opens the
+radial menu, middle-click toggles always-on, right-click gets dictate /
+ask / always-on / gc / settings. `install.sh` autostarts it at login.
 
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE/wlroots compositors; click anywhere
@@ -90,7 +97,8 @@ with the default Moonshine it falls back to Whisper-Large-v3-Turbo
 (override with `DICTATE_LISTEN_MODEL`).
 
 Toggle it with Ctrl+Alt+A, the record bubble in the menu (green while
-live), or `dictate listen --toggle`. To have it on from login instead, use
+live), the tray icon (middle-click, or the menu checkbox), or
+`dictate listen --toggle`. To have it on from login instead, use
 the systemd units (`install.sh` installs them but never enables them — an
 always-hot mic is your call):
 
