@@ -27,6 +27,8 @@ def test_judge_rules():
                           "raw_transcription": "hm"}) == "too_short"
     assert cleanup.judge(
         {**listen, "raw_transcription": "la " * 20}) == "repetition"
+    assert cleanup.judge({**listen, "duration_s": 23.0,
+                          "raw_transcription": "Thank you."}) == "sparse"
     assert cleanup.judge({**listen, "raw_transcription":
                           "remember to check the oven"}) is None
     # interactive rows only get the gentle rules

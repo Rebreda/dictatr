@@ -95,6 +95,11 @@ class ListenSettings:
     # the LLM warm around the clock, so it's opt-in unlike interactive rows.
     tag: bool = _s("DICTATE_LISTEN_TAG", "listen_tag", "false").lower() in (
         "1", "true", "yes", "on")
+    # Batch ASR model for listen mode. Streaming models only speak the
+    # /realtime websocket — the batch endpoint answers them with "" — so
+    # when unset and the main model is streaming, listen.py falls back to
+    # Whisper-Large-v3-Turbo.
+    model: str = _s("DICTATE_LISTEN_MODEL", "listen_model", "")
 
 
 @dataclass

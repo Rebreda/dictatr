@@ -61,6 +61,9 @@ def judge(row: dict, prev_listen: dict | None = None) -> str | None:
     duration = row.get("duration_s") or 0.0
     if norm in HALLUCINATIONS and duration < 3.0:
         return "hallucination"
+    if duration >= 5.0 and len(words) <= 2:
+        return "sparse"  # long audio, near-empty transcript: noise the ASR
+        # shrugged at ("Thank you." for 23s of keyboard clatter)
     if duration < settings.gc.min_duration_s and \
             len(words) < settings.gc.min_words:
         return "too_short"

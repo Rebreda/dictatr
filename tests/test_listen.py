@@ -40,7 +40,7 @@ def run_listen(tmp_path, monkeypatch, transcribe):
 
 
 def test_listen_archives_each_utterance(tmp_path, monkeypatch):
-    base = run_listen(tmp_path, monkeypatch, lambda b: "hello from tape")
+    base = run_listen(tmp_path, monkeypatch, lambda b, model=None: "hello from tape")
     (row,) = rows(base)
     assert row["raw_transcription"] == "hello from tape"
     assert row["meta"]["mode"] == "listen"
@@ -48,7 +48,7 @@ def test_listen_archives_each_utterance(tmp_path, monkeypatch):
 
 
 def test_lemonade_down_archives_pending_then_retries(tmp_path, monkeypatch):
-    def down(_):
+    def down(_, model=None):
         raise OSError("connection refused")
     base = run_listen(tmp_path, monkeypatch, down)
     (row,) = rows(base)
@@ -56,7 +56,7 @@ def test_lemonade_down_archives_pending_then_retries(tmp_path, monkeypatch):
     assert row["meta"]["pending_transcription"]
 
     # Lemonade back up: the next listen start backfills the transcript.
-    monkeypatch.setattr(listen, "transcribe_bytes", lambda b: "recovered")
+    monkeypatch.setattr(listen, "transcribe_bytes", lambda b, model=None: "recovered")
     assert listen.retry_pending() == 1
     (row,) = rows(base)
     assert row["raw_transcription"] == "recovered"

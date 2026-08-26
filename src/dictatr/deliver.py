@@ -10,13 +10,31 @@ All output paths are external tools chosen for portability:
 import shutil
 import subprocess
 
+from .runstate import RUN
+
+_ID_FILE = RUN / "notify-id"
+
 
 def notify(text: str, ms: int = 2500) -> None:
-    if shutil.which("notify-send"):
-        subprocess.run(
-            ["notify-send", "-a", "Dictate", "-t", str(ms), "Dictate", text],
-            check=False,
-        )
+    """One replaceable notification slot for all of dictatr: each state
+    update replaces the previous bubble (-r) instead of stacking, so a
+    session reads listening -> transcribing -> delivered as one changing
+    notification — never several "Listening…" at once."""
+    if not shutil.which("notify-send"):
+        return
+    cmd = ["notify-send", "-a", "Dictate", "-t", str(ms), "-p"]
+    try:
+        prev = _ID_FILE.read_text().strip()
+        if prev.isdigit() and int(prev):
+            cmd += ["-r", prev]
+    except OSError:
+        pass
+    r = subprocess.run(cmd + ["Dictate", text], check=False,
+                       capture_output=True, text=True)
+    new_id = (r.stdout or "").strip()
+    if new_id.isdigit():
+        RUN.mkdir(parents=True, exist_ok=True)
+        _ID_FILE.write_text(new_id)
 
 
 def deliver(text: str, prefer_typing: bool = True) -> str:

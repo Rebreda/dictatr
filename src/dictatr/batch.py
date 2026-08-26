@@ -20,12 +20,13 @@ def pcm_to_wav_bytes(pcm: bytes, rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
-def transcribe_bytes(wav_bytes: bytes, filename: str = "clip.wav") -> str:
+def transcribe_bytes(wav_bytes: bytes, filename: str = "clip.wav",
+                     model: str | None = None) -> str:
     url = f"{settings.whisper.api_base}/audio/transcriptions"
     boundary = uuid.uuid4().hex
     body = b"".join([
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n"
-        f"{settings.whisper.model}\r\n".encode(),
+        f"{model or settings.whisper.model}\r\n".encode(),
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
         f"filename=\"{filename}\"\r\nContent-Type: audio/wav\r\n\r\n".encode(),
         wav_bytes,

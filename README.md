@@ -26,6 +26,7 @@ pull the models you want:
 
 ```bash
 lemonade pull Moonshine-Medium-Streaming   # dictation (ASR) — required
+lemonade pull Whisper-Large-v3-Turbo       # always-on capture (optional)
 lemonade pull Qwen3.5-4B-GGUF              # ask mode (optional)
 lemonade pull nomic-embed-text-v1-GGUF     # ask-mode recall (optional)
 lemonade pull kokoro-v1                    # spoken answers, TTS (optional)
@@ -83,7 +84,10 @@ outside to dismiss); without it, a small centered window.
 hears — no typing, no clipboard, just the listenr-format archive filling up
 with fine-tuning data and recall context. It pauses automatically while a
 hotkey dictation is active (no duplicate rows), and if Lemonade is down the
-audio is archived untranscribed and backfilled on the next start.
+audio is archived untranscribed and backfilled on the next start. Listen
+transcribes via the batch endpoint, which streaming models don't support —
+with the default Moonshine it falls back to Whisper-Large-v3-Turbo
+(override with `DICTATE_LISTEN_MODEL`).
 
 Toggle it with Ctrl+Alt+A, the record bubble in the menu (green while
 live), or `dictate listen --toggle`. To have it on from login instead, use
@@ -162,6 +166,7 @@ tags (work, code, todo, ...) written into the manifest's listenr
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
+| `DICTATE_LISTEN_MODEL` | auto | batch ASR for `listen`; Whisper-Large-v3-Turbo when the main model is streaming |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
 | `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |

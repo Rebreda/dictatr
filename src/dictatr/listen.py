@@ -39,21 +39,32 @@ def _log(msg: str) -> None:
           flush=True)
 
 
+def batch_model() -> str:
+    """ASR model for listen's batch transcriptions. Streaming models only
+    work over /realtime (the batch endpoint returns "" for them, measured
+    2026-08), so fall back to a batch-capable Whisper unless overridden."""
+    if settings.listen.model:
+        return settings.listen.model
+    m = settings.whisper.model
+    return "Whisper-Large-v3-Turbo" if "streaming" in m.lower() else m
+
+
 def _transcribe_retry(pcm: bytes) -> str | None:
     """Transcribe, retrying briefly. None = Lemonade unreachable."""
     for delay in (0, *RETRY_DELAYS):
         if delay:
             time.sleep(delay)
         try:
-            return transcribe_bytes(pcm_to_wav_bytes(pcm))
+            return transcribe_bytes(pcm_to_wav_bytes(pcm), model=batch_model())
         except OSError:
             continue
     return None
 
 
 def retry_pending(limit: int = 50) -> int:
-    """Re-transcribe rows archived while Lemonade was down. Returns the
-    number of rows completed."""
+    """Re-transcribe rows archived while Lemonade was down, plus listen
+    rows whose transcript came back empty (once — e.g. rows written before
+    the streaming-model batch fallback existed). Returns rows completed."""
     base = Path(settings.storage.base).expanduser()
     manifest = base / "manifest.jsonl"
     try:
@@ -68,18 +79,24 @@ def retry_pending(limit: int = 50) -> int:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not (row.get("meta") or {}).get("pending_transcription"):
+        meta = row.get("meta") or {}
+        empty_listen = (meta.get("mode") == "listen"
+                        and not (row.get("raw_transcription") or "").strip()
+                        and not meta.get("retranscribed")
+                        and not row.get("gc"))
+        if not (meta.get("pending_transcription") or empty_listen):
             continue
         try:
             wav = Path(row["audio_path"]).read_bytes()
-            text = transcribe_bytes(wav)
+            text = transcribe_bytes(wav, model=batch_model())
         except OSError:
             break  # still unreachable; keep the flags for next time
-        meta = {**row.get("meta", {}), "pending_transcription": False}
         patch_manifest_record(manifest, row["uuid"], {
             "raw_transcription": text,
             "corrected_transcription": text,
-            "meta": meta,
+            "whisper_model": batch_model(),
+            "meta": {**meta, "pending_transcription": False,
+                     "retranscribed": True},
         })
         done += 1
     return done
@@ -95,7 +112,7 @@ async def _archive(pcm: bytes, sem: asyncio.Semaphore) -> None:
             record = save_recording(
                 pcm, text or "",
                 storage_base=Path(settings.storage.base).expanduser(),
-                whisper_model=settings.whisper.model,
+                whisper_model=batch_model(),
                 meta=meta,
             )
         except (OSError, ValueError) as e:
