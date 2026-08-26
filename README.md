@@ -14,7 +14,7 @@ merged into listenr as a `listenr dictate` subcommand later. (listenr itself
 is not required — dictatr just writes a listenr-compatible archive.)
 
 <p align="center">
-  <img src="docs/menu.png" width="400" alt="Floating radial menu: six round action bubbles around a mic hub">
+  <img src="docs/menu.png" width="400" alt="Floating radial menu: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
   <img src="docs/settings.png" width="330" alt="Settings window: model pickers, VAD timing, TTS and archive toggles">
 </p>
 
