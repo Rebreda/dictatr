@@ -22,6 +22,7 @@ import sys
 import threading
 from pathlib import Path
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -100,15 +101,20 @@ class Chat(Gtk.ApplicationWindow):
             Gdk.Display.get_default(), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
+        # Like the menu: a fullscreen transparent overlay so the card can
+        # appear at the pointer. Unlike the menu, the input region is
+        # clipped to the card, so the rest of the desktop stays clickable
+        # while the conversation floats.
+        self.overlay = False
         ls = layer_shell()
         if ls is not None:
+            self.overlay = True
             ls.init_for_window(self)
             ls.set_layer(self, ls.Layer.TOP)
             ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
-            ls.set_anchor(self, ls.Edge.RIGHT, True)
-            ls.set_anchor(self, ls.Edge.BOTTOM, True)
-            ls.set_margin(self, ls.Edge.RIGHT, 28)
-            ls.set_margin(self, ls.Edge.BOTTOM, 28)
+            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
+                         ls.Edge.RIGHT):
+                ls.set_anchor(self, edge, True)
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
@@ -145,10 +151,25 @@ class Chat(Gtk.ApplicationWindow):
         footer.append(self.mic_btn)
         card.append(footer)
 
-        outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
-                        margin_end=8)
-        outer.append(card)
-        self.set_child(outer)
+        self.card = card
+        if self.overlay:
+            self.canvas = Gtk.Fixed()
+            self.canvas.put(card, 0, 0)
+            card.set_opacity(0.0)  # invisible until placed at the pointer
+            self.placed = False
+            self.set_child(self.canvas)
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self.on_pointer)
+            motion.connect("motion", self.on_pointer)
+            self.add_controller(motion)
+            self._polls = 0
+            GLib.timeout_add(50, self.poll_pointer)
+            GLib.timeout_add(250, self._update_input_region)
+        else:
+            outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
+                            margin_end=8)
+            outer.append(card)
+            self.set_child(outer)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
@@ -175,6 +196,56 @@ class Chat(Gtk.ApplicationWindow):
                              self._discard_now)
         self.connect("close-request", self.on_close)
         self.start_turn()
+
+    # --- overlay placement (menu-style, card at the pointer) ----------
+    def on_pointer(self, _c, x, y):
+        self.place_at(x, y)
+
+    def poll_pointer(self):
+        if self.placed or not self.overlay:
+            return False
+        surface = self.get_surface()
+        if surface is not None and self.get_width() > 0:
+            seat = Gdk.Display.get_default().get_default_seat()
+            ok, x, y, _m = surface.get_device_position(seat.get_pointer())
+            if ok and (x or y):
+                self.place_at(x, y)
+                return False
+        self._polls += 1
+        if self._polls > 20 and self.get_width() > 0:
+            self.place_at(self.get_width() / 2, self.get_height() / 3)
+            return False
+        return True
+
+    def place_at(self, x, y):
+        if self.placed or not self.overlay:
+            return
+        self.placed = True
+        w = self.get_width() or 1920
+        h = self.get_height() or 1080
+        # Card top near the pointer; it grows downward. Clamp inside the
+        # screen, leaving room for a full conversation below.
+        cx = min(max(x - WIDTH / 2, 12), max(w - WIDTH - 12, 12))
+        cy = min(max(y - 24, 12), max(h - 640, 12))
+        self.canvas.move(self.card, cx, cy)
+        self.card.set_opacity(1.0)
+
+    def _update_input_region(self):
+        """Clip input to the card: clicks elsewhere fall through to
+        whatever is underneath, so the overlay never blocks the desktop."""
+        if self._closing:
+            return False
+        surface = self.get_surface()
+        if surface is None or not self.placed:
+            return True
+        ok, bounds = self.card.compute_bounds(self)
+        if ok:
+            rect = cairo.RectangleInt(int(bounds.origin.x) - 2,
+                                      int(bounds.origin.y) - 2,
+                                      int(bounds.size.width) + 4,
+                                      int(bounds.size.height) + 4)
+            surface.set_input_region(cairo.Region(rect))
+        return True
 
     # --- animation & status -------------------------------------------
     def _animate(self):
