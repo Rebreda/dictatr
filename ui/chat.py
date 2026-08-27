@@ -177,6 +177,17 @@ class Chat(Gtk.ApplicationWindow):
             self._polls = 0
             GLib.timeout_add(50, self.poll_pointer)
             GLib.timeout_add(250, self._update_input_region)
+
+            # Drag the mic hub to move the conversation; small movements
+            # still count as clicks (claim only past a threshold).
+            self._pos = (0, 0)
+            self._drag_from = None
+            drag = Gtk.GestureDrag()
+            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            drag.connect("drag-begin", self.on_drag_begin)
+            drag.connect("drag-update", self.on_drag_update)
+            drag.connect("drag-end", self.on_drag_end)
+            self.canvas.add_controller(drag)
         else:
             outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
                             margin_end=8)
@@ -240,6 +251,7 @@ class Chat(Gtk.ApplicationWindow):
         cx = min(max(x - WIDTH / 2, 12), max(w - WIDTH - 12, 12))
         cy = min(max(y - STACK_H + 34, 12 - STACK_H + 120),
                  max(h - STACK_H - 12, 12))
+        self._pos = (cx, cy)
         self.canvas.move(self.stack, cx, cy)
         self.stack.set_opacity(1.0)
 
@@ -329,6 +341,30 @@ class Chat(Gtk.ApplicationWindow):
         self.set_status("warming up…" if not self._warmed else
                         "listening — just talk")
         asyncio.run_coroutine_threadsafe(self._turn(), self.aio)
+
+    def _hub_at(self, x, y):
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while target is not None:
+            if target is self.mic_btn:
+                return True
+            target = target.get_parent()
+        return False
+
+    def on_drag_begin(self, _g, x, y):
+        self._drag_from = self._pos if self._hub_at(x, y) else None
+
+    def on_drag_update(self, g, dx, dy):
+        if self._drag_from is None:
+            return
+        if abs(dx) > 8 or abs(dy) > 8:
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.canvas.move(self.stack,
+                         self._drag_from[0] + dx, self._drag_from[1] + dy)
+
+    def on_drag_end(self, _g, dx, dy):
+        if self._drag_from is not None:
+            self._pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
+            self._drag_from = None
 
     def on_back(self, _btn):
         subprocess.Popen([str(REPO / "bin" / "dictate-menu")])

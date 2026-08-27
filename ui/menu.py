@@ -133,6 +133,17 @@ class Radial(Gtk.ApplicationWindow):
             outside = Gtk.GestureClick()
             outside.connect("pressed", self.on_outside_click)
             self.canvas.add_controller(outside)
+
+            # Drag the hub to move the whole circle; small movements
+            # still count as clicks (claim only past a threshold).
+            self._pos = (0, 0)
+            self._drag_from = None
+            drag = Gtk.GestureDrag()
+            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            drag.connect("drag-begin", self.on_drag_begin)
+            drag.connect("drag-update", self.on_drag_update)
+            drag.connect("drag-end", self.on_drag_end)
+            self.canvas.add_controller(drag)
         else:
             self.set_default_size(SIZE, SIZE)
             self.canvas = None
@@ -209,6 +220,7 @@ class Radial(Gtk.ApplicationWindow):
         h = self.get_height() or SIZE
         x = min(max(x - SIZE / 2, 0), max(w - SIZE, 0))
         y = min(max(y - SIZE / 2, 0), max(h - SIZE, 0))
+        self._pos = (x, y)
         self.canvas.put(self.circle, x, y)
         self.start_twirl()
 
@@ -239,6 +251,30 @@ class Radial(Gtk.ApplicationWindow):
             self.place_at(self.get_width() / 2, self.get_height() / 2)
             return False
         return True
+
+    def _hub_at(self, x, y):
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while target is not None:
+            if target is self.hub:
+                return True
+            target = target.get_parent()
+        return False
+
+    def on_drag_begin(self, _g, x, y):
+        self._drag_from = self._pos if self._hub_at(x, y) else None
+
+    def on_drag_update(self, g, dx, dy):
+        if self._drag_from is None:
+            return
+        if abs(dx) > 8 or abs(dy) > 8:
+            g.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.canvas.move(self.circle,
+                         self._drag_from[0] + dx, self._drag_from[1] + dy)
+
+    def on_drag_end(self, _g, dx, dy):
+        if self._drag_from is not None:
+            self._pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
+            self._drag_from = None
 
     def on_outside_click(self, _g, _n, x, y):
         # A press outside the circle's buttons dismisses the menu.
