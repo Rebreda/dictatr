@@ -63,6 +63,7 @@ window { background: transparent; }
 }
 .satbtn image { color: #e8eaf1; }
 .satbtn:hover { background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }
+.satbtn.back:hover { background: alpha(#8ab4f8, 0.25); border-color: alpha(#8ab4f8, 0.6); }
 .msg {
   border-radius: 20px; padding: 9px 14px;
   background: alpha(#1c1d22, 0.93);
@@ -143,6 +144,12 @@ class Chat(Gtk.ApplicationWindow):
         stack.append(status_row)
 
         hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        back = Gtk.Button(icon_name="go-previous-symbolic",
+                          valign=Gtk.Align.CENTER,
+                          tooltip_text="Back to the menu")
+        back.add_css_class("satbtn")
+        back.add_css_class("back")
+        back.connect("clicked", self.on_back)
         self.mic_btn = Gtk.Button(icon_name="audio-input-microphone-symbolic")
         self.mic_btn.add_css_class("hubbtn")
         self.mic_btn.connect("clicked", self.on_mic)
@@ -150,6 +157,7 @@ class Chat(Gtk.ApplicationWindow):
                            valign=Gtk.Align.CENTER)
         close.add_css_class("satbtn")
         close.connect("clicked", lambda *_: self.close())
+        hub_row.append(back)
         hub_row.append(self.mic_btn)
         hub_row.append(close)
         stack.append(hub_row)
@@ -284,6 +292,7 @@ class Chat(Gtk.ApplicationWindow):
                            transition_duration=200, child=wrap)
         self.msgs.append(rev)
         GLib.idle_add(rev.set_reveal_child, True)
+        self._refade()
         self._scroll_down()
         lab._inner = inner
         lab._rev = rev
@@ -292,6 +301,20 @@ class Chat(Gtk.ApplicationWindow):
     def drop_bubble(self, lab):
         if lab is not None:
             self.msgs.remove(lab._rev)
+            self._refade()
+
+    def _refade(self):
+        """Older pills fade with age: the freshest exchange is solid, the
+        history dims stepwise behind it."""
+        pills = []
+        child = self.msgs.get_first_child()
+        while child is not None:
+            pills.append(child)
+            child = child.get_next_sibling()
+        n = len(pills)
+        for i, rev in enumerate(pills):
+            age = n - 1 - i  # 0 = newest
+            rev.set_opacity(1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age))
 
     # --- turn flow (UI side; work happens on the asyncio thread) -------
     def start_turn(self):
@@ -306,6 +329,10 @@ class Chat(Gtk.ApplicationWindow):
         self.set_status("warming up…" if not self._warmed else
                         "listening — just talk")
         asyncio.run_coroutine_threadsafe(self._turn(), self.aio)
+
+    def on_back(self, _btn):
+        subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
+        self.close()
 
     def on_mic(self, _btn):
         if self.phase == "listening":
