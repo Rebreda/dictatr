@@ -256,13 +256,9 @@ class Chat(Gtk.ApplicationWindow):
 
     # --- animation & status -------------------------------------------
     def _animate(self):
-        self._dots = (self._dots + 1) % 4
-        dots = "·" * (self._dots or 1)
+        self._dots = (self._dots + 1) % 3
         if self.phase == "thinking" and self.think_label is not None:
-            self.think_label.set_label(dots)
-        elif self.phase == "listening" and self.live_label is not None \
-                and not self.live_label.get_label().strip("▏ "):
-            self.live_label.set_label("▏" if self._dots % 2 else " ▏")
+            self.think_label.set_label("· " * (self._dots + 1))
         return not self._closing
 
     def set_status(self, text, error=False):
@@ -304,8 +300,9 @@ class Chat(Gtk.ApplicationWindow):
         self.phase = "listening"
         self._discard = False
         self.mic_btn.add_css_class("rec")
-        self.live_label = self.bubble("user")
-        self.live_label._inner.add_css_class("live")
+        # No empty pill while waiting: the green hub says "listening";
+        # the pill appears with the first words.
+        self.live_label = None
         self.set_status("warming up…" if not self._warmed else
                         "listening — just talk")
         asyncio.run_coroutine_threadsafe(self._turn(), self.aio)
@@ -365,9 +362,11 @@ class Chat(Gtk.ApplicationWindow):
         GLib.idle_add(self._got_text, text or "", pcm)
 
     def _on_partial(self, text):
-        if self.live_label is not None:
-            self.live_label.set_label(text)
-            self._scroll_down()
+        if self.live_label is None:
+            self.live_label = self.bubble("user")
+            self.live_label._inner.add_css_class("live")
+        self.live_label.set_label(text)
+        self._scroll_down()
 
     def _turn_failed(self, msg):
         self.phase = "idle"
@@ -382,9 +381,15 @@ class Chat(Gtk.ApplicationWindow):
             self.drop_bubble(self.live_label)
             self.live_label = None
             self.phase = "idle"
-            if not self._closing:
-                self.set_status("tap the mic to talk")
+            if self._closing:
+                return
+            if self._discard:
+                self.set_status("cancelled — tap the mic to talk")
+            else:
+                self.start_turn()  # quiet spell: just keep listening
             return
+        if self.live_label is None:
+            self.live_label = self.bubble("user")
         self.live_label._inner.remove_css_class("live")
         self.live_label.set_label(text)
         self.live_label = None
