@@ -122,7 +122,12 @@ class Radial(Gtk.ApplicationWindow):
             self.add_controller(motion)
             # KWin doesn't send pointer-enter until the mouse moves, so ask
             # the surface for the pointer position once we're mapped.
+            # wlroots compositors answer only after a pointer event, which
+            # can't happen before the first frame is on screen — so the
+            # give-up countdown must not start until then.
             self._polls = 0
+            self._ticks = 0
+            self.add_tick_callback(self._mark_painted)
             GLib.timeout_add(50, self.poll_pointer)
 
             outside = Gtk.GestureClick()
@@ -210,6 +215,13 @@ class Radial(Gtk.ApplicationWindow):
     def on_pointer(self, _c, x, y):
         self.place_at(x, y)
 
+    def _mark_painted(self, _w, _clock):
+        # The first tick starts the first frame; only the second proves a
+        # frame is actually on screen (the first paint of a 4K surface can
+        # take a second on a software renderer).
+        self._ticks += 1
+        return self._ticks < 2
+
     def poll_pointer(self):
         if self.placed:
             return False
@@ -220,8 +232,9 @@ class Radial(Gtk.ApplicationWindow):
             if ok and (x or y):
                 self.place_at(x, y)
                 return False
-        self._polls += 1
-        if self._polls > 20 and self.get_width() > 0:
+            if self._ticks >= 2:
+                self._polls += 1
+        if self._polls > 40 and self.get_width() > 0:
             # Pointer is on another output (or query unsupported): center.
             self.place_at(self.get_width() / 2, self.get_height() / 2)
             return False

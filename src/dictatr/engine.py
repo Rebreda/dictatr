@@ -91,7 +91,7 @@ async def stream_utterances(audio_stream, stop: asyncio.Event,
     for url in (realtime_ws_url(), health_ws_url()):
         try:
             conn = await websockets.connect(url, max_size=10 * 1024 * 1024)
-        except (OSError, websockets.exceptions.InvalidStatus) as e:
+        except (OSError, websockets.exceptions.InvalidHandshake) as e:
             last_err = e
             log.warning("realtime connect failed for %s: %s", url, e)
             continue
@@ -221,7 +221,7 @@ async def dictate_once(
             async with websockets.connect(url, max_size=10 * 1024 * 1024) as ws:
                 return await _run_session(ws, session_update, audio_stream,
                                           stop_now, on_state)
-        except (OSError, websockets.exceptions.InvalidStatus) as e:
+        except (OSError, websockets.exceptions.InvalidHandshake) as e:
             last_err = e
             log.warning("realtime connect failed for %s: %s", url, e)
     raise ConnectionError(f"no Lemonade /realtime endpoint reachable: {last_err}")
