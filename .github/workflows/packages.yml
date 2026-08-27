@@ -1,0 +1,75 @@
+name: packages
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e . pytest
+      - run: pytest -q
+
+  deb:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deb
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          bash packaging/build-deb.sh
+      - name: Sanity-check contents
+        run: dpkg-deb --contents dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+
+  rpm:
+    needs: test
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install build tools
+        run: dnf install -y rpm-build git-core python3 awk
+      - uses: actions/checkout@v4
+      - name: Build rpm
+        run: |
+          git config --global --add safe.directory "$PWD"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          bash packaging/build-rpm.sh
+      - name: Sanity-check contents
+        run: rpm -qlp dist/noarch/*.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: dist/noarch/*.rpm
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

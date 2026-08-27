@@ -17,6 +17,20 @@ dictatr just writes a listenr-compatible archive.
 
 ## Install
 
+**Packages**: rpm and deb builds are attached to
+[GitHub releases](https://github.com/Rebreda/dictatr/releases). They set
+up everything below except Lemonade, including rootless typing:
+
+```bash
+sudo dnf install ./dictatr-*.rpm        # or: sudo apt install ./dictatr_*.deb
+dictate-hotkeys                                   # bind KDE shortcuts (once)
+systemctl --user enable --now dictatr-ydotoold    # type-at-cursor daemon
+```
+
+Then do step 1 (Lemonade) and you're dictating. Details in
+[docs/packaging.md](docs/packaging.md). Installing from source instead:
+all four steps.
+
 **1. Lemonade**, the local inference server everything runs on. Install
 [Lemonade Server](https://lemonade-server.ai) and make sure it's running:
 

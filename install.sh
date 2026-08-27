@@ -12,6 +12,7 @@ ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
 ln -sf "$here/bin/dictate-tray" ~/.local/bin/dictate-tray
 ln -sf "$here/bin/dictate-chat" ~/.local/bin/dictate-chat
+ln -sf "$here/bin/dictate-hotkeys" ~/.local/bin/dictate-hotkeys
 
 # Tray icon: autostart at login, and start it now (single-instance safe).
 mkdir -p ~/.config/autostart
@@ -43,19 +44,13 @@ StartupNotify=false
 EOF
 done
 
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate.desktop --key _launch "Ctrl+Alt+D"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-menu.desktop --key _launch "Ctrl+Alt+Space"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-cancel.desktop --key _launch "Ctrl+Alt+C"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-listen.desktop --key _launch "Ctrl+Alt+A"
+"$here/bin/dictate-hotkeys" || true
 
 # Systemd user units for always-on capture + daily archive gc. Installed
 # but never enabled here: an always-hot mic must be an explicit choice.
 mkdir -p ~/.config/systemd/user
-for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer; do
+for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer \
+            dictatr-ydotoold.service; do
     sed "s|@REPO@|$here|" "$here/systemd/$unit" >~/.config/systemd/user/$unit
 done
 command -v systemctl >/dev/null && systemctl --user daemon-reload || true

@@ -3,15 +3,20 @@
 #   dictate [type] | clip | cancel | file PATH
 set -u
 here=$(dirname "$(readlink -f "$0")")
-dictatr="$here/../.venv/bin/dictatr"
-if [[ ! -x $dictatr ]]; then
+if [[ -x "$here/../.venv/bin/dictatr" ]]; then
+    run=("$here/../.venv/bin/dictatr")           # dev checkout (uv sync)
+elif [[ -d "$here/../src/dictatr" ]]; then
+    # system package: run against the system python + python3-websockets
+    export PYTHONPATH="$here/../src${PYTHONPATH:+:$PYTHONPATH}"
+    run=(python3 -m dictatr)
+else
     notify-send -a Dictate "Dictate" "Not installed: run install.sh (uv sync) in $(dirname "$here")"
     exit 1
 fi
 case ${1:-type} in
-type) exec "$dictatr" toggle ;;
-clip) exec "$dictatr" toggle --clip ;;
-cancel) exec "$dictatr" cancel ;;
-file) shift; exec "$dictatr" file "$@" ;;
-*) exec "$dictatr" "$@" ;;
+type) exec "${run[@]}" toggle ;;
+clip) exec "${run[@]}" toggle --clip ;;
+cancel) exec "${run[@]}" cancel ;;
+file) shift; exec "${run[@]}" file "$@" ;;
+*) exec "${run[@]}" "$@" ;;
 esac

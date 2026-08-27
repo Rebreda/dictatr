@@ -1,0 +1,5 @@
+# dictatr: let the logged-in user create virtual input devices, so
+# ydotoold can run as a user service and type at the cursor without a
+# root daemon. uaccess grants an ACL to the active seat only; uinput can
+# inject input but cannot read anyone's keystrokes.
+KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"

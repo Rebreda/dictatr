@@ -32,9 +32,19 @@ anywhere outside to dismiss). Without it, a small centered window.
 Delivery prefers typing the transcript at the cursor via ydotool
 (kernel-level input, works on any Wayland or X11 desktop) and falls back
 to the clipboard when that fails, so a broken ydotool looks like
-"dictation only ever copies". Fedora's stock `ydotool.service` runs the
-daemon as root with its socket at `/tmp/.ydotool_socket` (root-only),
-while the `ydotool` client looks for
+"dictation only ever copies".
+
+**Package installs**: the rpm/deb ships a udev rule that grants the
+logged-in user access to `/dev/uinput`, so the daemon runs rootless as
+a user service. Just enable it once:
+
+```bash
+systemctl --user enable --now dictatr-ydotoold
+```
+
+**Source installs** hit a stock-unit trap instead: Fedora's
+`ydotool.service` runs the daemon as root with its socket at
+`/tmp/.ydotool_socket` (root-only), while the `ydotool` client looks for
 `/run/user/<uid>/.ydotool_socket`; with that mismatch every `ydotool
 type` fails. Point the daemon at the client's path and hand the socket
 to your user (replace 1000 with your uid):
