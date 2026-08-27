@@ -1,0 +1,5 @@
+# Demo stage editor: clean canvas (chrome is hidden with --zero at launch).
+set softwrap
+set atblanks
+set tabsize 2
+set nonewlines

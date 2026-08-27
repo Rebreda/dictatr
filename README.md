@@ -14,8 +14,13 @@ merged into listenr as a `listenr dictate` subcommand later. (listenr itself
 is not required — dictatr just writes a listenr-compatible archive.)
 
 <p align="center">
-  <img src="docs/menu.png" width="400" alt="Floating radial menu: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
-  <img src="docs/settings.png" width="330" alt="Settings window: model pickers, VAD timing, TTS and archive toggles">
+  <img src="docs/hero.gif" width="800" alt="Demo: Ctrl+Alt+D in an editor, a Listening notification appears, speech is transcribed and typed at the cursor, recording stops by itself">
+</p>
+<p align="center">
+  <img src="docs/chat.gif" width="800" alt="Demo: answering a chat message by voice — the radial menu blooms, the dictate bubble is clicked, the spoken reply is typed into the compose box and sent">
+</p>
+<p align="center">
+  <img src="docs/desktop-menu.png" width="800" alt="Radial menu bloomed at the cursor over a notes editor: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
 </p>
 
 ## Install

@@ -9,3 +9,6 @@ nohup.out
 # never commit recorded audio or transcripts
 *.wav
 manifest.jsonl
+
+# demo harness output
+docs/demo/out/

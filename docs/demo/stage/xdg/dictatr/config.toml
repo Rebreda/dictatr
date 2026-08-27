@@ -1,0 +1,9 @@
+# dictatr config for demo captures (lib/session.py points
+# XDG_CONFIG_HOME here; env vars set by scenes still override).
+model = "Moonshine-Medium-Streaming"
+llm_model = "Qwen3.5-4B-GGUF"
+silence_ms = 800
+idle_s = 1.2
+speak_answers = false
+recall = false
+concepts = false

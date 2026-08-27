@@ -1,0 +1,17 @@
+# Demo stage notifications — matches the radial menu's palette.
+font=Cantarell 11
+background-color=#1c1d22F0
+text-color=#e8eaf1
+border-color=#8ab4f8AA
+border-size=2
+border-radius=13
+padding=14
+margin=20
+width=380
+anchor=top-right
+layer=overlay
+default-timeout=0
+icons=0
+
+[app-name=Dictate]
+border-color=#8ab4f8DD

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <!-- Demo stage backdrop. Palette (shared by every capture):
+         charcoal  #1c1d22   surfaces (menu, editor, notifications, bar)
+         ink       #e8eaf1   text on charcoal
+         blue      #8ab4f8   accent / hover / borders
+         green     #81c995   live-capture accent
+         periwinkle #b9c9ef  backdrop cool end
+         peach     #f2e2cf   backdrop warm end
+       Rendered to PNG at capture time by lib/session.py. -->
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b9c9ef"/>
+      <stop offset="0.45" stop-color="#dde4f2"/>
+      <stop offset="1" stop-color="#f2e2cf"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.25" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.65"/>
+      <stop offset="0.65" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blue" cx="0.88" cy="0.10" r="0.55">
+      <stop offset="0" stop-color="#8ab4f8" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#8ab4f8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="green" cx="0.08" cy="0.95" r="0.5">
+      <stop offset="0" stop-color="#81c995" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#81c995" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.72" stop-color="#232c45" stop-opacity="0"/>
+      <stop offset="1" stop-color="#232c45" stop-opacity="0.10"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#base)"/>
+  <rect width="1920" height="1080" fill="url(#glow)"/>
+  <rect width="1920" height="1080" fill="url(#blue)"/>
+  <rect width="1920" height="1080" fill="url(#green)"/>
+  <rect width="1920" height="1080" fill="url(#vignette)"/>
+
+  <!-- dictatr logo watermark (docs/logo.svg shapes, monochrome, faint) -->
+  <g transform="translate(1700, 880) scale(1.35)" opacity="0.07"
+     fill="none" stroke="#1c1d22">
+    <circle cx="34" cy="86" r="9" stroke-width="3"/>
+    <circle cx="94" cy="86" r="9" stroke-width="3"/>
+    <circle cx="64" cy="100" r="9" stroke-width="3"/>
+    <circle cx="64" cy="100" r="3.6" fill="#1c1d22" stroke="none"/>
+    <circle cx="64" cy="50" r="22" stroke-width="3"/>
+    <rect x="60.5" y="40" width="7" height="11" rx="3.5" fill="#1c1d22"
+          stroke="none"/>
+    <path d="M57 49 a7 7 0 0 0 14 0" stroke-width="2.6"
+          stroke-linecap="round"/>
+    <path d="M64 56.5 v3.5" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+</svg>

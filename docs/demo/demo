@@ -1,0 +1,140 @@
+#!/usr/bin/python3
+"""dictatr demo harness — reproducible screenshots and demo videos.
+
+Every capture happens on an isolated headless desktop (see lib/session.py),
+so results are pixel-stable and nothing touches the host session.
+
+  demo stills   regenerate docs/menu.png and docs/settings.png
+  demo video    record the hero scene -> out/hero.mp4 + out/hero.gif
+  demo voice    (re)synthesize the demo voice with kokoro via Lemonade
+  demo shell    boot the stage and hold it for manual poking
+
+Requires: sudo dnf install sway grim wf-recorder wtype mako foot \
+          librsvg2-tools ffmpeg python3-pywayland python3-pillow nano
+(or point DICTATR_DEMO_TOOLS at extracted-RPM prefixes).
+`demo voice` additionally needs a running Lemonade with kokoro-v1 pulled.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+DEMO = Path(__file__).resolve().parent
+sys.path[:0] = [str(DEMO / "lib"), str(DEMO / "scenes")]
+
+from session import Session  # noqa: E402
+
+DOCS = DEMO.parent
+OUT = DEMO / "out"
+SCENES = ["hero", "chat"]        # video scenes with a voice line
+
+
+def _voice_wav(scene: str) -> Path:
+    return DEMO / "audio" / f"{scene}.wav"
+
+
+def _synthesize(scene: str):
+    import importlib
+    mod = importlib.import_module(scene)
+    url = os.environ.get("LEMONADE_URL",
+                         "http://localhost:8080/api/v1")
+    req = urllib.request.Request(
+        f"{url}/audio/speech",
+        data=json.dumps({"model": "kokoro-v1", "input": mod.TRANSCRIPT,
+                         "voice": "af_heart"}).encode(),
+        headers={"Content-Type": "application/json"})
+    print(f"synthesizing {scene} voice via {url} …")
+    with urllib.request.urlopen(req, timeout=120) as r:
+        raw = r.read()
+    wav = _voice_wav(scene)
+    tmp = wav.with_suffix(".synth")
+    wav.parent.mkdir(exist_ok=True)
+    tmp.write_bytes(raw)
+    # 16 kHz mono s16 (what dictatr's mic path produces), with lead-in
+    # silence and enough tail for the hands-free stop to trigger.
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
+         "-af", "adelay=800:all=1,apad=pad_dur=3.0",
+         "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
+         str(wav)], check=True)
+    tmp.unlink()
+    print(f"wrote {wav}")
+
+
+def cmd_voice(args):
+    for scene in ([args.scene] if args.scene else SCENES):
+        _synthesize(scene)
+
+
+def cmd_stills(args):
+    import stills
+    from director import Director
+    with Session(keep=args.keep).start({}) as s:
+        d = Director(s)
+        stills.desktop(d)
+        stills.menu(d, str(DOCS / "desktop-menu.png"))
+    print(f"wrote {DOCS / 'desktop-menu.png'}")
+
+
+def cmd_video(args):
+    import importlib
+    from director import Director
+    scene = args.scene or "hero"
+    mod = importlib.import_module(scene)
+    if not _voice_wav(scene).exists():
+        print(f"{_voice_wav(scene)} missing — synthesizing first")
+        _synthesize(scene)
+    OUT.mkdir(exist_ok=True)
+    raw = OUT / f"{scene}-raw.mkv"
+    plan = OUT / f"{scene}-plan.json"
+    cues = OUT / f"{scene}-cues.jsonl"
+    with Session(keep=args.keep).start(mod.SCENARIO) as s:
+        d = Director(s)
+        mod.run(d, str(_voice_wav(scene)), str(raw))
+        plan.write_text(json.dumps(mod.CAMERA_PLAN, indent=2))
+        cues.write_text(s.cues_path.read_text())
+    subprocess.run(
+        [sys.executable, str(DEMO / "lib/kenburns.py"),
+         "--video", str(raw), "--cues", str(cues), "--plan", str(plan),
+         "--out", str(OUT / f"{scene}.mp4"),
+         "--gif", str(OUT / f"{scene}.gif")],
+        check=True)
+    # The gif is a README asset; the mp4 (for sharing) stays in out/.
+    shutil.copy(OUT / f"{scene}.gif", DOCS / f"{scene}.gif")
+    print(f"wrote {DOCS / f'{scene}.gif'} and {OUT / f'{scene}.mp4'}")
+
+
+def cmd_shell(args):
+    with Session(keep=True).start({}) as s:
+        print(f"stage up.  export SWAYSOCK={s.swaysock}")
+        print(f"           export WAYLAND_DISPLAY={s.wayland_display}")
+        print(f"           export DBUS_SESSION_BUS_ADDRESS={s.bus_address}")
+        print(f"run dir:   {s.run}   (Ctrl-C to tear down)")
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("command", choices=["stills", "video", "voice", "shell"])
+    ap.add_argument("scene", nargs="?",
+                    help="video/voice scene (default: hero); "
+                         f"one of {SCENES}")
+    ap.add_argument("--keep", action="store_true",
+                    help="keep the run dir (and stage) after a failure")
+    args = ap.parse_args()
+    {"stills": cmd_stills, "video": cmd_video,
+     "voice": cmd_voice, "shell": cmd_shell}[args.command](args)
+
+
+if __name__ == "__main__":
+    main()
