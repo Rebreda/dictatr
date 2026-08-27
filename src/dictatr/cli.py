@@ -71,7 +71,7 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         await asyncio.to_thread(ensure_asr_loaded)
         text, pcm = await dictate_once(source, stop_now, on_state)
     except (ConnectionError, OSError, RuntimeError) as e:
-        dlv.notify(f"Lemonade error: {e}", 6000)
+        dlv.notify(f"Lemonade error: {e}", 6000, category="errors")
         return 1
 
     if cancelled:
@@ -92,7 +92,7 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         try:
             answer = await asyncio.to_thread(llm.chat, text, context)
         except OSError as e:
-            dlv.notify(f"LLM unreachable: {e}", 6000)
+            dlv.notify(f"LLM unreachable: {e}", 6000, category="errors")
             return 1
         PIDFILE.unlink(missing_ok=True)  # session over; free the hotkey
         if quiet:
@@ -100,7 +100,7 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         else:
             subprocess.run(["wl-copy"], input=answer.encode(), check=False)
             runstate.mark_done()
-            dlv.notify(f"{answer[:400]}", 15000)
+            dlv.notify(f"{answer[:400]}", 15000, category="answers")
             if settings.llm.speak:
                 await asyncio.to_thread(llm.speak, answer)
     else:

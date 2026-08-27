@@ -114,11 +114,15 @@ MENU_XML = """<node>
  </interface>
 </node>"""
 
-# (id, label, action) — checkbox id 5 mirrors the listener pidfile.
+# (id, label, action) — checkbox id 5 mirrors the listener pidfile;
+# ids 10-12 only appear while a hotkey session is recording.
 MENU_ITEMS = [
+    (10, "Stop recording (deliver)", ["type"]),
+    (11, "Discard recording", ["cancel"]),
+    (12, "", None),
     (1, "Dictate (type at cursor)", ["type"]),
     (2, "Dictate to clipboard", ["clip"]),
-    (3, "Ask the AI", ["ask"]),
+    (3, "Ask the AI (voice chat)", "chat"),
     (4, "", None),  # separator
     (5, "Always-on capture", ["listen", "--toggle"]),
     (6, "Clean up archive now", "gc"),
@@ -126,6 +130,7 @@ MENU_ITEMS = [
     (8, "Settings", "settings"),
     (9, "Quit tray", "quit"),
 ]
+RECORDING_IDS = {10, 11, 12}
 
 
 class Tray:
@@ -211,19 +216,25 @@ class Tray:
     # --- StatusNotifierItem --------------------------------------------
     def on_sni(self, _bus, _sender, _path, _iface, method, _params, inv):
         if method == "Activate":
-            subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
+            if self.state.startswith("rec"):
+                # Click the red icon = stop & deliver, like the hotkey.
+                subprocess.Popen([DICTATE, "type"])
+            else:
+                subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
         elif method == "SecondaryActivate":
             subprocess.Popen([DICTATE, "listen", "--toggle"])
         inv.return_value(None)
 
     # --- com.canonical.dbusmenu ----------------------------------------
     def _props(self, mid, label, action):
-        if action is None:
-            return {"type": GLib.Variant("s", "separator")}
-        p = {"label": GLib.Variant("s", label)}
+        p = ({"type": GLib.Variant("s", "separator")} if action is None
+             else {"label": GLib.Variant("s", label)})
         if mid == 5:
             p["toggle-type"] = GLib.Variant("s", "checkmark")
             p["toggle-state"] = GLib.Variant("i", 1 if self.live else 0)
+        if mid in RECORDING_IDS:
+            p["visible"] = GLib.Variant(
+                "b", self.state.startswith("rec"))
         return p
 
     def on_menu(self, _bus, _sender, _path, _iface, method, params, inv):
@@ -261,6 +272,8 @@ class Tray:
         action = next((a for i, _, a in MENU_ITEMS if i == mid), None)
         if action == "quit":
             self.loop.quit()
+        elif action == "chat":
+            subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
         elif action == "settings":
             subprocess.Popen([str(REPO / "bin" / "dictate-menu"),
                               "--settings"])

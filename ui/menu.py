@@ -40,7 +40,7 @@ ACTIONS = [
     ("audio-input-microphone-symbolic", "Dictate (type at cursor)", ["type"]),
     ("edit-copy-symbolic", "Dictate to clipboard", ["clip"]),
     ("folder-music-symbolic", "Transcribe audio file…", "file"),
-    ("user-available-symbolic", "Ask the AI (speak a question)", ["ask"]),
+    ("user-available-symbolic", "Ask the AI (voice chat)", "chat"),
     ("media-record-symbolic", "Always-on capture (toggle)",
      ["listen", "--toggle"]),
     ("emblem-system-symbolic", "Settings", "settings"),
@@ -263,6 +263,9 @@ class Radial(Gtk.ApplicationWindow):
         action = ACTIONS[index][2]
         if action == "file":
             self.pick_file()
+        elif action == "chat":
+            subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
+            self.close()
         elif action == "settings":
             SettingsWindow(self.get_application()).present()
             self.close()
@@ -337,16 +340,28 @@ class SettingsWindow(Gtk.Window):
             else str(Path.home() / ".listenr" / "dictation"))
         row(6, "Archive folder", self.archive_dir)
 
+        self.notify_checks = {}
+        nbox = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                           max_children_per_line=3, column_spacing=6)
+        for key, label in (("state", "State"), ("delivery", "Delivery"),
+                           ("answers", "Answers"), ("toggles", "Toggles"),
+                           ("errors", "Errors")):
+            cb = Gtk.CheckButton(label=label)
+            cb.set_active(getattr(settings.notify, key))
+            self.notify_checks[key] = cb
+            nbox.append(cb)
+        row(7, "Notifications", nbox)
+
         note = Gtk.Label(
             label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
             xalign=0.0)
         note.add_css_class("dim-label")
-        grid.attach(note, 0, 7, 2, 1)
+        grid.attach(note, 0, 8, 2, 1)
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
         save.connect("clicked", self.on_save)
-        grid.attach(save, 1, 8, 1, 1)
+        grid.attach(save, 1, 9, 1, 1)
 
         self.set_child(grid)
 
@@ -387,6 +402,8 @@ class SettingsWindow(Gtk.Window):
             "speak_answers": self.speak_sw.get_active(),
             "archive": archive,
         }
+        for key, cb in self.notify_checks.items():
+            cfg[f"notify_{key}"] = cb.get_active()
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         lines = []
         for k, v in cfg.items():

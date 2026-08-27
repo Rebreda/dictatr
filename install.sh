@@ -11,6 +11,7 @@ command -v uv >/dev/null || { echo "uv is required (https://docs.astral.sh/uv/)"
 ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
 ln -sf "$here/bin/dictate-tray" ~/.local/bin/dictate-tray
+ln -sf "$here/bin/dictate-chat" ~/.local/bin/dictate-chat
 
 # Tray icon: autostart at login, and start it now (single-instance safe).
 mkdir -p ~/.config/autostart

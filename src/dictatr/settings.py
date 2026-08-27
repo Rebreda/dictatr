@@ -89,6 +89,21 @@ class LLMSettings:
         "1", "true", "yes", "on")
 
 
+def _b(env: str, key: str, default: str) -> bool:
+    return _s(env, key, default).lower() in ("1", "true", "yes", "on")
+
+
+@dataclass
+class NotifySettings:
+    # Which notification categories show. State chatter (listening /
+    # transcribing) shares one replaceable bubble; the rest pop fresh.
+    state: bool = _b("DICTATE_NOTIFY_STATE", "notify_state", "true")
+    delivery: bool = _b("DICTATE_NOTIFY_DELIVERY", "notify_delivery", "true")
+    answers: bool = _b("DICTATE_NOTIFY_ANSWERS", "notify_answers", "true")
+    toggles: bool = _b("DICTATE_NOTIFY_TOGGLES", "notify_toggles", "true")
+    errors: bool = _b("DICTATE_NOTIFY_ERRORS", "notify_errors", "true")
+
+
 @dataclass
 class ListenSettings:
     # Always-on mode (dictatr listen). Tagging every ambient utterance keeps
@@ -115,6 +130,7 @@ class Settings:
     storage: StorageSettings = field(default_factory=StorageSettings)
     listen: ListenSettings = field(default_factory=ListenSettings)
     gc: GCSettings = field(default_factory=GCSettings)
+    notify: NotifySettings = field(default_factory=NotifySettings)
     # Audio source override for tests: a wav file streamed instead of the mic.
     input_file: str | None = os.environ.get("DICTATE_INPUT") or None
 

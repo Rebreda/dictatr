@@ -69,12 +69,16 @@ def _system_prompt(context: list[dict] | None) -> str:
     return system
 
 
-def chat(question: str, context: list[dict] | None = None) -> str:
+def chat(question: str, context: list[dict] | None = None,
+         history: list[dict] | None = None) -> str:
     """Tool-calling conversation loop: the model may consult local tools
-    (time, file search, calendar, remember) before answering."""
+    (time, file search, calendar, remember) before answering. *history*
+    is prior turns as {"role", "content"} dicts (the chat window's
+    running conversation)."""
     schemas, executors = toolbox.registry()
     messages = [
         {"role": "system", "content": _system_prompt(context)},
+        *(history or []),
         {"role": "user", "content": question},
     ]
     for _ in range(4):

@@ -25,6 +25,11 @@ SPEECH_STARTED = "input_audio_buffer.speech_started"
 SPEECH_STOPPED = "input_audio_buffer.speech_stopped"
 
 
+def _is_delta(msg_type: str) -> bool:
+    # Word-level streaming deltas mid-segment (OpenAI realtime shape).
+    return msg_type.endswith("transcription.delta")
+
+
 def realtime_ws_url() -> str:
     """Prefer the /realtime proxy on the main API port; fall back to the
     dedicated websocket port advertised by /v1/health (listenr's approach)."""
@@ -194,11 +199,15 @@ async def dictate_once(
     audio_stream,
     stop_now: asyncio.Event,
     on_state=lambda state: None,
+    on_partial=None,
 ) -> tuple[str | None, bytes]:
     """Stream *audio_stream* until the server transcribes one utterance.
 
     stop_now: set externally (hotkey) to force a commit immediately.
     on_state: callback for UI feedback: "listening" | "speech" | "transcribing".
+    on_partial: called with the running transcript (finished segments plus
+    the in-flight segment's streaming deltas) whenever it grows — the live
+    text a chat UI displays while the user is still talking.
     Returns (text or None, captured_pcm_bytes).
     """
     vad = settings.vad
@@ -220,14 +229,15 @@ async def dictate_once(
         try:
             async with websockets.connect(url, max_size=10 * 1024 * 1024) as ws:
                 return await _run_session(ws, session_update, audio_stream,
-                                          stop_now, on_state)
+                                          stop_now, on_state, on_partial)
         except (OSError, websockets.exceptions.InvalidHandshake) as e:
             last_err = e
             log.warning("realtime connect failed for %s: %s", url, e)
     raise ConnectionError(f"no Lemonade /realtime endpoint reachable: {last_err}")
 
 
-async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
+async def _run_session(ws, session_update, audio_stream, stop_now, on_state,
+                       on_partial=None):
     """Multi-segment dictation: the server's VAD ends a *segment* at every
     decent pause, so treating the first transcript as the whole dictation
     cuts speakers off mid-thought. Instead transcripts accumulate; the
@@ -264,6 +274,14 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
         finally:
             state["mic_ended"] = True
 
+    partial = [""]
+
+    def emit_partial():
+        if on_partial is not None:
+            live = " ".join([*transcripts, partial[0]]).strip()
+            if live:
+                on_partial(live)
+
     async def recv_events():
         async for raw in ws:
             msg = json.loads(raw)
@@ -275,10 +293,15 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state):
             elif t == SPEECH_STOPPED:
                 state["speech_active"] = False
                 on_state("transcribing")
+            elif _is_delta(t):
+                partial[0] += msg.get("delta") or ""
+                emit_partial()
             elif t == COMPLETED:
                 text = (msg.get("transcript") or "").strip()
                 if text and text not in (".", "[BLANK_AUDIO]"):
                     transcripts.append(text)
+                partial[0] = ""
+                emit_partial()
                 state["speech_active"] = False
                 state["last_done"] = loop.time()
                 on_state("listening" if not stop_now.is_set() else "transcribing")

@@ -75,6 +75,7 @@ dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
 dictate listen     always-on capture into the archive
 dictate gc         quarantine junk archive clips, purge old trash
 dictate-tray       tray icon: state at a glance, quick actions (autostarts)
+dictate-chat       floating voice chat: live transcript, spoken answers
 ```
 
 The tray icon shows a record icon while always-on capture is live;

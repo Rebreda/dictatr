@@ -156,12 +156,13 @@ def toggle() -> int:
 
     if pid := runstate.live_pid(runstate.LISTEN_PID):
         os.kill(pid, signal.SIGTERM)
-        dlv.notify("Always-on capture: off", 2500)
+        dlv.notify("Always-on capture: off", 2500, category="toggles")
         return 0
     runstate.RUN.mkdir(parents=True, exist_ok=True)
     with open(runstate.RUN / "listen.log", "ab") as log:
         subprocess.Popen([sys.executable, "-m", "dictatr.cli", "listen"],
                          start_new_session=True, stdout=log,
                          stderr=subprocess.STDOUT)
-    dlv.notify("Always-on capture: on 🎙 (everything is archived)", 4000)
+    dlv.notify("Always-on capture: on 🎙 (everything is archived)",
+               4000, category="toggles")
     return 0
