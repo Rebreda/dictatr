@@ -294,7 +294,11 @@ async def _run_session(ws, session_update, audio_stream, stop_now, on_state,
                 state["speech_active"] = False
                 on_state("transcribing")
             elif _is_delta(t):
-                partial[0] += msg.get("delta") or ""
+                # Lemonade's deltas are cumulative: each event carries the
+                # whole in-flight segment so far (observed 2026-08), so
+                # replace — appending doubles the text until it settles.
+                partial[0] = (msg.get("delta") or msg.get("transcript")
+                              or partial[0])
                 emit_partial()
             elif t == COMPLETED:
                 text = (msg.get("transcript") or "").strip()
