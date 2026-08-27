@@ -25,6 +25,30 @@ The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE and wlroots compositors; click
 anywhere outside to dismiss). Without it, a small centered window.
 
+## Typing at the cursor (ydotool)
+
+Delivery prefers typing the transcript at the cursor via ydotool
+(kernel-level input, works on any Wayland or X11 desktop) and falls back
+to the clipboard when that fails, so a broken ydotool looks like
+"dictation only ever copies". Fedora's stock `ydotool.service` runs the
+daemon as root with its socket at `/tmp/.ydotool_socket` (root-only),
+while the `ydotool` client looks for
+`/run/user/<uid>/.ydotool_socket`; with that mismatch every `ydotool
+type` fails. Point the daemon at the client's path and hand the socket
+to your user (replace 1000 with your uid):
+
+```bash
+sudo mkdir -p /etc/systemd/system/ydotool.service.d
+sudo tee /etc/systemd/system/ydotool.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/ydotoold --socket-path=/run/user/1000/.ydotool_socket --socket-own=1000:1000
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ydotool
+ydotool type ''   # exits 0 when the socket is reachable
+```
+
 ## Always-on capture
 
 `dictate listen` holds a persistent `/realtime` session: the same

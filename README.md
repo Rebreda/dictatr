@@ -42,8 +42,11 @@ sudo dnf install pipewire-utils wl-clipboard libnotify   # mic, clipboard, notif
 ```
 
 Without ydotool, transcripts go to the clipboard instead of typing at the
-cursor. Without gtk4-layer-shell the menu still works as a centered window
-(GNOME has no layer-shell protocol).
+cursor. On Fedora the stock ydotool service also needs a socket fix or
+typing silently fails; see
+[docs/guide.md](docs/guide.md#typing-at-the-cursor-ydotool). Without
+gtk4-layer-shell the menu still works as a centered window (GNOME has no
+layer-shell protocol).
 
 **3. dictatr:**
 
