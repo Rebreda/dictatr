@@ -36,46 +36,50 @@ from dictatr.engine import dictate_once, ensure_asr_loaded  # noqa: E402
 from dictatr.settings import settings  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
 
-WIDTH = 380
+WIDTH = 360
+STACK_H = 620   # spacer + pills + status + hub; hub sits at the bottom
 
+# Same visual vocabulary as the radial menu: round dark bubbles with thin
+# white borders, blue hub mic, green record accent. No card, no chrome —
+# message pills float on the transparent overlay, twirling out of a hub.
 CSS = b"""
 window { background: transparent; }
-.card {
-  background: alpha(#17181d, 0.96);
+.hubbtn {
+  border-radius: 9999px;
   border: 1px solid alpha(#ffffff, 0.10);
-  border-radius: 18px;
-}
-.header-title { color: #e8eaf1; font-weight: 600; }
-.status { color: alpha(#e8eaf1, 0.55); font-size: 11px; }
-.status.error { color: #f28b82; }
-.bubble-user, .bubble-ai {
-  border-radius: 14px; padding: 8px 12px;
-}
-.bubble-user {
-  background: alpha(#81c995, 0.16);
-  border: 1px solid alpha(#81c995, 0.35);
-  color: #e8eaf1;
-}
-.bubble-user.live { border-color: alpha(#81c995, 0.8); }
-.bubble-ai {
-  background: #24262d;
-  border: 1px solid alpha(#ffffff, 0.08);
-  color: #e8eaf1;
-}
-.micbtn {
-  border-radius: 9999px; min-width: 44px; min-height: 44px;
-  background: alpha(#2a2c34, 0.95);
-  border: 1px solid alpha(#ffffff, 0.12);
+  background: alpha(#1c1d22, 0.93);
+  min-width: 58px; min-height: 58px;
   transition: background 150ms ease, border-color 150ms ease;
 }
-.micbtn image { color: #e8eaf1; }
-.micbtn.rec { background: alpha(#81c995, 0.30); border-color: #81c995; }
-.micbtn.rec image { color: #81c995; }
-.micbtn:hover { border-color: alpha(#ffffff, 0.35); }
-.closebtn { border-radius: 9999px; min-width: 26px; min-height: 26px;
-            background: transparent; border: none; }
-.closebtn image { color: alpha(#e8eaf1, 0.5); }
-.closebtn:hover image { color: #e8eaf1; }
+.hubbtn image { color: #8ab4f8; }
+.hubbtn.rec { background: alpha(#81c995, 0.25); border-color: alpha(#81c995, 0.6); }
+.hubbtn.rec image { color: #81c995; }
+.hubbtn:hover { border-color: alpha(#ffffff, 0.35); }
+.satbtn {
+  border-radius: 9999px;
+  border: 1px solid alpha(#ffffff, 0.10);
+  background: alpha(#1c1d22, 0.93);
+  min-width: 36px; min-height: 36px;
+}
+.satbtn image { color: #e8eaf1; }
+.satbtn:hover { background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }
+.msg {
+  border-radius: 20px; padding: 9px 14px;
+  background: alpha(#1c1d22, 0.93);
+  border: 1px solid alpha(#ffffff, 0.10);
+  color: #e8eaf1;
+  transition: border-color 150ms ease;
+}
+.msg-user { border-color: alpha(#81c995, 0.45); }
+.msg-user.live { border-color: alpha(#81c995, 0.85); }
+.msg-ai { border-color: alpha(#8ab4f8, 0.35); }
+.status-pill {
+  background: alpha(#1c1d22, 0.85);
+  border: 1px solid alpha(#ffffff, 0.08);
+  border-radius: 9999px; padding: 3px 12px;
+  color: alpha(#e8eaf1, 0.6); font-size: 11px;
+}
+.status-pill.error { color: #f28b82; }
 """
 
 
@@ -116,46 +120,46 @@ class Chat(Gtk.ApplicationWindow):
                          ls.Edge.RIGHT):
                 ls.set_anchor(self, edge, True)
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("card")
-        card.set_size_request(WIDTH, -1)
+        # A column that grows upward from the hub: spacer, message pills,
+        # status pill, then the hub row (mic bubble + close satellite) —
+        # the hub lands where the pointer was, like the menu's center.
+        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        stack.set_size_request(WIDTH, STACK_H)
+        stack.append(Gtk.Box(vexpand=True))  # pushes everything down
 
-        header = Gtk.Box(spacing=8, margin_top=12, margin_start=16,
-                         margin_end=10)
-        title = Gtk.Label(label="Ask", xalign=0.0)
-        title.add_css_class("header-title")
-        self.status = Gtk.Label(label="", xalign=0.0, hexpand=True)
-        self.status.set_ellipsize(Pango.EllipsizeMode.END)
-        self.status.add_css_class("status")
-        close = Gtk.Button(icon_name="window-close-symbolic")
-        close.add_css_class("closebtn")
-        close.connect("clicked", lambda *_: self.close())
-        header.append(title)
-        header.append(self.status)
-        header.append(close)
-        card.append(header)
-
-        self.msgs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                            margin_start=12, margin_end=12)
+        self.msgs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.scroll = Gtk.ScrolledWindow(
-            hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True,
-            propagate_natural_height=True, max_content_height=440,
-            min_content_height=140)
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            propagate_natural_height=True, max_content_height=430,
+            valign=Gtk.Align.END)
         self.scroll.set_child(self.msgs)
-        card.append(self.scroll)
+        stack.append(self.scroll)
 
-        footer = Gtk.Box(margin_bottom=12, margin_top=2, halign=Gtk.Align.CENTER)
+        self.status = Gtk.Label(label="")
+        self.status.set_ellipsize(Pango.EllipsizeMode.END)
+        self.status.add_css_class("status-pill")
+        status_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        status_row.append(self.status)
+        stack.append(status_row)
+
+        hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
         self.mic_btn = Gtk.Button(icon_name="audio-input-microphone-symbolic")
-        self.mic_btn.add_css_class("micbtn")
+        self.mic_btn.add_css_class("hubbtn")
         self.mic_btn.connect("clicked", self.on_mic)
-        footer.append(self.mic_btn)
-        card.append(footer)
+        close = Gtk.Button(icon_name="window-close-symbolic",
+                           valign=Gtk.Align.CENTER)
+        close.add_css_class("satbtn")
+        close.connect("clicked", lambda *_: self.close())
+        hub_row.append(self.mic_btn)
+        hub_row.append(close)
+        stack.append(hub_row)
 
-        self.card = card
+        self.stack = stack
+        self._hit_widgets = (self.scroll, status_row, hub_row)
         if self.overlay:
             self.canvas = Gtk.Fixed()
-            self.canvas.put(card, 0, 0)
-            card.set_opacity(0.0)  # invisible until placed at the pointer
+            self.canvas.put(stack, 0, 0)
+            stack.set_opacity(0.0)  # invisible until placed at the pointer
             self.placed = False
             self.set_child(self.canvas)
             motion = Gtk.EventControllerMotion()
@@ -168,7 +172,7 @@ class Chat(Gtk.ApplicationWindow):
         else:
             outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
                             margin_end=8)
-            outer.append(card)
+            outer.append(stack)
             self.set_child(outer)
 
         keys = Gtk.EventControllerKey()
@@ -223,28 +227,31 @@ class Chat(Gtk.ApplicationWindow):
         self.placed = True
         w = self.get_width() or 1920
         h = self.get_height() or 1080
-        # Card top near the pointer; it grows downward. Clamp inside the
-        # screen, leaving room for a full conversation below.
+        # The hub (bottom of the stack) lands at the pointer, like the
+        # menu's center bubble; pills grow upward from there.
         cx = min(max(x - WIDTH / 2, 12), max(w - WIDTH - 12, 12))
-        cy = min(max(y - 24, 12), max(h - 640, 12))
-        self.canvas.move(self.card, cx, cy)
-        self.card.set_opacity(1.0)
+        cy = min(max(y - STACK_H + 34, 12 - STACK_H + 120),
+                 max(h - STACK_H - 12, 12))
+        self.canvas.move(self.stack, cx, cy)
+        self.stack.set_opacity(1.0)
 
     def _update_input_region(self):
-        """Clip input to the card: clicks elsewhere fall through to
-        whatever is underneath, so the overlay never blocks the desktop."""
+        """Clip input to the visible pieces (pills, status, hub): clicks
+        anywhere else fall through to whatever is underneath, so the
+        overlay never blocks the desktop."""
         if self._closing:
             return False
         surface = self.get_surface()
         if surface is None or not self.placed:
             return True
-        ok, bounds = self.card.compute_bounds(self)
-        if ok:
-            rect = cairo.RectangleInt(int(bounds.origin.x) - 2,
-                                      int(bounds.origin.y) - 2,
-                                      int(bounds.size.width) + 4,
-                                      int(bounds.size.height) + 4)
-            surface.set_input_region(cairo.Region(rect))
+        region = cairo.Region()
+        for widget in self._hit_widgets:
+            ok, b = widget.compute_bounds(self)
+            if ok and b.size.width > 0:
+                region.union(cairo.RectangleInt(
+                    int(b.origin.x) - 4, int(b.origin.y) - 4,
+                    int(b.size.width) + 8, int(b.size.height) + 8))
+        surface.set_input_region(region)
         return True
 
     # --- animation & status -------------------------------------------
@@ -273,7 +280,8 @@ class Chat(Gtk.ApplicationWindow):
         wrap = Gtk.Box(halign=Gtk.Align.END if role == "user"
                        else Gtk.Align.START)
         inner = Gtk.Box()
-        inner.add_css_class(f"bubble-{role}")
+        inner.add_css_class("msg")
+        inner.add_css_class(f"msg-{role}")
         inner.append(lab)
         wrap.append(inner)
         rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
