@@ -14,12 +14,6 @@ dictatr just writes a listenr-compatible archive.
 <p align="center">
   <img src="docs/hero.gif" width="800" alt="Demo: Ctrl+Alt+D in an editor, a Listening notification appears, and the spoken sentence lands at the cursor in real time; recording stops by itself">
 </p>
-<p align="center">
-  <img src="docs/chat.gif" width="800" alt="Demo: answering a chat message by voice. The radial menu blooms, the dictate bubble is clicked, and the spoken reply streams into the compose box and is sent">
-</p>
-<p align="center">
-  <img src="docs/desktop-menu.png" width="800" alt="Radial menu bloomed at the cursor over a notes editor: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
-</p>
 
 ## Install
 

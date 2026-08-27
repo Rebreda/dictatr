@@ -4,6 +4,13 @@ The details behind the short version in the [README](../README.md).
 
 ## The tray and the menu
 
+<p align="center">
+  <img src="chat.gif" width="700" alt="Answering a chat message by voice: the radial menu blooms, the dictate bubble is clicked, and the spoken reply streams into the compose box and is sent">
+</p>
+<p align="center">
+  <img src="desktop-menu.png" width="700" alt="Radial menu bloomed at the cursor over a notes editor: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
+</p>
+
 The tray icon is a StatusNotifierItem implemented over plain DBus; it
 works on Plasma and most Wayland bars, and GNOME needs its AppIndicator
 extension. It shows a record icon while always-on capture is live.
