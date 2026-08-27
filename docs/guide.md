@@ -13,10 +13,13 @@ The details behind the short version in the [README](../README.md).
 
 The tray icon is a StatusNotifierItem implemented over plain DBus; it
 works on Plasma and most Wayland bars, and GNOME needs its AppIndicator
-extension. It shows a record icon while always-on capture is live.
-Left-click opens the radial menu, middle-click toggles always-on capture,
-right-click gets dictate / ask / always-on / gc / settings. `install.sh`
-autostarts it at login.
+extension. The icon is the recording indicator: dark mic when idle,
+green while always-on capture is live, and red while a hotkey session
+records, with a corner badge for where the transcript will go (caret =
+typed at the cursor, clipboard, chat bubble = ask mode). The tooltip
+spells the same state out. Left-click opens the radial menu,
+middle-click toggles always-on capture, right-click gets dictate / ask /
+always-on / gc / settings. `install.sh` autostarts it at login.
 
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE and wlroots compositors; click

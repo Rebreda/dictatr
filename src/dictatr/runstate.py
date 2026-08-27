@@ -12,6 +12,9 @@ from pathlib import Path
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dictatr"
 DICTATE_PID = RUN / "pid"
 LISTEN_PID = RUN / "listen.pid"
+# What the live hotkey session will do with the transcript
+# ("type" | "clip" | "ask") — the tray shows it while recording.
+MODE = RUN / "mode"
 
 
 def live_pid(pidfile: Path) -> int | None:
@@ -27,3 +30,15 @@ def live_pid(pidfile: Path) -> int | None:
 def write_pid(pidfile: Path) -> None:
     RUN.mkdir(parents=True, exist_ok=True)
     pidfile.write_text(str(os.getpid()))
+
+
+def write_mode(mode: str) -> None:
+    RUN.mkdir(parents=True, exist_ok=True)
+    MODE.write_text(mode)
+
+
+def read_mode() -> str | None:
+    try:
+        return MODE.read_text().strip() or None
+    except OSError:
+        return None

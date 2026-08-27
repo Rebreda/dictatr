@@ -19,6 +19,7 @@ from . import deliver as dlv
 from . import llm
 from . import recall
 from . import mic
+from . import runstate
 from .batch import transcribe_file
 from .engine import dictate_once, ensure_asr_loaded
 from .runstate import DICTATE_PID as PIDFILE, live_pid, write_pid
@@ -127,10 +128,13 @@ def cmd_toggle(prefer_typing: bool, ask: bool = False,
         os.kill(pid, signal.SIGUSR1)
         return 0
     write_pid(PIDFILE)
+    # Tell the tray what this session does with the transcript.
+    runstate.write_mode("ask" if ask else "type" if prefer_typing else "clip")
     try:
         return asyncio.run(_listen(prefer_typing, ask, quiet))
     finally:
         PIDFILE.unlink(missing_ok=True)
+        runstate.MODE.unlink(missing_ok=True)
 
 
 def cmd_cancel() -> int:

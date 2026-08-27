@@ -6,9 +6,11 @@ Gio DBus — no GTK window, no libappindicator, no new dependencies. Works
 on any SNI host (KDE Plasma, most Wayland bars); GNOME needs its
 AppIndicator extension, as with every tray icon.
 
-The icon flips to media-record while the always-on listener is live
-(watching its pidfile), the menu's checkbox mirrors the same state, and
-left-click opens the radial menu.
+The icon tracks the runstate pidfiles so recording is unambiguous:
+red while a hotkey session records, with a badge for where the
+transcript goes (caret = typed at cursor, clipboard, chat bubble = ask);
+green while the always-on listener is live; dark when idle. The menu's
+checkbox mirrors the listener, and left-click opens the radial menu.
 """
 
 import subprocess
@@ -30,6 +32,15 @@ BUS_NAME = "io.github.rebreda.dictatr.tray"
 # Theme-icon fallbacks, used only if the bundled pixmaps fail to load.
 ICON_IDLE = "audio-input-microphone"
 ICON_LIVE = "media-record"
+
+# state -> (pixmap basename, tooltip)
+STATES = {
+    "idle": ("tray-idle", "Voice dictation"),
+    "listen": ("tray-live", "Always-on capture is LIVE"),
+    "rec-type": ("tray-rec-type", "Recording: will type at the cursor"),
+    "rec-clip": ("tray-rec-clip", "Recording: will copy to the clipboard"),
+    "rec-ask": ("tray-rec-ask", "Recording an ask-mode question"),
+}
 
 
 def load_pixmaps(name: str) -> list:
@@ -119,10 +130,10 @@ class Tray:
     def __init__(self, bus: Gio.DBusConnection, loop: GLib.MainLoop):
         self.bus = bus
         self.loop = loop
-        self.live = self._listener_live()
+        self.state = self._state()
         self.revision = 1
-        self.pixmaps = {"idle": load_pixmaps("tray-idle"),
-                        "live": load_pixmaps("tray-live")}
+        self.pixmaps = {name: load_pixmaps(base)
+                        for name, (base, _) in STATES.items()}
         for xml, path, handler in ((SNI_XML, "/StatusNotifierItem", self.on_sni),
                                    (MENU_XML, "/MenuBar", self.on_menu)):
             iface = Gio.DBusNodeInfo.new_for_xml(xml).interfaces[0]
@@ -130,10 +141,21 @@ class Tray:
         Gio.bus_watch_name_on_connection(
             bus, "org.kde.StatusNotifierWatcher",
             Gio.BusNameWatcherFlags.NONE, self._register, None)
-        GLib.timeout_add_seconds(1, self._poll)
+        GLib.timeout_add(500, self._poll)
 
     @staticmethod
-    def _listener_live() -> bool:
+    def _state() -> str:
+        """A recording hotkey session outranks the always-on listener
+        (which pauses itself while one is active)."""
+        if runstate.live_pid(runstate.DICTATE_PID) is not None:
+            mode = runstate.read_mode() or "type"
+            return f"rec-{mode}" if f"rec-{mode}" in STATES else "rec-type"
+        if runstate.live_pid(runstate.LISTEN_PID) is not None:
+            return "listen"
+        return "idle"
+
+    @property
+    def live(self) -> bool:
         return runstate.live_pid(runstate.LISTEN_PID) is not None
 
     def _register(self, bus, name, owner):
@@ -143,9 +165,9 @@ class Tray:
                  None, Gio.DBusCallFlags.NONE, -1, None, None)
 
     def _poll(self):
-        live = self._listener_live()
-        if live != self.live:
-            self.live = live
+        state = self._state()
+        if state != self.state:
+            self.state = state
             self.revision += 1
             for sig in ("NewIcon", "NewToolTip"):
                 self.bus.emit_signal(None, "/StatusNotifierItem",
@@ -157,20 +179,19 @@ class Tray:
 
     # --- properties ----------------------------------------------------
     def on_get_prop(self, _bus, _sender, _path, _iface, name):
-        state = "live" if self.live else "idle"
+        state = self.state
+        fallback_icon = ICON_IDLE if state == "idle" else ICON_LIVE
         if name == "IconName":
             # Empty when we serve pixmaps: hosts prefer a non-empty name.
             if self.pixmaps[state]:
                 return GLib.Variant("s", "")
-            return GLib.Variant("s", ICON_LIVE if self.live else ICON_IDLE)
+            return GLib.Variant("s", fallback_icon)
         if name == "IconPixmap":
             return GLib.Variant("a(iiay)", self.pixmaps[state])
         if name == "ToolTip":
-            state = ("Always-on capture is LIVE" if self.live
-                     else "Voice dictation")
             return GLib.Variant("(sa(iiay)ss)",
-                                (ICON_LIVE if self.live else ICON_IDLE, [],
-                                 "Dictate", state))
+                                (fallback_icon, [],
+                                 "Dictate", STATES[state][1]))
         fixed = {
             "Category": GLib.Variant("s", "ApplicationStatus"),
             "Id": GLib.Variant("s", "dictatr"),
