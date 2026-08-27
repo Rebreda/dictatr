@@ -31,11 +31,13 @@ SCENARIO = {
 
 CAMERA_PLAN = {
     "keyframes": [
+        # Set the scene, then hold wide through the hotkey beat so the
+        # keycaps and the "Listening" notification both read.
         {"at": {"t": 0.0}, "zoom": 1.0, "center": [800, 450]},
-        {"at": {"cue": "speech_started", "offset": -0.4},
+        {"at": {"cue": "speech_started", "offset": 0.5},
          "zoom": 1.0, "center": [800, 450]},
-        # On the cursor while the words stream in.
-        {"at": {"cue": "speech_started", "offset": 0.8},
+        # Then onto the cursor while the transcription lands in chunks.
+        {"at": {"cue": "speech_started", "offset": 1.5},
          "zoom": 1.6, "center": [470, 330]},
         {"at": {"cue": "type_end", "offset": 0.6},
          "zoom": 1.6, "center": [470, 330]},
@@ -48,6 +50,13 @@ CAMERA_PLAN = {
         {"text": "Ctrl + Alt + D",
          "from": {"cue": "hotkey", "offset": -0.1},
          "until": {"cue": "speech_started", "offset": 0.4}},
+    ],
+    # The spoken words, as a live caption bubble — the voice track of a
+    # silent gif; the typed chunks trail it like real streaming ASR.
+    "captions": [
+        {"text": "“" + TRANSCRIPT + "”",
+         "from": {"cue": "speech_started", "offset": -0.05},
+         "until": {"cue": "speech_stopped", "offset": 0.35}},
     ],
 }
 

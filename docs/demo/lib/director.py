@@ -141,13 +141,29 @@ class Director:
             self.recorder.wait(10)
         self.recorder = None
 
-    def stream_type(self, text: str, duration: float):
-        """Type *text* into the focused surface char-by-char, paced to
-        span *duration* — the 'live dictation' illusion. One wtype
-        process (-s settles the keymap once, -d paces every key)."""
-        per_char_ms = max(12, int(duration * 1000 / max(1, len(text))))
-        subprocess.run(["wtype", "-s", "150", "-d", str(per_char_ms),
-                        "--", text], env=self.s.env, check=False)
+    def stream_type(self, text: str, duration: float,
+                    sizes=(3, 2, 4, 2)):
+        """Type *text* into the focused surface in word-group chunks
+        spread across *duration* — the way streaming ASR commits
+        phrases, with a natural lag behind the voice. Each chunk is one
+        wtype call (-s settles its keymap so no first char is eaten)."""
+        words = text.split()
+        chunks = []
+        i = k = 0
+        while i < len(words):
+            n = sizes[k % len(sizes)]
+            chunks.append(" ".join(words[i:i + n]))
+            i += n
+            k += 1
+        t0 = time.time()
+        for j, chunk in enumerate(chunks):
+            target = (j + 1) / len(chunks) * duration
+            lead = target - (time.time() - t0)
+            if lead > 0:
+                time.sleep(lead)
+            payload = chunk + (" " if j < len(chunks) - 1 else "")
+            subprocess.run(["wtype", "-s", "150", "--", payload],
+                           env=self.s.env, check=False)
 
     # -- apps -----------------------------------------------------------
     def run_app(self, cmd, wait=False, **env_extra):
