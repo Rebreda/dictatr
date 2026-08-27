@@ -26,7 +26,7 @@ prefixes containing extracted RPMs (`usr/bin`, `usr/lib64`).
 
 ## How it works
 
-`lib/session.py` boots the stage: headless sway (3200x1800 @ 2x — crisp
+`lib/session.py` boots the stage: headless sway (3200x1800 @ 2x: crisp
 captures, and the video's zooms magnify real pixels), a private session
 bus with **no activatable services** (a stock bus would drag the host's
 xdg-desktop-portal stack in and stall GTK), mako for notifications, a
@@ -38,17 +38,17 @@ socket is shared via an absolute `WAYLAND_DISPLAY` path.
 `lib/stub_lemonade.py` stands in for Lemonade: scripted transcripts over
 the `/realtime` websocket (with real energy-VAD on the streamed audio, so
 notification timing tracks the voice), plus the health/models/batch/chat
-endpoints. Every take is identical — no models, no GPU, no ASR variance.
+endpoints. Every take is identical: no models, no GPU, no ASR variance.
 
 `lib/pointerd.py` holds a wlr-virtual-pointer open for the whole session.
 Headless sway renders no cursor unless the seat has a pointer device, and
 one-shot injectors (wlrctl) destroy theirs on exit. Movement and clicks
 go through it; typing goes through wtype via a `ydotool` shim on PATH
-(real ydotool is uinput — its events would land on the *host* desktop).
+(real ydotool is uinput; its events would land on the *host* desktop).
 
 `lib/director.py` drives scenes: eased pointer glides, window placement
 over sway IPC, cue logging (`cues.jsonl`), grim screenshots, wf-recorder
-capture (lossless ffv1, sliced+threaded — single-threaded ffv1 can't keep
+capture (lossless ffv1, sliced+threaded; single-threaded ffv1 can't keep
 up with 4K@30 and silently truncates).
 
 `lib/kenburns.py` is the camera: keyframed zoom/pan (smoothstep-eased)
@@ -58,11 +58,11 @@ logical-resolution mp4 + gif, with screen-space keycap overlays
 start of each recording; the capture is damage-driven VFR, rebuilt to a
 constant-rate timeline from its real timestamps at decode.
 
-Scenes live in [scenes/](scenes) — `stills.py` (desktop compositions),
+Scenes live in [scenes/](scenes); `stills.py` (desktop compositions),
 `hero.py` (hotkey dictation into a notes editor) and `chat.py` (a reply
 dictated into a messenger via the radial menu; the Signal-style DM window
 is a GTK prop, [stage/chat.py](stage/chat.py)). The voice line is
 synthesized once with the project's own TTS stack (kokoro via Lemonade)
-into `audio/hero.wav` (gitignored; `demo voice` regenerates it) and
-streamed into dictatr through `DICTATE_INPUT` — the same path the tests
-use — so the app under capture is the real app end to end.
+into `audio/<scene>.wav` (gitignored; `demo voice` regenerates them) and
+streamed into dictatr through `DICTATE_INPUT`, the same path the tests
+use, so the app under capture is the real app end to end.

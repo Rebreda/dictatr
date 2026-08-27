@@ -1,0 +1,118 @@
+# dictatr guide
+
+The details behind the short version in the [README](../README.md).
+
+## The tray and the menu
+
+The tray icon is a StatusNotifierItem implemented over plain DBus; it
+works on Plasma and most Wayland bars, and GNOME needs its AppIndicator
+extension. It shows a record icon while always-on capture is live.
+Left-click opens the radial menu, middle-click toggles always-on capture,
+right-click gets dictate / ask / always-on / gc / settings. `install.sh`
+autostarts it at login.
+
+The menu appears at the cursor via a transparent layer-shell overlay when
+`gtk4-layer-shell` is installed (KDE and wlroots compositors; click
+anywhere outside to dismiss). Without it, a small centered window.
+
+## Always-on capture
+
+`dictate listen` holds a persistent `/realtime` session: the same
+Moonshine + server-side TEN-VAD engine the hotkey uses, running forever.
+Segments the server transcribes are archived the moment the transcript
+arrives; segments it hears as noise are dropped and never touch disk. It
+pauses automatically while a hotkey dictation is active (no duplicate
+rows), pins the ASR model in Lemonade at startup (`lemonade load
+--pinned`) so other models can't evict it, and reconnects with backoff if
+the server goes away.
+
+Toggle it with Ctrl+Alt+A, the record bubble in the menu (green while
+live), the tray icon (middle-click, or the menu checkbox), or
+`dictate listen --toggle`. To have it on from login instead, use the
+systemd units. `install.sh` installs them but never enables them; an
+always-hot mic is your call:
+
+```bash
+systemctl --user enable --now dictatr-listen
+systemctl --user enable --now dictatr-gc.timer   # daily junk sweep
+```
+
+Unattended capture still archives some junk: ASR hallucinations on
+breaths ("Thank you."), a TV repeating itself. `dictate gc` sweeps the
+archive. Junk rows are *quarantined* (audio moved to `trash/`, manifest
+row marked and excluded from recall), not deleted, because a false
+positive would be unrecoverable; trash older than 30 days is purged for
+good. Interactive dictations get gentle rules (only empty or degenerate
+rows); listen-mode rows get the aggressive ones. `dictate gc --dry-run`
+previews, `dictate gc --restore UID` brings a clip back.
+
+## How it decides when you stopped talking
+
+All microphone paths (hotkey dictation, ask, always-on) speak Lemonade's
+`/realtime` WebSocket, where the streaming model's bundled neural TEN-VAD
+segments speech server-side ([src/dictatr/engine.py](../src/dictatr/engine.py));
+robust against keyboard clicks and mic auto-gain, with word-level
+streaming deltas. There is deliberately no client-side VAD: energy
+thresholds need per-room tuning and still misfire (measured, repeatedly).
+The batch endpoint is used only for `dictate file`, with a Whisper
+fallback since streaming models don't serve it.
+
+## Ask mode
+
+The ask bubble (or `dictatr ask`) captures a spoken question and answers
+it with a local LLM via Lemonade: answer on the clipboard, notification
+preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings
+or `speak_answers = false`). Before answering, the question is
+semantically matched against your dictation archive (listenr's
+embed-once-and-cache approach, via Lemonade's `/embeddings` endpoint and
+the 75 MB nomic-embed-text model) and relevant past dictations are given
+to the LLM, so "what did I say about X" works. Disable with
+`recall = false`.
+
+The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
+warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
+to 15-45 s. `dictatr ask --quiet` skips TTS and notifications and
+delivers the answer like a dictation.
+
+Ask mode can also use local tools instead of guessing: current time
+(`date`), file search in your home directory (`find`, read-only), your
+local calendar (khal/calcurse when installed), and `remember`, whose
+lasting facts land in `memories.jsonl` in the archive and are loaded into
+every future ask. Archived dictations additionally get LLM-extracted
+concept tags (work, code, todo, ...) written into the manifest's listenr
+`categories` field plus an aggregate `cache/concepts.json` index;
+`dictatr tag` backfills older rows.
+
+## Configuration (environment variables)
+
+Defaults < `~/.config/dictatr/config.toml` (written by the settings UI) <
+environment.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LEMONADE_URL` | `http://localhost:8080/api/v1` | Lemonade API base |
+| `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (a streaming model; drives all mic paths) |
+| `DICTATE_ARCHIVE` | `~/.listenr/dictation` | listenr-format archive dir, `off` to disable |
+| `DICTATE_VAD_THRESHOLD` | `0.02` | speech trigger floor (matches listenr tuning) |
+| `DICTATE_VAD_SILENCE_MS` | `1200` | pause that ends the utterance |
+| `DICTATE_VAD_PREFIX_MS` | `250` | pre-roll kept before the first word |
+| `DICTATE_MAX_SEC` | `25` | hard cap on utterance length |
+| `DICTATE_MAX_WAIT` | `20` | give up when no speech for this many seconds |
+| `DICTATE_LLM_MODEL` | `Qwen3.5-4B-GGUF` | ask-mode chat model |
+| `DICTATE_RECALL` | `true` | ask-mode semantic recall over the archive |
+| `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
+| `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
+| `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
+| `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
+| `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
+| `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
+| `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |
+
+## Project layout
+
+The package mirrors listenr's module layout (settings / storage / batch /
+realtime client) so it can be merged into listenr as a `listenr dictate`
+subcommand later.
+
+The demo assets in the README are generated by a reproducible capture
+harness; see [docs/demo/README.md](demo/README.md).
