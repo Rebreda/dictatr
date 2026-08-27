@@ -10,6 +10,7 @@ All output paths are external tools chosen for portability:
 import shutil
 import subprocess
 
+from . import runstate
 from .runstate import RUN
 
 _ID_FILE = RUN / "notify-id"
@@ -39,6 +40,7 @@ def notify(text: str, ms: int = 2500) -> None:
 
 def deliver(text: str, prefer_typing: bool = True) -> str:
     """Deliver *text*; returns "typed" or "clipboard"."""
+    runstate.mark_done()   # tray flashes a checkmark
     if prefer_typing and shutil.which("ydotool"):
         r = subprocess.run(["ydotool", "type", "--", text], check=False,
                            capture_output=True)

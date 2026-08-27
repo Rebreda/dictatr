@@ -15,6 +15,9 @@ LISTEN_PID = RUN / "listen.pid"
 # What the live hotkey session will do with the transcript
 # ("type" | "clip" | "ask") — the tray shows it while recording.
 MODE = RUN / "mode"
+# Touched on successful delivery; the tray flashes a checkmark while
+# this file is fresh.
+DONE = RUN / "done"
 
 
 def live_pid(pidfile: Path) -> int | None:
@@ -40,5 +43,19 @@ def write_mode(mode: str) -> None:
 def read_mode() -> str | None:
     try:
         return MODE.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def mark_done() -> None:
+    RUN.mkdir(parents=True, exist_ok=True)
+    DONE.touch()
+
+
+def done_age() -> float | None:
+    """Seconds since the last successful delivery, None if never."""
+    import time
+    try:
+        return time.time() - DONE.stat().st_mtime
     except OSError:
         return None

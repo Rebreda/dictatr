@@ -16,8 +16,10 @@ works on Plasma and most Wayland bars, and GNOME needs its AppIndicator
 extension. The icon is the recording indicator: dark mic when idle,
 green while always-on capture is live, and red while a hotkey session
 records, with a corner badge for where the transcript will go (caret =
-typed at the cursor, clipboard, chat bubble = ask mode). The tooltip
-spells the same state out. Left-click opens the radial menu,
+typed at the cursor, clipboard, chat bubble = ask mode). A green
+checkmark flashes for a couple of seconds after a transcript is
+delivered, then the icon returns to idle. The tooltip spells the same
+state out. Left-click opens the radial menu,
 middle-click toggles always-on capture, right-click gets dictate / ask /
 always-on / gc / settings. `install.sh` autostarts it at login.
 

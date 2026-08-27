@@ -40,7 +40,9 @@ STATES = {
     "rec-type": ("tray-rec-type", "Recording: will type at the cursor"),
     "rec-clip": ("tray-rec-clip", "Recording: will copy to the clipboard"),
     "rec-ask": ("tray-rec-ask", "Recording an ask-mode question"),
+    "done": ("tray-done", "Transcript delivered"),
 }
+DONE_FLASH_S = 2.5   # how long the checkmark lingers after delivery
 
 
 def load_pixmaps(name: str) -> list:
@@ -145,11 +147,14 @@ class Tray:
 
     @staticmethod
     def _state() -> str:
-        """A recording hotkey session outranks the always-on listener
-        (which pauses itself while one is active)."""
+        """A recording hotkey session outranks everything; a fresh
+        delivery flashes a checkmark; then the always-on listener."""
         if runstate.live_pid(runstate.DICTATE_PID) is not None:
             mode = runstate.read_mode() or "type"
             return f"rec-{mode}" if f"rec-{mode}" in STATES else "rec-type"
+        age = runstate.done_age()
+        if age is not None and age < DONE_FLASH_S:
+            return "done"
         if runstate.live_pid(runstate.LISTEN_PID) is not None:
             return "listen"
         return "idle"

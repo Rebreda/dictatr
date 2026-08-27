@@ -99,6 +99,7 @@ async def _listen(prefer_typing: bool, ask: bool = False,
             dlv.deliver(answer, prefer_typing)
         else:
             subprocess.run(["wl-copy"], input=answer.encode(), check=False)
+            runstate.mark_done()
             dlv.notify(f"{answer[:400]}", 15000)
             if settings.llm.speak:
                 await asyncio.to_thread(llm.speak, answer)
