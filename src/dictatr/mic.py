@@ -8,6 +8,8 @@ sounddevice-based source can be swapped in for a future listenr merge.
 
 import asyncio
 import contextlib
+import shutil
+import subprocess
 import wave
 
 RATE = 16000
@@ -19,6 +21,25 @@ PW_RECORD = [
     "--rate", str(RATE), "--channels", "1", "--format", "s16",
     "-",
 ]
+
+
+def source_muted() -> bool:
+    """Best-effort: is the default capture source muted or at zero volume?
+    A muted mic records perfect silence and every voice feature just sits
+    there "listening" — surface it instead. False when wpctl is missing."""
+    if not shutil.which("wpctl"):
+        return False
+    try:
+        out = subprocess.run(
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"],
+            capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    parts = out.split()  # "Volume: 0.00 [MUTED]"
+    try:
+        return "[MUTED]" in parts or float(parts[1]) == 0.0
+    except (IndexError, ValueError):
+        return False
 
 
 async def mic_chunks(stop: asyncio.Event):

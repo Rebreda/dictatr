@@ -345,6 +345,10 @@ class Chat(Gtk.ApplicationWindow):
         runstate.write_mode("ask")
         text, pcm = None, b""
         try:
+            if await asyncio.to_thread(mic.source_muted):
+                GLib.idle_add(self._turn_failed,
+                              "microphone is muted — unmute, then tap")
+                return
             if not self._warmed:
                 await asyncio.to_thread(ensure_asr_loaded)
                 self._warmed = True

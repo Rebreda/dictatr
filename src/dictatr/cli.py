@@ -59,6 +59,10 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         if text:
             dlv.notify(text, 15000)
 
+    if not settings.input_file and mic.source_muted():
+        dlv.notify("Microphone is muted — unmute to dictate", 6000,
+                   category="errors")
+        return 1
     source = (
         mic.file_chunks(settings.input_file, stop_now,
                         realtime=os.environ.get("DICTATE_INPUT_PACED") == "1")

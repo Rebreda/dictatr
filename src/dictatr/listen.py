@@ -79,6 +79,9 @@ async def _run() -> int:
         loop.add_signal_handler(sig, stopping.set)
 
     await asyncio.to_thread(pin_model)
+    if await asyncio.to_thread(mic.source_muted):
+        _log("WARNING: the default mic is muted — capturing silence "
+             "until it is unmuted")
     _log("listening (always-on, server VAD); pauses while a hotkey "
          "session is active")
     failures = 0
