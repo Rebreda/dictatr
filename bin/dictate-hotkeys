@@ -18,5 +18,18 @@ kwriteconfig6 --file kglobalshortcutsrc --group services \
     --group dictate-cancel.desktop --key _launch "Ctrl+Alt+C"
 kwriteconfig6 --file kglobalshortcutsrc --group services \
     --group dictate-listen.desktop --key _launch "Ctrl+Alt+A"
-echo "Shortcuts registered; they load at next login, or assign them now in"
-echo "System Settings -> Shortcuts (search \"Dictate\")."
+
+# Plasma <= 6.3 runs a restartable shortcut daemon: reload it so the keys
+# work immediately. Newer Plasma hosts shortcuts inside KWin and only
+# reads the config at login.
+systemctl --user try-restart plasma-kglobalaccel.service 2>/dev/null || true
+if systemctl --user is-active -q plasma-kglobalaccel.service 2>/dev/null; then
+    echo "Shortcuts registered and active:"
+else
+    echo "Shortcuts registered. LOG OUT AND BACK IN to activate them, or"
+    echo "assign them now in System Settings -> Shortcuts (search Dictate):"
+fi
+echo "  Ctrl+Alt+D      dictate (type at cursor)"
+echo "  Ctrl+Alt+Space  radial menu"
+echo "  Ctrl+Alt+C      cancel"
+echo "  Ctrl+Alt+A      always-on capture"

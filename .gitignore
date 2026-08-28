@@ -12,3 +12,6 @@ manifest.jsonl
 
 # demo harness output
 docs/demo/out/
+
+# session worktrees
+.claude/
