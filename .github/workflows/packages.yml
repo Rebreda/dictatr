@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch pinned lemond for vendoring
+        run: |
+          . packaging/lemond-version.env
+          curl -sSL -o /tmp/lemond.tar.gz \
+            "https://github.com/lemonade-sdk/lemonade/releases/download/v${LEMOND_VERSION}/lemonade-embeddable-${LEMOND_VERSION}-ubuntu-x64.tar.gz"
+          echo "${LEMOND_SHA256}  /tmp/lemond.tar.gz" | sha256sum -c -
+          echo "DICTATR_LEMOND_TARBALL=/tmp/lemond.tar.gz" >> "$GITHUB_ENV"
       - name: Build deb
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -46,6 +53,13 @@ jobs:
       - name: Install build tools
         run: dnf install -y rpm-build git-core python3 awk
       - uses: actions/checkout@v4
+      - name: Fetch pinned lemond for vendoring
+        run: |
+          . packaging/lemond-version.env
+          curl -sSL -o /tmp/lemond.tar.gz \
+            "https://github.com/lemonade-sdk/lemonade/releases/download/v${LEMOND_VERSION}/lemonade-embeddable-${LEMOND_VERSION}-ubuntu-x64.tar.gz"
+          echo "${LEMOND_SHA256}  /tmp/lemond.tar.gz" | sha256sum -c -
+          echo "DICTATR_LEMOND_TARBALL=/tmp/lemond.tar.gz" >> "$GITHUB_ENV"
       - name: Build rpm
         run: |
           git config --global --add safe.directory "$PWD"
