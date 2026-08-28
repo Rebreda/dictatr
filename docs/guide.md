@@ -25,7 +25,12 @@ always-on / gc / settings. `install.sh` autostarts it at login.
 
 The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE and wlroots compositors; click
-anywhere outside to dismiss). Without it, a small centered window.
+anywhere outside to dismiss). Without it, a small centered window. The
+ring holds dictate, clipboard, ask, always-on, More, and cancel. More
+folds file transcription, archive cleanup, and settings into a submenu:
+the ring twirls into the hub, the chosen bubble becomes the hub, and its
+children bloom out. The hub is then a back button; Escape backs out one
+level and number keys pick from the visible ring.
 
 ## Global hotkeys
 
