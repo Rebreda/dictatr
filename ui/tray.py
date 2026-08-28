@@ -6,6 +6,12 @@ Gio DBus — no GTK window, no libappindicator, no new dependencies. Works
 on any SNI host (KDE Plasma, most Wayland bars); GNOME needs its
 AppIndicator extension, as with every tray icon.
 
+The tray also hosts the global hotkeys via the GlobalShortcuts desktop
+portal (Plasma 6, GNOME 48+): it binds the four default shortcuts at
+startup and spawns the same commands the .desktop files run. Where the
+portal is missing (wlroots) it logs once and does nothing; the legacy
+kglobalshortcutsrc path (bin/dictate-hotkeys) still works there.
+
 The icon tracks the runstate pidfiles so recording is unambiguous:
 red while a hotkey session records, with a badge for where the
 transcript goes (caret = typed at cursor, clipboard, chat bubble = ask);
@@ -13,6 +19,8 @@ green while the always-on listener is live; dark when idle. The menu's
 checkbox mirrors the listener, and left-click opens the radial menu.
 """
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +37,20 @@ sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
 
 BUS_NAME = "io.github.rebreda.dictatr.tray"
+APP_ID = "io.github.rebreda.dictatr"
+PORTAL_BUS = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+# (shortcut id, description, preferred trigger, command) — the same
+# actions the .desktop files launch, bound via the GlobalShortcuts
+# portal instead of desktop-specific config.
+PORTAL_SHORTCUTS = [
+    ("dictate", "Dictate at cursor", "CTRL+ALT+d", [DICTATE, "type"]),
+    ("menu", "Open the dictate menu", "CTRL+ALT+space",
+     [str(REPO / "bin" / "dictate-menu")]),
+    ("cancel", "Cancel dictation", "CTRL+ALT+c", [DICTATE, "cancel"]),
+    ("listen", "Toggle always-on capture", "CTRL+ALT+a",
+     [DICTATE, "listen", "--toggle"]),
+]
 # Theme-icon fallbacks, used only if the bundled pixmaps fail to load.
 ICON_IDLE = "audio-input-microphone"
 ICON_LIVE = "media-record"
@@ -288,6 +310,116 @@ class Tray:
             subprocess.Popen([DICTATE, *action])
 
 
+class Shortcuts:
+    """Global hotkeys via the GlobalShortcuts portal, hosted here since
+    the tray is the resident process. Fully asynchronous: the portal's
+    request pattern returns a Request object path immediately and the
+    real reply arrives as a Response signal on it, so nothing blocks the
+    tray loop. Any failure logs one stderr line and gives up; the legacy
+    kglobalshortcutsrc path (bin/dictate-hotkeys) still works."""
+
+    IFACE = "org.freedesktop.portal.GlobalShortcuts"
+
+    def __init__(self, bus: Gio.DBusConnection):
+        self.bus = bus
+        self.session = None
+        self._sender = bus.get_unique_name().lstrip(":").replace(".", "_")
+        self._n = 0
+        # Portal >= 1.20 wants non-sandboxed apps to self-identify
+        # before their first session; older portals lack the interface.
+        try:
+            bus.call_sync(PORTAL_BUS, PORTAL_PATH,
+                          "org.freedesktop.host.portal.Registry", "Register",
+                          GLib.Variant("(sa{sv})", (APP_ID, {})), None,
+                          Gio.DBusCallFlags.NONE, 3000, None)
+        except GLib.Error:
+            pass
+        self._request("CreateSession", "(a{sv})", (),
+                      {"session_handle_token": GLib.Variant("s", "dictatr")},
+                      self._on_session)
+
+    def _fail(self, msg: str) -> None:
+        print(f"dictatr tray: portal hotkeys unavailable: {msg}; "
+              "bind shortcuts in your desktop instead (dictate-hotkeys "
+              "on KDE)", file=sys.stderr)
+
+    def _request(self, method, sig, args, options, cb):
+        self._n += 1
+        token = f"dictatr{self._n}"
+        req = (f"/org/freedesktop/portal/desktop/request/"
+               f"{self._sender}/{token}")
+
+        def on_response(_bus, _sender, _path, _iface, _sig, params):
+            self.bus.signal_unsubscribe(sub)
+            code, results = params.unpack()
+            cb(code, results)
+
+        sub = self.bus.signal_subscribe(
+            PORTAL_BUS, "org.freedesktop.portal.Request", "Response", req,
+            None, Gio.DBusSignalFlags.NONE, on_response)
+        opts = dict(options, handle_token=GLib.Variant("s", token))
+        try:
+            self.bus.call_sync(PORTAL_BUS, PORTAL_PATH, self.IFACE, method,
+                               GLib.Variant(sig, tuple(args) + (opts,)),
+                               None, Gio.DBusCallFlags.NONE, 3000, None)
+        except GLib.Error as e:
+            self.bus.signal_unsubscribe(sub)
+            self._fail(e.message)
+
+    def _on_session(self, code, results):
+        session = results.get("session_handle")
+        if code or not session:
+            self._fail(f"CreateSession refused ({code})")
+            return
+        self.session = session
+        self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Activated",
+                                  PORTAL_PATH, None,
+                                  Gio.DBusSignalFlags.NONE, self._activated)
+        shorts = [(sid, {"description": GLib.Variant("s", desc),
+                         "preferred_trigger": GLib.Variant("s", trig)})
+                  for sid, desc, trig, _ in PORTAL_SHORTCUTS]
+        self._request("BindShortcuts", "(oa(sa{sv})sa{sv})",
+                      (session, shorts, ""), {}, self._on_bound)
+
+    def _on_bound(self, code, _results):
+        if code:
+            self._fail(f"BindShortcuts refused ({code})")
+            return
+        self._retire_legacy()
+
+    def _activated(self, _bus, _sender, _path, _iface, _sig, params):
+        session, sid, _ts, _opts = params.unpack()
+        if session != self.session:
+            return
+        for wanted, _desc, _trig, cmd in PORTAL_SHORTCUTS:
+            if wanted == sid:
+                subprocess.Popen(cmd)
+                return
+
+    def _retire_legacy(self):
+        """With the portal bind live, a leftover kglobalshortcutsrc entry
+        from bin/dictate-hotkeys would fire the same command a second
+        time per press (KDE honours both). Remove the legacy entries so
+        exactly one path is live; dictate-hotkeys can recreate them if
+        the user ever leaves the portal behind."""
+        cfg = Path(os.environ.get("XDG_CONFIG_HOME",
+                                  Path.home() / ".config"))
+        try:
+            text = (cfg / "kglobalshortcutsrc").read_text()
+        except OSError:
+            return
+        if "dictate.desktop" not in text or not shutil.which("kwriteconfig6"):
+            return
+        for group in ("dictate.desktop", "dictate-menu.desktop",
+                      "dictate-cancel.desktop", "dictate-listen.desktop"):
+            subprocess.run(["kwriteconfig6", "--file", "kglobalshortcutsrc",
+                            "--group", "services", "--group", group,
+                            "--key", "_launch", "--delete"],
+                           check=False, capture_output=True)
+        print("dictatr tray: hotkeys now bound via the desktop portal; "
+              "removed legacy kglobalshortcutsrc entries", file=sys.stderr)
+
+
 def main():
     loop = GLib.MainLoop()
     bus = Gio.bus_get_sync(Gio.BusType.SESSION)
@@ -299,6 +431,13 @@ def main():
     Gio.bus_own_name_on_connection(bus, BUS_NAME,
                                    Gio.BusNameOwnerFlags.NONE, None, lost)
     Tray(bus, loop)
+    shortcuts = None
+    if os.environ.get("DICTATE_NO_PORTAL") != "1":
+        try:
+            shortcuts = Shortcuts(bus)   # noqa: F841 (kept alive by scope)
+        except Exception as e:
+            print(f"dictatr tray: portal hotkeys unavailable: {e}",
+                  file=sys.stderr)
     loop.run()
 
 

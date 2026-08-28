@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Bind the default KDE global shortcuts for dictatr (per-user; run once).
-# On other desktops, bind the dictate commands in your own settings.
+# Fallback: bind the default KDE global shortcuts via kglobalshortcutsrc.
+# On Plasma 6 / GNOME 48+ the tray binds these itself through the
+# GlobalShortcuts desktop portal at startup, and removes any entries this
+# script wrote so a press only fires once. Run this only on desktops
+# without that portal; elsewhere bind the dictate commands manually.
 set -eu
+echo "Note: on Plasma 6 / GNOME 48+ the tray binds hotkeys via the desktop"
+echo "portal automatically; this script is only for other environments."
 command -v kwriteconfig6 >/dev/null || {
     echo "kwriteconfig6 not found (not KDE?). Bind shortcuts manually:"
     echo "  dictate type            Ctrl+Alt+D"
