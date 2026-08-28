@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Storyboard review for demo scenes: see the camera before re-shooting.
+
+`demo video <scene>` leaves everything needed for supervision in out/:
+the 4K raw master, the cue log, and the camera plan (a copy of the
+scene's CAMERA_PLAN). This tool turns them into out/review.html — per
+scene: the finished gif, a storyboard of camera keyframes with the zoom
+viewport drawn on real frames, a cue-timeline contact sheet, and the
+overlay/caption schedule.
+
+The edit loop, no re-capture involved:
+    1. ./docs/demo/review                 # look
+    2. edit out/<scene>-plan.json         # tweak zooms/centers/timing
+    3. ./docs/demo/review --camera hero   # re-render camera + refresh page
+    4. port final numbers into scenes/<scene>.py CAMERA_PLAN
+
+Only re-shoot (`demo video`) when the *scene* changes, not the camera.
+"""
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from html import escape
+from pathlib import Path
+
+DEMO = Path(__file__).resolve().parent
+OUT = DEMO / "out"
+THUMBS = OUT / "review"
+LOGICAL = (1600, 900)   # plan coordinate space; the raw master is 2x
+
+SCENES = ("hero", "chat", "voicechat")
+
+
+def duration(video):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(video)], capture_output=True, text=True).stdout
+    try:
+        return float(out.strip())
+    except ValueError:
+        return 0.0
+
+
+def load_scene(scene):
+    raw = OUT / f"{scene}-raw.mkv"
+    if not raw.exists():
+        return None
+    cues = {}
+    for line in (OUT / f"{scene}-cues.jsonl").read_text().splitlines():
+        e = json.loads(line)
+        cues.setdefault(e["event"], e["t"])
+    plan = json.loads((OUT / f"{scene}-plan.json").read_text())
+    t0 = cues.get("sync_flash", min(cues.values()))
+    return {"raw": raw, "plan": plan, "dur": duration(raw),
+            "cues": {k: v - t0 for k, v in cues.items()}}
+
+
+def resolve(at, cues):
+    """A plan time anchor: {"t": s} or {"cue": name, "offset": s}."""
+    if "t" in at:
+        return at["t"]
+    return cues.get(at["cue"], 0.0) + at.get("offset", 0.0)
+
+
+def grab(raw, t, dest, box=None):
+    """One frame at *t*, optionally with the camera viewport drawn."""
+    vf = []
+    if box:
+        x, y, w, h = box
+        vf.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color=#81c995@0.9:t=10")
+    vf.append("scale=440:-1")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+         "-ss", f"{max(t, 0):.3f}", "-i", str(raw),
+         "-frames:v", "1", "-vf", ",".join(vf), str(dest)],
+        check=True)
+
+
+def viewport(kf):
+    """Plan keyframe -> raw-pixel viewport rectangle (raw is 2x logical)."""
+    z = kf.get("zoom", 1.0)
+    cx, cy = kf.get("center", (LOGICAL[0] / 2, LOGICAL[1] / 2))
+    w, h = LOGICAL[0] / z * 2, LOGICAL[1] / z * 2
+    return (int(cx * 2 - w / 2), int(cy * 2 - h / 2), int(w), int(h))
+
+
+def anchor_label(at):
+    if "t" in at:
+        return f"t={at['t']:.2f}s"
+    off = at.get("offset", 0.0)
+    return f"{at['cue']}{off:+.2f}s"
+
+
+def scene_html(scene, data):
+    cues, plan, raw = data["cues"], data["plan"], data["raw"]
+    parts = [f'<h2>{scene}</h2>']
+    gif = OUT / f"{scene}.gif"
+    if gif.exists():
+        parts.append(f'<img class="gif" src="../{gif.name}" alt="">')
+
+    parts.append("<h3>Camera keyframes</h3><div class='row'>")
+    for i, kf in enumerate(plan.get("keyframes", [])):
+        t = resolve(kf["at"], cues)
+        past_end = t > data["dur"]
+        thumb = THUMBS / f"{scene}-kf{i}.jpg"
+        box = viewport(kf) if kf.get("zoom", 1.0) > 1.01 else None
+        grab(raw, min(t, data["dur"] - 0.15), thumb, box)
+        note = (" · <b style='color:#f28b82'>past end of capture</b>"
+                if past_end else "")
+        parts.append(
+            f"<figure><img src='review/{thumb.name}'>"
+            f"<figcaption>#{i} · {anchor_label(kf['at'])} → video "
+            f"{t:.2f}s{note}<br>zoom {kf.get('zoom', 1.0)} · center "
+            f"{kf.get('center', '–')}</figcaption></figure>")
+    parts.append("</div>")
+
+    parts.append("<h3>Cue timeline</h3><div class='row'>")
+    for name, t in sorted(cues.items(), key=lambda kv: kv[1]):
+        thumb = THUMBS / f"{scene}-cue-{name}.jpg"
+        grab(raw, min(t, data["dur"] - 0.15), thumb)
+        parts.append(
+            f"<figure><img src='review/{thumb.name}'>"
+            f"<figcaption>{escape(name)}<br>{t:.2f}s</figcaption></figure>")
+    parts.append("</div>")
+
+    rows = []
+    for kind in ("overlays", "captions"):
+        for o in plan.get(kind, []):
+            rows.append(
+                f"<tr><td>{kind[:-1]}</td><td>{escape(o['text'])}</td>"
+                f"<td>{anchor_label(o['from'])}</td>"
+                f"<td>{anchor_label(o['until'])}</td></tr>")
+    if rows:
+        parts.append("<h3>Overlays & captions</h3><table>"
+                     "<tr><th></th><th>text</th><th>from</th><th>until</th>"
+                     f"</tr>{''.join(rows)}</table>")
+
+    plan_path = OUT / f"{scene}-plan.json"
+    parts.append(
+        f"<details><summary>plan ({plan_path.name}) — edit, then "
+        f"<code>./docs/demo/review --camera {scene}</code></summary>"
+        f"<pre>{escape(json.dumps(plan, indent=2))}</pre></details>")
+    return "\n".join(parts)
+
+
+HEAD = """<!doctype html><meta charset="utf-8"><title>demo review</title>
+<style>
+body { background:#17181d; color:#e8eaf1; font:14px sans-serif;
+       max-width:1500px; margin:24px auto; padding:0 16px; }
+h2 { border-bottom:1px solid #333; padding-bottom:4px; }
+.row { display:flex; flex-wrap:wrap; gap:10px; }
+figure { margin:0; }
+figcaption { font-size:11px; color:#9aa0ac; padding-top:3px; }
+img { border-radius:6px; display:block; }
+.gif { max-width:800px; }
+table { border-collapse:collapse; font-size:13px; }
+td, th { border:1px solid #333; padding:4px 10px; text-align:left; }
+pre { background:#101116; padding:12px; border-radius:8px; overflow:auto; }
+details { margin:12px 0; } summary { cursor:pointer; color:#8ab4f8; }
+</style>
+"""
+
+
+def rerender(scene):
+    subprocess.run(
+        [sys.executable, str(DEMO / "lib/kenburns.py"),
+         "--video", str(OUT / f"{scene}-raw.mkv"),
+         "--cues", str(OUT / f"{scene}-cues.jsonl"),
+         "--plan", str(OUT / f"{scene}-plan.json"),
+         "--out", str(OUT / f"{scene}.mp4"),
+         "--gif", str(OUT / f"{scene}.gif")],
+        check=True)
+    print(f"camera re-rendered: {OUT / f'{scene}.gif'}")
+    print("(README asset docs/*.gif is only updated by `demo video`; "
+          "copy it over when the take is final)")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("scenes", nargs="*", help=f"default: all of {SCENES}")
+    ap.add_argument("--camera", metavar="SCENE",
+                    help="re-render only the camera pass from the cached "
+                         "raw + edited plan, then rebuild the page")
+    ap.add_argument("--no-open", action="store_true")
+    args = ap.parse_args()
+
+    if args.camera:
+        rerender(args.camera)
+    THUMBS.mkdir(parents=True, exist_ok=True)
+    sections = []
+    for scene in args.scenes or SCENES:
+        data = load_scene(scene)
+        if data is None:
+            print(f"{scene}: no capture in out/, skipping")
+            continue
+        sections.append(scene_html(scene, data))
+    page = OUT / "review.html"
+    page.write_text(HEAD + "\n".join(sections))
+    print(f"wrote {page}")
+    if not args.no_open and shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", str(page)])
+
+
+if __name__ == "__main__":
+    main()
