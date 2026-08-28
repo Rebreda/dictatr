@@ -36,52 +36,56 @@ from dictatr.engine import dictate_once, ensure_asr_loaded  # noqa: E402
 from dictatr.settings import settings  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
 
+sys.path.insert(0, str(REPO / "ui"))
+from radial import BLUE, CHARCOAL, GREEN, INK, RED  # noqa: E402
+
 WIDTH = 360
 STACK_H = 620   # spacer + pills + status + hub; hub sits at the bottom
 
-# Same visual vocabulary as the radial menu: round dark bubbles with thin
-# white borders, blue hub mic, green record accent. No card, no chrome —
-# message pills float on the transparent overlay, twirling out of a hub.
-CSS = b"""
-window { background: transparent; }
-.hubbtn {
+# Same visual vocabulary as the radial menu — the palette comes from the
+# radial kit: round dark bubbles with thin white borders, blue hub mic,
+# green record accent. No card, no chrome — message pills float on the
+# transparent overlay, twirling out of a hub.
+CSS = f"""
+window {{ background: transparent; }}
+.hubbtn {{
   border-radius: 9999px;
   border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
+  background: alpha({CHARCOAL}, 0.93);
   min-width: 58px; min-height: 58px;
   transition: background 150ms ease, border-color 150ms ease;
-}
-.hubbtn image { color: #8ab4f8; }
-.hubbtn.rec { background: alpha(#81c995, 0.25); border-color: alpha(#81c995, 0.6); }
-.hubbtn.rec image { color: #81c995; }
-.hubbtn:hover { border-color: alpha(#ffffff, 0.35); }
-.satbtn {
+}}
+.hubbtn image {{ color: {BLUE}; }}
+.hubbtn.rec {{ background: alpha({GREEN}, 0.25); border-color: alpha({GREEN}, 0.6); }}
+.hubbtn.rec image {{ color: {GREEN}; }}
+.hubbtn:hover {{ border-color: alpha(#ffffff, 0.35); }}
+.satbtn {{
   border-radius: 9999px;
   border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
+  background: alpha({CHARCOAL}, 0.93);
   min-width: 36px; min-height: 36px;
-}
-.satbtn image { color: #e8eaf1; }
-.satbtn:hover { background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }
-.satbtn.back:hover { background: alpha(#8ab4f8, 0.25); border-color: alpha(#8ab4f8, 0.6); }
-.msg {
+}}
+.satbtn image {{ color: {INK}; }}
+.satbtn:hover {{ background: alpha({RED}, 0.25); border-color: alpha({RED}, 0.6); }}
+.satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
+.msg {{
   border-radius: 20px; padding: 9px 14px;
-  background: alpha(#1c1d22, 0.93);
+  background: alpha({CHARCOAL}, 0.93);
   border: 1px solid alpha(#ffffff, 0.10);
-  color: #e8eaf1;
+  color: {INK};
   transition: border-color 150ms ease;
-}
-.msg-user { border-color: alpha(#81c995, 0.45); }
-.msg-user.live { border-color: alpha(#81c995, 0.85); }
-.msg-ai { border-color: alpha(#8ab4f8, 0.35); }
-.status-pill {
-  background: alpha(#1c1d22, 0.85);
+}}
+.msg-user {{ border-color: alpha({GREEN}, 0.45); }}
+.msg-user.live {{ border-color: alpha({GREEN}, 0.85); }}
+.msg-ai {{ border-color: alpha({BLUE}, 0.35); }}
+.status-pill {{
+  background: alpha({CHARCOAL}, 0.85);
   border: 1px solid alpha(#ffffff, 0.08);
   border-radius: 9999px; padding: 3px 12px;
-  color: alpha(#e8eaf1, 0.6); font-size: 11px;
-}
-.status-pill.error { color: #f28b82; }
-"""
+  color: alpha({INK}, 0.6); font-size: 11px;
+}}
+.status-pill.error {{ color: {RED}; }}
+""".encode()
 
 
 def layer_shell():
