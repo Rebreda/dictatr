@@ -24,6 +24,13 @@ except (OSError, tomllib.TOMLDecodeError):
     _cfg = {}
 
 
+def raw_config() -> dict:
+    """The parsed config-file table. backend/config.py reads its flat
+    backend keys from here at call time (testable, unlike the dataclass
+    defaults below which bind at import)."""
+    return _cfg
+
+
 def _s(env: str, key: str, default: str) -> str:
     return os.environ.get(env) or str(_cfg.get(key, default))
 
