@@ -129,6 +129,43 @@ concept tags (work, code, todo, ...) written into the manifest's listenr
 `categories` field plus an aggregate `cache/concepts.json` index;
 `dictatr tag` backfills older rows.
 
+## Backends
+
+dictatr talks to an OpenAI-compatible inference server through one
+provider seam (`src/dictatr/backend/`). Three provider kinds, picked
+automatically unless `backend` is set in config.toml:
+
+- **managed**: dictatr's own private `lemond` (the Lemonade daemon).
+  The binary is vendored by the packages at `/usr/lib/dictatr/lemond`
+  or downloaded once to `~/.local/share/dictatr/lemond` (sha256-pinned
+  release; see `packaging/lemond-version.env`). The instance keeps its
+  state in `~/.local/share/dictatr/lemonade` with its own port and a
+  generated API key, runs with `--no-broadcast`, and stores models in
+  the shared HuggingFace cache so other local-AI apps reuse them.
+- **system**: an existing Lemonade server, detected on ports 13305 and
+  8080 (or at `backend_url`). This is the pre-backend-layer behavior;
+  `LEMONADE_URL` still forces this provider at exactly that URL.
+- **custom**: any OpenAI-compatible endpoints, configured per
+  capability (asr / chat / tts / embed). `OPENAI_BASE_URL` and
+  `OPENAI_API_KEY` fill whatever is left unset.
+
+Auto-resolution order: a running managed lemond, then a detected
+system server, then custom endpoints, then the default URL.
+
+`dictatr backend status|start|stop|pull MODEL|models` manages the
+backend from the command line; `pull` streams download progress.
+
+Config keys (flat, in `~/.config/dictatr/config.toml`):
+
+| Key | Meaning |
+|---|---|
+| `backend` | `managed`, `system` or `custom`; unset = auto |
+| `backend_url` | server URL for the system provider |
+| `asr_url` / `asr_key` / `asr_model` | custom ASR endpoint, key, model |
+| `chat_url` / `chat_key` / `chat_model` | custom chat endpoint |
+| `tts_url` / `tts_key` / `tts_model` | custom TTS endpoint |
+| `embed_url` / `embed_key` / `embed_model` | custom embeddings endpoint |
+
 ## Configuration (environment variables)
 
 Defaults < `~/.config/dictatr/config.toml` (written by the settings UI) <
@@ -136,7 +173,9 @@ environment.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEMONADE_URL` | `http://localhost:8080/api/v1` | Lemonade API base |
+| `LEMONADE_URL` | unset | forces the system provider at this API base |
+| `OPENAI_BASE_URL` | unset | default base URL for the custom provider |
+| `OPENAI_API_KEY` | unset | default API key for the custom provider |
 | `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (a streaming model; drives all mic paths) |
 | `DICTATE_ARCHIVE` | `~/.listenr/dictation` | listenr-format archive dir, `off` to disable |
 | `DICTATE_VAD_THRESHOLD` | `0.02` | speech trigger floor (matches listenr tuning) |
