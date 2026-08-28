@@ -403,8 +403,11 @@ class SettingsWindow(Gtk.Window):
 
     def _load_models(self):
         try:
-            url = f"{settings.whisper.api_base}/models"
-            with urllib.request.urlopen(url, timeout=5) as r:
+            from dictatr.backend import client as backend
+            b = backend.get_backend()
+            req = urllib.request.Request(f"{b.api_base}/models",
+                                         headers=b.headers())
+            with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.load(r)["data"]
             asr = [m["id"] for m in data
                    if "transcription" in (m.get("labels") or [])]
