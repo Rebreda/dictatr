@@ -15,6 +15,7 @@ import re
 import urllib.request
 from pathlib import Path
 
+from .backend import client as backend
 from .settings import settings
 
 
@@ -31,12 +32,13 @@ def _key(text: str) -> str:
 
 
 def embed(texts: list[str]) -> list[list[float]]:
+    cap = backend.get_backend().cap("embed")
     req = urllib.request.Request(
-        f"{settings.whisper.api_base}/embeddings",
+        f"{cap.base}/embeddings",
         data=json.dumps({
-            "model": settings.llm.embed_model, "input": texts,
+            "model": cap.model, "input": texts,
         }).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **cap.headers()},
     )
     with urllib.request.urlopen(req, timeout=120) as r:
         data = json.load(r)["data"]

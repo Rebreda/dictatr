@@ -12,10 +12,10 @@ import asyncio
 import base64
 import json
 import logging
-import urllib.request
 
 import websockets
 
+from .backend import client as backend
 from .settings import settings
 
 log = logging.getLogger("dictatr.engine")
@@ -30,40 +30,33 @@ def _is_delta(msg_type: str) -> bool:
     return msg_type.endswith("transcription.delta")
 
 
-def realtime_ws_url() -> str:
-    """Prefer the /realtime proxy on the main API port; fall back to the
-    dedicated websocket port advertised by /v1/health (listenr's approach)."""
-    base = settings.whisper.api_base  # e.g. http://localhost:8080/api/v1
-    proxied = base.replace("http://", "ws://").replace("https://", "wss://")
-    return f"{proxied}/realtime?model={settings.whisper.model}"
+def _asr():
+    """(backend, asr capability): urls, auth and model in one place."""
+    b = backend.get_backend()
+    return b, b.cap("asr")
 
 
-def health_ws_url() -> str:
-    root = settings.whisper.api_base.split("/api/")[0]
-    try:
-        with urllib.request.urlopen(f"{root}/v1/health", timeout=5) as r:
-            port = json.load(r).get("websocket_port", 8001)
-    except Exception:
-        port = 8001
-    return f"ws://localhost:{port}/realtime?model={settings.whisper.model}"
+async def _connect(url):
+    _, cap = _asr()
+    return await websockets.connect(url, max_size=10 * 1024 * 1024,
+                                    additional_headers=cap.headers() or None)
 
 
 def ensure_asr_loaded() -> None:
     """The /realtime endpoint doesn't auto-load models (the batch endpoint
     does), and other models can evict the ASR model from Lemonade's memory.
     Pre-flight: if it isn't loaded, a tiny batch request loads it."""
-    root = settings.whisper.api_base.split("/api/")[0]
+    b, cap = _asr()
     try:
-        with urllib.request.urlopen(f"{root}/v1/health", timeout=5) as r:
-            loaded = {m.get("model_name")
-                      for m in json.load(r).get("all_models_loaded", [])}
-        if settings.whisper.model in loaded:
+        loaded = {m.get("model_name")
+                  for m in b.health().get("all_models_loaded", [])}
+        if cap.model in loaded:
             return
     except Exception:
         return  # no health endpoint; let the session try its luck
     from .batch import pcm_to_wav_bytes, transcribe_bytes
     try:
-        log.info("loading %s via batch warmup", settings.whisper.model)
+        log.info("loading %s via batch warmup", cap.model)
         transcribe_bytes(pcm_to_wav_bytes(b"\x00" * 3200))
     except Exception as e:
         log.warning("ASR warmup failed: %s", e)
@@ -74,7 +67,7 @@ def _session_update() -> dict:
     return {
         "type": "session.update",
         "session": {
-            "model": settings.whisper.model,
+            "model": _asr()[1].model,
             "turn_detection": {
                 "threshold": vad.threshold,
                 "silence_duration_ms": vad.silence_duration_ms,
@@ -93,9 +86,9 @@ async def stream_utterances(audio_stream, stop: asyncio.Event,
     ends the generator; caller owns the reconnect policy). Raises
     ConnectionError when no endpoint accepts the connection."""
     last_err = None
-    for url in (realtime_ws_url(), health_ws_url()):
+    for url in _asr()[0].realtime_ws_urls():
         try:
-            conn = await websockets.connect(url, max_size=10 * 1024 * 1024)
+            conn = await _connect(url)
         except (OSError, websockets.exceptions.InvalidHandshake) as e:
             last_err = e
             log.warning("realtime connect failed for %s: %s", url, e)
@@ -210,24 +203,13 @@ async def dictate_once(
     text a chat UI displays while the user is still talking.
     Returns (text or None, captured_pcm_bytes).
     """
-    vad = settings.vad
-    session_update = {
-        "type": "session.update",
-        "session": {
-            "model": settings.whisper.model,
-            "turn_detection": {
-                "threshold": vad.threshold,
-                "silence_duration_ms": vad.silence_duration_ms,
-                "prefix_padding_ms": vad.prefix_padding_ms,
-            },
-        },
-    }
+    session_update = _session_update()
 
-    urls = [realtime_ws_url(), health_ws_url()]
+    urls = _asr()[0].realtime_ws_urls()
     last_err = None
     for url in urls:
         try:
-            async with websockets.connect(url, max_size=10 * 1024 * 1024) as ws:
+            async with await _connect(url) as ws:
                 return await _run_session(ws, session_update, audio_stream,
                                           stop_now, on_state, on_partial)
         except (OSError, websockets.exceptions.InvalidHandshake) as e:

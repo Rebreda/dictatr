@@ -11,6 +11,7 @@ import tempfile
 import urllib.request
 
 from . import tools as toolbox
+from .backend import client as backend
 from .settings import settings
 
 SYSTEM_PROMPT = (
@@ -28,10 +29,11 @@ SYSTEM_PROMPT = (
 def complete(system: str, user: str, max_tokens: int = 512,
              timeout: float = 60.0) -> str:
     """One-shot completion with thinking disabled (latency)."""
+    cap = backend.get_backend().cap("chat")
     req = urllib.request.Request(
-        f"{settings.whisper.api_base}/chat/completions",
+        f"{cap.base}/chat/completions",
         data=json.dumps({
-            "model": settings.llm.model,
+            "model": cap.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -39,17 +41,18 @@ def complete(system: str, user: str, max_tokens: int = 512,
             "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False},
         }).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **cap.headers()},
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return (json.load(r)["choices"][0]["message"]["content"] or "").strip()
 
 
 def _post_chat(payload: dict, timeout: float = 180.0) -> dict:
+    cap = backend.get_backend().cap("chat")
     req = urllib.request.Request(
-        f"{settings.whisper.api_base}/chat/completions",
+        f"{cap.base}/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **cap.headers()},
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)["choices"][0]["message"]
@@ -83,7 +86,7 @@ def chat(question: str, context: list[dict] | None = None,
     ]
     for _ in range(4):
         msg = _post_chat({
-            "model": settings.llm.model,
+            "model": backend.get_backend().cap("chat").model,
             "messages": messages,
             "tools": schemas,
             "max_tokens": 2048,
@@ -113,14 +116,15 @@ def chat(question: str, context: list[dict] | None = None,
 def speak(text: str) -> None:
     """Synthesize *text* with Kokoro and play it. Best-effort."""
     try:
+        cap = backend.get_backend().cap("tts")
         req = urllib.request.Request(
-            f"{settings.whisper.api_base}/audio/speech",
+            f"{cap.base}/audio/speech",
             data=json.dumps({
-                "model": settings.llm.tts_model,
+                "model": cap.model,
                 "input": text[:1500],
                 "voice": settings.llm.tts_voice,
             }).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **cap.headers()},
         )
         with urllib.request.urlopen(req, timeout=120) as r:
             audio = r.read()

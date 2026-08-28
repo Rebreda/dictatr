@@ -7,7 +7,7 @@ import uuid
 import wave
 from pathlib import Path
 
-from .settings import settings
+from .backend import client as backend
 
 
 def pcm_to_wav_bytes(pcm: bytes, rate: int = 16000) -> bytes:
@@ -22,11 +22,12 @@ def pcm_to_wav_bytes(pcm: bytes, rate: int = 16000) -> bytes:
 
 def transcribe_bytes(wav_bytes: bytes, filename: str = "clip.wav",
                      model: str | None = None) -> str:
-    url = f"{settings.whisper.api_base}/audio/transcriptions"
+    cap = backend.get_backend().cap("asr")
+    url = f"{cap.base}/audio/transcriptions"
     boundary = uuid.uuid4().hex
     body = b"".join([
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n"
-        f"{model or settings.whisper.model}\r\n".encode(),
+        f"{model or cap.model}\r\n".encode(),
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
         f"filename=\"{filename}\"\r\nContent-Type: audio/wav\r\n\r\n".encode(),
         wav_bytes,
@@ -34,6 +35,7 @@ def transcribe_bytes(wav_bytes: bytes, filename: str = "clip.wav",
     ])
     req = urllib.request.Request(url, data=body, headers={
         "Content-Type": f"multipart/form-data; boundary={boundary}",
+        **cap.headers(),
     })
     with urllib.request.urlopen(req, timeout=120) as r:
         text = (json.load(r).get("text") or "").strip()
@@ -46,7 +48,7 @@ def batch_model() -> str:
     """A batch-capable model for `dictate file`: streaming models only
     speak /realtime (the batch endpoint answers them with "", measured
     2026-08), so fall back to Whisper for one-shot file transcription."""
-    m = settings.whisper.model
+    m = backend.get_backend().cap("asr").model
     return "Whisper-Large-v3-Turbo" if "streaming" in m.lower() else m
 
 

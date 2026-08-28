@@ -1,3 +1,8 @@
+# The optionally vendored lemond (/usr/lib/dictatr/lemond, an x64 ELF
+# fetched by CI per packaging/lemond-version.env) rides inside this
+# otherwise-noarch package; keep noarch and silence the arch check.
+%global _binaries_in_noarch_packages_terminate_build 0
+
 Name:           dictatr
 Version:        0.1.0
 Release:        1%{?dist}

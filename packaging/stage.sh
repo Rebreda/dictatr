@@ -30,6 +30,27 @@ done
 install -Dpm644 "$repo/docs/logo.svg" "$lib/docs/logo.svg"
 install -Dpm644 "$repo/docs/logo.png" "$lib/docs/logo.png"
 
+# --- managed lemond (optional vendoring) ----------------------------
+# DICTATR_LEMOND_TARBALL: the pinned embeddable tarball (version and
+# sha256 in packaging/lemond-version.env; CI downloads and verifies).
+# Without it the dir still exists with a README placeholder so package
+# file lists are identical either way.
+install -dm755 "$lib/lemond"
+if [ -n "${DICTATR_LEMOND_TARBALL:-}" ]; then
+    tar -xzf "$DICTATR_LEMOND_TARBALL" -C "$lib/lemond" \
+        --strip-components=1
+    chmod 755 "$lib/lemond/lemond"
+    if [ -f "$lib/lemond/lemonade" ]; then
+        chmod 755 "$lib/lemond/lemonade"
+    fi
+else
+    cat >"$lib/lemond/README" <<EOF
+No vendored lemond in this build. dictatr downloads the pinned release
+(see packaging/lemond-version.env) to ~/.local/share/dictatr/lemond on
+first use of the managed backend.
+EOF
+fi
+
 # --- /usr/bin -------------------------------------------------------
 install -dm755 "$DESTDIR/usr/bin"
 for cmd in dictate dictate-menu dictate-tray dictate-chat dictate-hotkeys; do
