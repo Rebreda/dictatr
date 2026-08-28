@@ -27,12 +27,38 @@ The menu appears at the cursor via a transparent layer-shell overlay when
 `gtk4-layer-shell` is installed (KDE and wlroots compositors; click
 anywhere outside to dismiss). Without it, a small centered window.
 
-## Typing at the cursor (ydotool)
+## Global hotkeys
 
-Delivery prefers typing the transcript at the cursor via ydotool
-(kernel-level input, works on any Wayland or X11 desktop) and falls back
-to the clipboard when that fails, so a broken ydotool looks like
-"dictation only ever copies".
+The tray binds the four defaults through the GlobalShortcuts desktop
+portal at startup: Ctrl+Alt+D dictate, Ctrl+Alt+Space menu, Ctrl+Alt+C
+cancel, Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
+System Settings natively and are remembered; GNOME 48+ asks once with a
+consent dialog. When the portal bind succeeds while old
+`bin/dictate-hotkeys` entries exist in kglobalshortcutsrc, the tray
+deletes the old entries so a press fires once, not twice. Desktops
+without the portal (wlroots compositors) keep using `dictate-hotkeys`
+(KDE config writer) or bind the `dictate` commands in their own
+settings; the tray logs one line and stays out of the way.
+
+## Typing at the cursor
+
+Delivery tries three tiers in order, and the outcome notification stays
+truthful ("Typed:" only when text was really typed, "Copied" otherwise):
+
+1. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
+   through xdg-desktop-portal, no special privileges. The grant is
+   remembered across sessions on Plasma 6.1+ / GNOME 46+ as a token in
+   `~/.local/state/dictatr/portal-typing-token`, so the permission
+   dialog appears once ever. A dictation never pops that dialog
+   mid-flow: without a stored token this tier is skipped entirely. To
+   grant deliberately, run `python3 ui/portal_typed.py --grant`;
+   `--check` prints what the portal offers without any dialog.
+2. **ydotool**: kernel-level input, works on any Wayland or X11 desktop
+   (setup below).
+3. **Clipboard**: `wl-copy` plus a "Copied" notification.
+
+Set `DICTATE_NO_PORTAL=1` to skip the portal tier (the demo harness does
+this so its ydotool shim keeps capturing the typing).
 
 **Package installs**: the rpm/deb ships a udev rule that grants the
 logged-in user access to `/dev/uinput`, so the daemon runs rootless as
@@ -159,6 +185,7 @@ environment.
 | `DICTATE_EMBED_MODEL` | `nomic-embed-text-v1-GGUF` | recall embedding model |
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
+| `DICTATE_NO_PORTAL` | unset | `1` disables the portal typing tier and the tray's portal hotkeys |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

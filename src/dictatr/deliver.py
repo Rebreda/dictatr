@@ -1,19 +1,27 @@
 """Get transcribed text to the user: type at the cursor when possible,
 clipboard otherwise. Desktop notifications for state feedback.
 
-All output paths are external tools chosen for portability:
-  ydotool  - kernel-level typing, works on any Wayland/X11 desktop (optional)
+Typing is a ladder, most portable and least privileged first:
+  portal   - RemoteDesktop portal keysym injection (ui/portal_typed.py,
+             PyGObject lives there so this package stays stdlib-only);
+             used only when a persisted grant token is already stored,
+             because a dictation must never pop a permission dialog
+             mid-flow. DICTATE_NO_PORTAL=1 skips the tier.
+  ydotool  - kernel-level typing, works on any Wayland/X11 desktop
   wl-copy  - Wayland clipboard (wl-clipboard)
   notify-send - freedesktop notifications, any desktop
 """
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from . import runstate
 from .runstate import RUN
 
 _ID_FILE = RUN / "notify-id"
+_PORTAL_HELPER = Path(__file__).resolve().parents[2] / "ui" / "portal_typed.py"
 
 
 def notify(text: str, ms: int = 2500, category: str = "state") -> None:
@@ -59,15 +67,45 @@ def notify(text: str, ms: int = 2500, category: str = "state") -> None:
         _ID_FILE.write_text(new_id)
 
 
+def _portal_token() -> Path:
+    # Keep in sync with token_path() in ui/portal_typed.py.
+    state = Path(os.environ.get("XDG_STATE_HOME")
+                 or Path.home() / ".local" / "state")
+    return state / "dictatr" / "portal-typing-token"
+
+
+def _type_portal(text: str) -> bool:
+    """RemoteDesktop portal typing. Only attempted with a stored grant
+    token: without one the portal would raise a permission dialog in the
+    middle of a dictation, so fall through to ydotool instead."""
+    if os.environ.get("DICTATE_NO_PORTAL") == "1":
+        return False
+    if not _portal_token().exists() or not _PORTAL_HELPER.exists():
+        return False
+    try:
+        # System python3: PyGObject lives in system site-packages.
+        r = subprocess.run(["python3", str(_PORTAL_HELPER)],
+                           input=text.encode(), check=False,
+                           capture_output=True, timeout=150)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def _type_ydotool(text: str) -> bool:
+    if not shutil.which("ydotool"):
+        return False
+    r = subprocess.run(["ydotool", "type", "--", text], check=False,
+                       capture_output=True)
+    return r.returncode == 0
+
+
 def deliver(text: str, prefer_typing: bool = True) -> str:
     """Deliver *text*; returns "typed" or "clipboard"."""
     runstate.mark_done()   # tray flashes a checkmark
-    if prefer_typing and shutil.which("ydotool"):
-        r = subprocess.run(["ydotool", "type", "--", text], check=False,
-                           capture_output=True)
-        if r.returncode == 0:
-            notify(f"Typed: {text[:120]}", category="delivery")
-            return "typed"
+    if prefer_typing and (_type_portal(text) or _type_ydotool(text)):
+        notify(f"Typed: {text[:120]}", category="delivery")
+        return "typed"
     subprocess.run(["wl-copy"], input=text.encode(), check=False)
     notify(f"Copied to clipboard (Ctrl+V): {text[:120]}", 4000,
            category="delivery")
