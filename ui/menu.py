@@ -12,11 +12,13 @@ pointer position to it, the bubbles spiral out from exactly there, and a
 click anywhere outside dismisses. Without layer-shell (GNOME) the menu is a
 small centered window with the same animation.
 
+The ring itself (bubbles, orbits, twirl in/out, the More submenu) lives in
+ui/radial.py; this file owns placement, the window, and the actions.
+
 `dictate-menu --settings` opens the settings window directly.
 """
 
 import json
-import math
 import subprocess
 import sys
 import threading
@@ -35,44 +37,11 @@ sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
 from dictatr.settings import CONFIG_PATH, settings  # noqa: E402
 
-# (icon, tooltip, action) — action: list = dictate args, str = internal
-ACTIONS = [
-    ("audio-input-microphone-symbolic", "Dictate (type at cursor)", ["type"]),
-    ("edit-copy-symbolic", "Dictate to clipboard", ["clip"]),
-    ("folder-music-symbolic", "Transcribe audio file…", "file"),
-    ("user-available-symbolic", "Ask the AI (voice chat)", "chat"),
-    ("media-record-symbolic", "Always-on capture (toggle)",
-     ["listen", "--toggle"]),
-    ("emblem-system-symbolic", "Settings", "settings"),
-    ("process-stop-symbolic", "Cancel recording", ["cancel"]),
-]
+sys.path.insert(0, str(REPO / "ui"))
+import radial  # noqa: E402
+from radial import SIZE, Bubble, Ring  # noqa: E402
 
-SIZE = 250          # circle bounding box
-BUBBLE = 52         # satellite diameter
-CENTER_BUBBLE = 58  # hub diameter
-RADIUS = 84         # orbit radius
-
-ANIM_S = 0.45       # total twirl duration
-STAGGER_S = 0.05    # per-bubble delay
-TWIRL_RAD = 2.2     # how much extra rotation unwinds during the twirl
-
-CSS = b"""
-window { background: transparent; }
-.hub, .bubble {
-  border-radius: 9999px;
-  border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
-  transition: background 130ms ease, border-color 130ms ease;
-}
-.hub image { color: #8ab4f8; }
-.bubble image { color: #e8eaf1; }
-.bubble:hover, .bubble:focus-visible {
-  background: alpha(#8ab4f8, 0.28);
-  border-color: alpha(#8ab4f8, 0.6);
-}
-.bubble.on { background: alpha(#81c995, 0.25); border-color: alpha(#81c995, 0.6); }
-.bubble.on image { color: #81c995; }
-.hub:hover { background: alpha(#f28b82, 0.25); }
+MENU_CSS = b"""
 .settings-box { padding: 18px; }
 """
 
@@ -86,24 +55,17 @@ def layer_shell():
         return None
 
 
-def _ease_out(p):
-    return 1 - (1 - p) ** 3
-
-
 class Radial(Gtk.ApplicationWindow):
     def __init__(self, app):
         # NB: resizable must stay True — a non-resizable window rejects the
         # compositor's fullscreen configure, breaking the layer-shell overlay.
         super().__init__(application=app, decorated=False)
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        radial.apply_css(MENU_CSS)
 
-        self.circle = self._build_circle()
+        self.circle = self._build_ring()
         self.placed = False
+        self._dismissing = False
 
         ls = layer_shell()
         if ls is not None:
@@ -148,68 +110,37 @@ class Radial(Gtk.ApplicationWindow):
             self.set_default_size(SIZE, SIZE)
             self.canvas = None
             self.set_child(self.circle)
-            self.connect("map", lambda *_: GLib.idle_add(self.start_twirl))
+            self.connect("map", lambda *_: GLib.idle_add(self.circle.open))
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.add_controller(keys)
 
-    def _build_circle(self):
-        fixed = Gtk.Fixed()
-        fixed.set_size_request(SIZE, SIZE)
-        cx = cy = SIZE // 2
-        self._center = (cx, cy)
-
-        # Satellites first (behind the hub), stacked at the center, hidden.
-        self.bubbles = []
-        for i, (icon, tip, action) in enumerate(ACTIONS):
-            b = Gtk.Button(icon_name=icon, tooltip_text=f"{tip}  [{i + 1}]")
-            b.add_css_class("bubble")
-            if action == ["listen", "--toggle"] and \
-                    runstate.live_pid(runstate.LISTEN_PID):
-                b.add_css_class("on")  # listener is live: show it green
-            b.set_size_request(BUBBLE, BUBBLE)
-            b.set_opacity(0.0)
-            b.connect("clicked", self.on_action, i)
-            angle = -math.pi / 2 + i * (2 * math.pi / len(ACTIONS))
-            fixed.put(b, cx - BUBBLE / 2, cy - BUBBLE / 2)
-            self.bubbles.append((b, angle))
-
-        hub = Gtk.Button(icon_name="audio-input-microphone-symbolic",
-                         tooltip_text="Close")
-        hub.add_css_class("hub")
-        hub.set_size_request(CENTER_BUBBLE, CENTER_BUBBLE)
-        hub.set_opacity(0.0)
-        hub.connect("clicked", lambda *_: self.close())
-        fixed.put(hub, cx - CENTER_BUBBLE / 2, cy - CENTER_BUBBLE / 2)
-        self.hub = hub
-        return fixed
-
-    # --- twirl animation ----------------------------------------------
-    def start_twirl(self):
-        self._anim_t0 = None
-        self.add_tick_callback(self._tick)
-        return False
-
-    def _tick(self, _w, clock):
-        now = clock.get_frame_time() / 1e6
-        if self._anim_t0 is None:
-            self._anim_t0 = now
-        t = now - self._anim_t0
-        cx, cy = self._center
-        span = ANIM_S - (len(self.bubbles) - 1) * STAGGER_S
-
-        self.hub.set_opacity(min(1.0, t / 0.15))
-        done = t >= ANIM_S
-        for i, (b, final_angle) in enumerate(self.bubbles):
-            p = min(max((t - i * STAGGER_S) / span, 0.0), 1.0)
-            e = _ease_out(p)
-            angle = final_angle + (1 - e) * TWIRL_RAD
-            r = RADIUS * e
-            self.circle.move(b, cx + r * math.cos(angle) - BUBBLE / 2,
-                             cy + r * math.sin(angle) - BUBBLE / 2)
-            b.set_opacity(e)
-        return not done
+    def _build_ring(self):
+        # Root ring, top position first, then clockwise.
+        listen_css = ("on",) if runstate.live_pid(runstate.LISTEN_PID) else ()
+        items = [
+            Bubble("audio-input-microphone-symbolic",
+                   "Dictate (type at cursor)", self.run(["type"])),
+            Bubble("edit-copy-symbolic", "Dictate to clipboard",
+                   self.run(["clip"])),
+            Bubble("user-available-symbolic", "Ask the AI (voice chat)",
+                   self.chat),
+            Bubble("media-record-symbolic", "Always-on capture (toggle)",
+                   self.run(["listen", "--toggle"]), css=listen_css),
+            Bubble("view-more-symbolic", "More", children=[
+                Bubble("folder-music-symbolic", "Transcribe audio file…",
+                       self.pick_file),
+                Bubble("user-trash-symbolic", "Clean up archive",
+                       self.gc),
+                Bubble("emblem-system-symbolic", "Settings",
+                       self.open_settings),
+            ]),
+            Bubble("process-stop-symbolic", "Cancel recording",
+                   self.run(["cancel"])),
+        ]
+        return Ring(items, hub_icon="audio-input-microphone-symbolic",
+                    hub_tooltip="Close", on_root_hub=self.dismiss)
 
     # --- overlay-mode placement ---------------------------------------
     def place_at(self, x, y):
@@ -222,7 +153,7 @@ class Radial(Gtk.ApplicationWindow):
         y = min(max(y - SIZE / 2, 0), max(h - SIZE, 0))
         self._pos = (x, y)
         self.canvas.put(self.circle, x, y)
-        self.start_twirl()
+        self.circle.open()
 
     def on_pointer(self, _c, x, y):
         self.place_at(x, y)
@@ -255,7 +186,7 @@ class Radial(Gtk.ApplicationWindow):
     def _hub_at(self, x, y):
         target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
         while target is not None:
-            if target is self.hub:
+            if target is self.circle.hub:
                 return True
             target = target.get_parent()
         return False
@@ -283,31 +214,49 @@ class Radial(Gtk.ApplicationWindow):
             if isinstance(target, Gtk.Button):
                 return  # the button handles it
             target = target.get_parent()
-        self.close()
+        self.dismiss()
+
+    def dismiss(self):
+        """Twirl the bubbles back into the hub, then close. A second
+        request (hotkey mashing) closes immediately."""
+        if self._dismissing or (self.canvas is not None and not self.placed):
+            self.close()
+            return
+        self._dismissing = True
+        self.circle.dismiss(then=self.close)
 
     # --- actions -------------------------------------------------------
     def on_key(self, _c, keyval, _code, _state):
-        if keyval == Gdk.KEY_Escape:
-            self.close()
+        if self.circle.handle_key(keyval):
             return True
-        if Gdk.KEY_1 <= keyval <= Gdk.KEY_0 + len(ACTIONS):
-            self.on_action(None, keyval - Gdk.KEY_1)
+        if keyval == Gdk.KEY_Escape:
+            self.dismiss()
             return True
         return False
 
-    def on_action(self, _btn, index):
-        action = ACTIONS[index][2]
-        if action == "file":
-            self.pick_file()
-        elif action == "chat":
-            subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
+    def run(self, args):
+        def action():
+            subprocess.Popen([DICTATE, *args])
             self.close()
-        elif action == "settings":
-            SettingsWindow(self.get_application()).present()
-            self.close()
-        else:
-            subprocess.Popen([DICTATE, *action])
-            self.close()
+        return action
+
+    def chat(self):
+        subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
+        self.close()
+
+    def gc(self):
+        # Detached: the shell survives the menu closing, and reports the
+        # result with a notification like the tray does.
+        subprocess.Popen(
+            ["sh", "-c",
+             f'out=$("{DICTATE}" gc 2>/dev/null); '
+             f'notify-send -a Dictate "Archive gc" "${{out:-done}}"'],
+            start_new_session=True)
+        self.close()
+
+    def open_settings(self):
+        SettingsWindow(self.get_application()).present()
+        self.close()
 
     def pick_file(self):
         dialog = Gtk.FileDialog(title="Transcribe audio file")
@@ -468,8 +417,7 @@ class MenuApp(Gtk.Application):
         # Single instance + toggle: a second hotkey press lands here in the
         # primary process; close the open menu instead of stacking another.
         if self.win is not None:
-            self.win.close()
-            self.win = None
+            self.win.dismiss()
             return
         self.win = Radial(self)
         self.win.connect("close-request", self._closed)
