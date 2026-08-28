@@ -7,11 +7,12 @@ session. Every asset shares one motif: the palette in
 top bar with the live tray icon.
 
 ```bash
-./docs/demo/demo stills       # docs/desktop-menu.png
-./docs/demo/demo video        # docs/hero.gif  (notes scene, hotkey path)
-./docs/demo/demo video chat   # docs/chat.gif  (DM scene, radial-menu path)
-./docs/demo/demo voice        # resynthesize voices (needs Lemonade + kokoro-v1)
-./docs/demo/demo shell        # boot the stage and hold it for manual poking
+./docs/demo/demo stills          # docs/desktop-menu.png + desktop-chat.png
+./docs/demo/demo video           # docs/hero.gif  (notes scene, hotkey path)
+./docs/demo/demo video chat      # docs/chat.gif  (DM scene, radial-menu path)
+./docs/demo/demo video voicechat # docs/voicechat.gif  (two-turn AI chat)
+./docs/demo/demo voice           # resynthesize voices (needs Lemonade + kokoro-v1)
+./docs/demo/demo shell           # boot the stage and hold it for manual poking
 ```
 
 Dependencies (Fedora names):
@@ -59,10 +60,13 @@ start of each recording; the capture is damage-driven VFR, rebuilt to a
 constant-rate timeline from its real timestamps at decode.
 
 Scenes live in [scenes/](scenes); `stills.py` (desktop compositions),
-`hero.py` (hotkey dictation into a notes editor) and `chat.py` (a reply
+`hero.py` (hotkey dictation into a notes editor), `chat.py` (a reply
 dictated into a messenger via the radial menu; the Signal-style DM window
-is a GTK prop, [stage/chat.py](stage/chat.py)). The voice line is
-synthesized once with the project's own TTS stack (kokoro via Lemonade)
-into `audio/<scene>.wav` (gitignored; `demo voice` regenerates them) and
-streamed into dictatr through `DICTATE_INPUT`, the same path the tests
-use, so the app under capture is the real app end to end.
+is a GTK prop, [stage/chat.py](stage/chat.py)) and `voicechat.py` (a
+two-turn conversation with the floating voice chat: scripted word-level
+deltas stream into the live pill, per-turn answers come from the stub's
+chat endpoint). Voice lines are synthesized once with the project's own
+TTS stack (kokoro via Lemonade) into `audio/<scene>[-N].wav` (gitignored;
+`demo voice` regenerates them) and streamed into dictatr through
+`DICTATE_INPUT` — one wav per conversation turn — the same path the
+tests use, so the app under capture is the real app end to end.

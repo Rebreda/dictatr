@@ -7,16 +7,23 @@ dictation lands in it), and Enter / the send button posts the draft as
 an outgoing bubble. Styled to the demo palette. No network, nothing real.
 """
 
+import sys
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import props  # noqa: E402
 
 # Keep in sync with scenes/chat.py (window placement + camera targets).
 WIN_W, WIN_H = 700, 620
 SIDEBAR_W = 240
 
 THREAD = [
+    ("out", "morning! running the last release checks now"),
     ("in", "hey! how's the release prep going?"),
     ("in", "any chance you can summarize where "
            "things stand? want to mention it in standup"),
@@ -89,13 +96,12 @@ class ChatWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Robin",
                          default_width=WIN_W, default_height=WIN_H)
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            self.get_display(), provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        props.add_css(self, CSS)
 
-        root = Gtk.Box()
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.append(props.titlebar("Messages"))
+        root = Gtk.Box(vexpand=True)
+        outer.append(root)
         root.append(self._sidebar())
         convo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         convo.append(self._header())
@@ -120,7 +126,7 @@ class ChatWindow(Gtk.ApplicationWindow):
         convo.append(scroll)
         convo.append(self._composer())
         root.append(convo)
-        self.set_child(root)
+        self.set_child(outer)
 
     def _sidebar(self):
         side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,

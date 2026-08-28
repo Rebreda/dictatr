@@ -16,6 +16,7 @@ the cancel hotkey discards it. Esc or the close button dismisses.
 
 import asyncio
 import contextlib
+import os
 import signal
 import subprocess
 import sys
@@ -208,6 +209,7 @@ class Chat(Gtk.ApplicationWindow):
         self._closing = False
         self._stop = None        # asyncio.Event of the live recording
         self._dots = 0
+        self._turn_no = 0
 
         self.aio = asyncio.new_event_loop()
         threading.Thread(target=self.aio.run_forever, daemon=True).start()
@@ -236,7 +238,10 @@ class Chat(Gtk.ApplicationWindow):
                 return False
         self._polls += 1
         if self._polls > 20 and self.get_width() > 0:
-            self.place_at(self.get_width() / 2, self.get_height() / 3)
+            # No pointer position to be had: settle low-center — the hub
+            # anchors the column's bottom, so the conversation needs its
+            # room *above* the fallback point, not below.
+            self.place_at(self.get_width() / 2, self.get_height() * 0.62)
             return False
         return True
 
@@ -401,6 +406,23 @@ class Chat(Gtk.ApplicationWindow):
         return False
 
     # --- the actual work ----------------------------------------------
+    def _audio_source(self, stop):
+        """The mic, or — like the CLI and the tests — canned audio via
+        DICTATE_INPUT: a colon-separated wav list consumed one per turn
+        (silence once exhausted)."""
+        if not settings.input_file:
+            return mic.mic_chunks(stop)
+        paths = [p for p in settings.input_file.split(":") if p]
+        turn, self._turn_no = self._turn_no, self._turn_no + 1
+        if turn >= len(paths):
+            async def silence():
+                return
+                yield
+            return silence()
+        return mic.file_chunks(
+            paths[turn], stop,
+            realtime=os.environ.get("DICTATE_INPUT_PACED") == "1")
+
     async def _turn(self):
         stop = asyncio.Event()
         self._stop = stop
@@ -408,7 +430,8 @@ class Chat(Gtk.ApplicationWindow):
         runstate.write_mode("ask")
         text, pcm = None, b""
         try:
-            if await asyncio.to_thread(mic.source_muted):
+            if not settings.input_file and \
+                    await asyncio.to_thread(mic.source_muted):
                 GLib.idle_add(self._turn_failed,
                               "microphone is muted — unmute, then tap")
                 return
@@ -417,7 +440,7 @@ class Chat(Gtk.ApplicationWindow):
                 self._warmed = True
                 GLib.idle_add(self.set_status, "listening — just talk")
             text, pcm = await dictate_once(
-                mic.mic_chunks(stop), stop,
+                self._audio_source(stop), stop,
                 on_partial=lambda t: GLib.idle_add(self._on_partial, t))
         except (ConnectionError, OSError, RuntimeError) as e:
             GLib.idle_add(self._turn_failed, f"Lemonade offline — {e}")

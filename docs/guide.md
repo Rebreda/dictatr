@@ -105,10 +105,20 @@ fallback since streaming models don't serve it.
 
 ## Ask mode
 
+<p align="center">
+  <img src="voicechat.gif" width="700" alt="Voice chat demo: the radial menu blooms, the Ask-the-AI bubble is clicked, and a two-turn spoken conversation streams into floating pills — question, drafted answer, then a snappier redraft">
+</p>
+<p align="center">
+  <img src="desktop-chat.png" width="700" alt="Floating voice chat mid-conversation on a staged desktop: message pills float over the wallpaper between a DM window and a notes editor, history fading with age, the mic hub re-armed green">
+</p>
+
 The ask bubble (or `dictatr ask`) captures a spoken question and answers
 it with a local LLM via Lemonade: answer on the clipboard, notification
 preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings
-or `speak_answers = false`). Before answering, the question is
+or `speak_answers = false`). `dictate-chat` (the menu's "Ask the AI"
+bubble) is the continued-conversation flavor: your words stream into a
+floating pill as you speak, the answer appears beneath, and the mic
+re-opens for the follow-up — history and all, entirely by voice. Before answering, the question is
 semantically matched against your dictation archive (listenr's
 embed-once-and-cache approach, via Lemonade's `/embeddings` endpoint and
 the 75 MB nomic-embed-text model) and relevant past dictations are given

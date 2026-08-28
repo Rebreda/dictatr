@@ -6,11 +6,19 @@ every take is identical — no models, no GPU, no transcription variance:
   GET  /v1/health, /api/v1/health   model list + websocket_port
   GET  /api/v1/models               model roster (feeds the settings UI)
   POST /api/v1/audio/transcriptions scenario["file_text"]
-  POST /api/v1/chat/completions     scenario["chat_answer"] (after a delay)
+  POST /api/v1/chat/completions     scenario["chat_answers"] in order
+                                    (fallback: "chat_answer"), after
+                                    "chat_delay_s"; emits a chat_answer cue
   POST /api/v1/audio/speech         bytes of scenario["tts_wav"]
   WS   :ws-port/realtime            energy-VAD over the streamed PCM;
                                     transcripts come from
-                                    scenario["transcripts"] in order
+                                    scenario["transcripts"] in order —
+                                    consumed ACROSS sessions (the voice
+                                    chat opens one session per turn) —
+                                    with cumulative word-level deltas
+                                    during speech, one word per
+                                    scenario["delta_word_ms"] (scalar or
+                                    per-transcript list)
 
 The websocket side runs real voice-activity detection on the audio dictatr
 streams (RMS threshold + the session's silence_duration_ms), so notification
@@ -63,7 +71,7 @@ class Cues:
                     + "\n")
 
 
-def http_handler(scenario: dict, ws_port: int):
+def http_handler(scenario: dict, ws_port: int, state: dict, cues: "Cues"):
     health = {
         "all_models_loaded": [{"model_name": m["id"]} for m in MODELS],
         "websocket_port": ws_port,
@@ -101,10 +109,15 @@ def http_handler(scenario: dict, ws_port: int):
                 self._json({"text": scenario.get("file_text", "")})
             elif path == "/api/v1/chat/completions":
                 time.sleep(scenario.get("chat_delay_s", 1.0))
+                with state["lock"]:
+                    answers = state["answers"]
+                    answer = (answers.pop(0) if answers
+                              else scenario.get("chat_answer", ""))
                 self._json({"choices": [{"message": {
                     "role": "assistant",
-                    "content": scenario.get("chat_answer", ""),
+                    "content": answer,
                 }}]})
+                cues.emit("chat_answer")
             elif path == "/api/v1/audio/speech":
                 audio = Path(scenario["tts_wav"]).read_bytes() \
                     if scenario.get("tts_wav") else b""
@@ -119,26 +132,56 @@ def http_handler(scenario: dict, ws_port: int):
     return Handler
 
 
-async def realtime(ws, scenario: dict, cues: Cues):
-    """One /realtime session: VAD on streamed PCM, scripted transcripts."""
-    transcripts = list(scenario.get("transcripts", []))
+def _delta_interval(scenario: dict, utt: int) -> float:
+    ms = scenario.get("delta_word_ms", 260)
+    if isinstance(ms, list):
+        ms = ms[min(utt, len(ms) - 1)] if ms else 260
+    return ms
+
+
+async def realtime(ws, scenario: dict, cues: Cues, state: dict):
+    """One /realtime session: VAD on streamed PCM, scripted transcripts.
+    The transcript queue lives in *state*, shared across sessions — the
+    voice chat opens a fresh session per conversation turn."""
+    transcripts = state["transcripts"]
     delay = scenario.get("transcribe_delay_ms", 400) / 1000
     threshold = 0.02
     silence_ms = 1200
     speech = False
     speech_ms = 0
     quiet_ms = 0
+    utter_ms = 0   # wall-clock of the utterance: paces the word deltas
+    sent_words = 0
     seen_audio = False
 
+    async def emit_delta():
+        """Cumulative word-level partials while speech is live, the way
+        Lemonade streams them (each delta carries the whole segment so
+        far) — this is what makes the chat bubble stream."""
+        nonlocal sent_words
+        words = (transcripts[0].split() if transcripts else [])
+        due = min(int(utter_ms / _delta_interval(scenario, state["utt"])),
+                  len(words))
+        if due > sent_words:
+            sent_words = due
+            await ws.send(json.dumps({
+                "type": "conversation.item"
+                        ".input_audio_transcription.delta",
+                "delta": " ".join(words[:due]),
+            }))
+
     async def complete():
-        nonlocal speech, quiet_ms, speech_ms
+        nonlocal speech, quiet_ms, speech_ms, utter_ms, sent_words
         speech = False
         speech_ms = 0
+        utter_ms = 0
+        sent_words = 0
         await ws.send(json.dumps(
             {"type": "input_audio_buffer.speech_stopped"}))
         cues.emit("speech_stopped")
         await asyncio.sleep(delay)
         text = transcripts.pop(0) if transcripts else ""
+        state["utt"] += 1
         await ws.send(json.dumps({
             "type": "conversation.item.input_audio_transcription.completed",
             "transcript": text,
@@ -157,6 +200,9 @@ async def realtime(ws, scenario: dict, cues: Cues):
             pcm = base64.b64decode(msg["audio"])
             seen_audio = True
             level = rms(pcm)
+            if speech:
+                utter_ms += CHUNK_MS
+                await emit_delta()
             if level > threshold:
                 quiet_ms = 0
                 speech_ms += CHUNK_MS
@@ -176,10 +222,10 @@ async def realtime(ws, scenario: dict, cues: Cues):
                 await complete()
 
 
-async def ws_main(args, scenario, cues):
+async def ws_main(args, scenario, cues, state):
     async def handler(ws):
         try:
-            await realtime(ws, scenario, cues)
+            await realtime(ws, scenario, cues, state)
         except websockets.exceptions.ConnectionClosed:
             pass
 
@@ -198,11 +244,18 @@ def main():
     args = ap.parse_args()
     scenario = json.loads(Path(args.scenario).read_text())
     cues = Cues(args.cues)
+    state = {
+        "transcripts": list(scenario.get("transcripts", [])),
+        "answers": list(scenario.get("chat_answers", [])),
+        "utt": 0,
+        "lock": threading.Lock(),
+    }
 
     httpd = ThreadingHTTPServer(
-        ("127.0.0.1", args.http_port), http_handler(scenario, args.ws_port))
+        ("127.0.0.1", args.http_port),
+        http_handler(scenario, args.ws_port, state, cues))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    asyncio.run(ws_main(args, scenario, cues))
+    asyncio.run(ws_main(args, scenario, cues, state))
 
 
 if __name__ == "__main__":

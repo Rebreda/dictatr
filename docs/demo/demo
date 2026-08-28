@@ -4,8 +4,8 @@
 Every capture happens on an isolated headless desktop (see lib/session.py),
 so results are pixel-stable and nothing touches the host session.
 
-  demo stills   regenerate docs/menu.png and docs/settings.png
-  demo video    record the hero scene -> out/hero.mp4 + out/hero.gif
+  demo stills   regenerate docs/desktop-menu.png and docs/desktop-chat.png
+  demo video    record a scene (hero/chat/voicechat) -> gif + mp4
   demo voice    (re)synthesize the demo voice with kokoro via Lemonade
   demo shell    boot the stage and hold it for manual poking
 
@@ -32,11 +32,20 @@ from session import Session  # noqa: E402
 
 DOCS = DEMO.parent
 OUT = DEMO / "out"
-SCENES = ["hero", "chat"]        # video scenes with a voice line
+SCENES = ["hero", "chat", "voicechat"]   # video scenes with voice lines
 
 
-def _voice_wav(scene: str) -> Path:
-    return DEMO / "audio" / f"{scene}.wav"
+def _scene_lines(mod) -> list[str]:
+    """A scene speaks one TRANSCRIPT or several TRANSCRIPTS."""
+    return getattr(mod, "TRANSCRIPTS", None) or [mod.TRANSCRIPT]
+
+
+def _voice_wavs(scene: str, mod) -> list[Path]:
+    lines = _scene_lines(mod)
+    if len(lines) == 1:
+        return [DEMO / "audio" / f"{scene}.wav"]
+    return [DEMO / "audio" / f"{scene}-{i + 1}.wav"
+            for i in range(len(lines))]
 
 
 def _synthesize(scene: str):
@@ -44,27 +53,42 @@ def _synthesize(scene: str):
     mod = importlib.import_module(scene)
     url = os.environ.get("LEMONADE_URL",
                          "http://localhost:8080/api/v1")
-    req = urllib.request.Request(
-        f"{url}/audio/speech",
-        data=json.dumps({"model": "kokoro-v1", "input": mod.TRANSCRIPT,
-                         "voice": "af_heart"}).encode(),
-        headers={"Content-Type": "application/json"})
-    print(f"synthesizing {scene} voice via {url} …")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        raw = r.read()
-    wav = _voice_wav(scene)
-    tmp = wav.with_suffix(".synth")
-    wav.parent.mkdir(exist_ok=True)
-    tmp.write_bytes(raw)
-    # 16 kHz mono s16 (what dictatr's mic path produces), with lead-in
-    # silence and enough tail for the hands-free stop to trigger.
-    subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
-         "-af", "adelay=800:all=1,apad=pad_dur=3.0",
-         "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
-         str(wav)], check=True)
-    tmp.unlink()
-    print(f"wrote {wav}")
+    for line, wav in zip(_scene_lines(mod), _voice_wavs(scene, mod)):
+        req = urllib.request.Request(
+            f"{url}/audio/speech",
+            data=json.dumps({"model": "kokoro-v1", "input": line,
+                             "voice": "af_heart"}).encode(),
+            headers={"Content-Type": "application/json"})
+        print(f"synthesizing {wav.name} via {url} …")
+        with urllib.request.urlopen(req, timeout=120) as r:
+            raw = r.read()
+        tmp = wav.with_suffix(".synth")
+        wav.parent.mkdir(exist_ok=True)
+        tmp.write_bytes(raw)
+        # 16 kHz mono s16 (what dictatr's mic path produces), with
+        # lead-in silence and enough tail for the hands-free stop.
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(tmp),
+             "-af", "adelay=800:all=1,apad=pad_dur=3.0",
+             "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
+             str(wav)], check=True)
+        tmp.unlink()
+        print(f"wrote {wav}")
+
+
+def _voices_ready(scene: str, mod) -> list[str]:
+    wavs = _voice_wavs(scene, mod)
+    if not all(w.exists() for w in wavs):
+        print(f"{scene} voice missing — synthesizing first")
+        _synthesize(scene)
+    return [str(w) for w in wavs]
+
+
+def _scenario(mod, voices: list[str]) -> dict:
+    """Scenes with duration-dependent pacing define scenario(voices)."""
+    if hasattr(mod, "scenario"):
+        return mod.scenario(voices)
+    return mod.SCENARIO
 
 
 def cmd_voice(args):
@@ -74,12 +98,20 @@ def cmd_voice(args):
 
 def cmd_stills(args):
     import stills
+    import voicechat
     from director import Director
     with Session(keep=args.keep).start({}) as s:
         d = Director(s)
         stills.desktop(d)
         stills.menu(d, str(DOCS / "desktop-menu.png"))
     print(f"wrote {DOCS / 'desktop-menu.png'}")
+    # The chat still replays the real two-turn conversation, so it needs
+    # a fresh stage with the voicechat scenario on the stub.
+    voices = _voices_ready("voicechat", voicechat)
+    with Session(keep=args.keep).start(_scenario(voicechat, voices)) as s:
+        d = Director(s)
+        voicechat.still(d, voices, str(DOCS / "desktop-chat.png"))
+    print(f"wrote {DOCS / 'desktop-chat.png'}")
 
 
 def cmd_video(args):
@@ -87,16 +119,15 @@ def cmd_video(args):
     from director import Director
     scene = args.scene or "hero"
     mod = importlib.import_module(scene)
-    if not _voice_wav(scene).exists():
-        print(f"{_voice_wav(scene)} missing — synthesizing first")
-        _synthesize(scene)
+    voices = _voices_ready(scene, mod)
     OUT.mkdir(exist_ok=True)
     raw = OUT / f"{scene}-raw.mkv"
     plan = OUT / f"{scene}-plan.json"
     cues = OUT / f"{scene}-cues.jsonl"
-    with Session(keep=args.keep).start(mod.SCENARIO) as s:
+    with Session(keep=args.keep).start(_scenario(mod, voices)) as s:
         d = Director(s)
-        mod.run(d, str(_voice_wav(scene)), str(raw))
+        voice = voices if len(voices) > 1 else voices[0]
+        mod.run(d, voice, str(raw))
         plan.write_text(json.dumps(mod.CAMERA_PLAN, indent=2))
         cues.write_text(s.cues_path.read_text())
     subprocess.run(

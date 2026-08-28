@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Live monitor for the demo stage: watch scenes execute while you write
+them.
+
+The stage is headless sway — invisible by design. This opens a normal
+window on the *host* desktop mirroring the stage at a few fps (periodic
+grim captures over the stage's wayland socket), so `demo shell` becomes a
+place you can see, and a running `demo video` take can be supervised
+live instead of discovered in the gif afterwards.
+
+    ./docs/demo/demo shell &     # or: ./docs/demo/demo video hero &
+    ./docs/demo/monitor
+
+Closes itself when the stage goes away. Read-only: it never injects
+input, so watching a take can't contaminate it.
+"""
+
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+
+INTERVAL_MS = 250
+STAGE = Path(os.environ.get("XDG_RUNTIME_DIR",
+                            f"/run/user/{os.getuid()}")) / "dictatr-demo"
+
+
+def stage_socket() -> str | None:
+    # The session writes its display + sway socket into gen/sway-env.
+    env_file = STAGE / "gen" / "sway-env"
+    try:
+        wl = env_file.read_text().splitlines()[0].strip()
+    except (OSError, IndexError):
+        return None
+    p = Path(wl) if "/" in wl else STAGE.parent / wl
+    return str(p) if p.is_socket() else None
+
+
+class Monitor(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="demo stage",
+                         default_width=1120, default_height=630)
+        self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN)
+        self.set_child(self.picture)
+        self.frame = Path(tempfile.mkstemp(suffix=".ppm")[1])
+        self._last = time.monotonic()
+        GLib.timeout_add(INTERVAL_MS, self.refresh)
+
+    def refresh(self):
+        sock = stage_socket()
+        if sock is None:
+            self.set_title("demo stage — gone")
+            self.close()
+            return False
+        r = subprocess.run(
+            ["grim", "-t", "ppm", str(self.frame)],
+            env={**os.environ, "WAYLAND_DISPLAY": sock},
+            capture_output=True)
+        if r.returncode == 0:
+            try:
+                self.picture.set_paintable(
+                    Gdk.Texture.new_from_filename(str(self.frame)))
+            except GLib.Error:
+                pass
+            now = time.monotonic()
+            self.set_title(
+                f"demo stage — live ({1 / max(now - self._last, 1e-3):.1f} fps)")
+            self._last = now
+        else:
+            self.set_title("demo stage — waiting for first frame…")
+        return True
+
+    def do_close_request(self):
+        self.frame.unlink(missing_ok=True)
+        return False
+
+
+def main():
+    if stage_socket() is None:
+        print("no stage running — start one first:\n"
+              "  ./docs/demo/demo shell   (or any `demo video` take)",
+              file=sys.stderr)
+        return 1
+    app = Gtk.Application(application_id="io.github.rebreda.dictatr.demomon")
+    app.connect("activate", lambda a: Monitor(a).present())
+    return app.run([])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
