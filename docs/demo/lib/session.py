@@ -324,6 +324,10 @@ sys.exit(rc)
             # (PyGObject for the menu/tray lives in system site-packages)
             PATH=f"{self.run / 'bin'}:/usr/bin:{self.env['PATH']}",
             DEMO_CUES=str(self.cues_path),
+            # No portal tier on the stage: typing must go through the
+            # ydotool shim above, and the tray must not touch the host's
+            # xdg-desktop-portal from the demo bus.
+            DICTATE_NO_PORTAL="1",
             GTK_THEME="Adwaita:dark",
             GSK_RENDERER="cairo",
             GTK_A11Y="none",
