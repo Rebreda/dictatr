@@ -4,6 +4,7 @@ Commands (hotkey-oriented, single instance coordinated via a pidfile):
   toggle [--clip]   start listening; if already listening, stop now (commit)
   cancel            abort the current listening session, no transcription
   file PATH         transcribe an audio file via the batch HTTP API
+  backend ...       inference backend: status|start|stop|pull MODEL|models
 """
 
 import asyncio
@@ -148,6 +149,53 @@ def cmd_cancel() -> int:
     return 0
 
 
+def cmd_backend(args) -> int:
+    import json
+    import urllib.request
+    from .backend import client, lemond
+
+    if args.backend_cmd == "start":
+        print(f"managed lemond up at {lemond.start()}")
+        return 0
+    if args.backend_cmd == "stop":
+        print("stopped" if lemond.stop() else "not running")
+        return 0
+
+    b = client.resolve(allow_start=False)
+    if args.backend_cmd == "status":
+        try:
+            loaded = b.health().get("all_models_loaded", [])
+            server = f"up ({len(loaded)} model(s) loaded)"
+        except Exception:
+            server = "unreachable"
+        st = lemond.status()
+        print(f"provider: {b.kind}\n"
+              f"api_base: {b.api_base}\n"
+              f"server:   {server}\n"
+              f"managed:  {'running' if st['running'] else 'stopped'}, "
+              f"binary {st['binary'] or 'not installed'} "
+              f"(pinned {st['version']})")
+        return 0
+    if args.backend_cmd == "models":
+        req = urllib.request.Request(f"{b.api_base}/models",
+                                     headers=b.headers())
+        with urllib.request.urlopen(req, timeout=10) as r:
+            for m in json.load(r).get("data", []):
+                print(m["id"])
+        return 0
+    if args.backend_cmd == "pull":
+        def progress(ev):
+            pct = ev.get("percent")
+            name = ev.get("file") or args.model
+            print(f"\r{name}: {pct if pct is not None else '?'}%",
+                  end="", flush=True)
+        lemond.pull(args.model, on_progress=progress,
+                    base=b.api_base, key=b.api_key)
+        print(f"\r{args.model}: done      ")
+        return 0
+    return 2
+
+
 def cmd_file(path: str) -> int:
     text = transcribe_file(path)
     if not text:
@@ -176,6 +224,15 @@ def main() -> None:
                                        "sessions)")
     ls.add_argument("--toggle", action="store_true",
                     help="start detached, or stop the running listener")
+    be = sub.add_parser("backend",
+                        help="inference backend: status, lifecycle, models")
+    besub = be.add_subparsers(dest="backend_cmd", required=True)
+    besub.add_parser("status", help="active provider and server health")
+    besub.add_parser("start", help="start the managed lemond instance")
+    besub.add_parser("stop", help="stop the managed lemond instance")
+    bp = besub.add_parser("pull", help="download a model onto the backend")
+    bp.add_argument("model")
+    besub.add_parser("models", help="list models on the active backend")
     g = sub.add_parser("gc", help="quarantine junk archive clips, purge old trash")
     g.add_argument("--dry-run", action="store_true",
                    help="report what would be quarantined, touch nothing")
@@ -199,6 +256,8 @@ def main() -> None:
         sys.exit(0)
     if args.cmd == "file":
         sys.exit(cmd_file(args.path))
+    if args.cmd == "backend":
+        sys.exit(cmd_backend(args))
     if args.cmd == "listen":
         from . import listen
         sys.exit(listen.toggle() if args.toggle else listen.main())
