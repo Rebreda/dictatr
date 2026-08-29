@@ -94,6 +94,12 @@ clean) and **ask mode** (speak a question, a local LLM answers, with
 semantic recall over everything you've dictated). Details, design notes,
 and all configuration variables live in [docs/guide.md](docs/guide.md).
 
+## Working on it
+
+`uv sync`, then `.venv/bin/python -m pytest -q`. The rest, including how
+to run a dictation against a scripted server with no microphone, is in
+[docs/development.md](docs/development.md).
+
 ## License
 
 MIT: see [LICENSE](LICENSE).

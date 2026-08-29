@@ -1,48 +1,48 @@
 # dictatr guide
 
 The details behind the short version in the [README](../README.md).
+For hacking on dictatr itself, see [development.md](development.md).
 
 ## Setup
 
-`dictate setup` (or `dictate-setup`, or "Set up dictatr" in the tray
-menu) opens the wizard. The tray offers it once, the first time it ever
-starts: it writes a `setup_done` key whether you finish or close it, and
-only the absence of that key triggers the offer, so it never nags twice.
-`DICTATE_NO_SETUP=1` suppresses the offer entirely.
+<p align="center">
+  <img src="desktop-setup.png" width="700" alt="The setup wizard on the desktop: a mic emblem orbited by three green checkmarks, the Try it page with a text box, and Finish and Start dictation buttons">
+</p>
 
-Four pages, each one a probe plus a single action, so every page doubles
-as a diagnostic you can come back to:
+The tray offers the wizard the first time it ever starts. To open it
+again: `dictate setup`, the `dictate-setup` command, "Set up dictatr" in
+the tray menu, or More in the radial menu.
 
-1. **Engine.** Probes for a managed instance, then a system Lemonade on
-   13305 and 8080, then configured custom endpoints. If it finds one it
-   records the choice and moves on. If it finds nothing, "Set up the
-   built-in engine" fetches the pinned `lemond` when the packages did
-   not vendor it, starts it on a private port, pulls
-   `Moonshine-Medium-Streaming` with live progress on the emblem arc,
-   and pins it. "Use a custom endpoint" takes a base URL and an optional
-   key, calls `/models` to check them, and writes them to config.
-2. **Typing.** Runs the read-only portal probe. With the RemoteDesktop
-   portal present, "Allow typing" performs the grant dance once and
-   stores the token; without it, the page offers the ydotool user
-   service instead. Either way it finishes by typing a test line into
-   the page's own entry, so the result is observed rather than assumed.
-3. **Hotkeys.** Binds the four defaults through the GlobalShortcuts
-   portal and shows the triggers the desktop actually assigned, which
-   are not always the ones requested. It also starts the tray if it is
-   not running, since the tray owns the live shortcut session. Desktops
-   with no portal get the `dictate-hotkeys` KDE config writer instead.
-4. **Try it.** One real dictation into a text box, through whatever the
-   previous pages configured.
+Four pages. Each one checks something and offers a single button, so you
+can also come back later to see what a machine is actually doing.
 
-The wizard is drawn in the radial kit's vocabulary (`ui/radial.py`): the
-page emblem is a `ProgressBubble` orbited by one bubble per step, and the
-orbit rotates to bring the current step to the top, so going back is the
-same motion in reverse. Escape backs up one page, and closes the wizard
-on the first. Every probe, download and portal call runs on a worker
-thread; the window never blocks.
+**1. Engine.** Looks for a Lemonade server: one dictatr already runs, one
+you started yourself (ports 13305 and 8080), or endpoints you configured.
+If it finds one, it uses it. If not, "Set up the built-in engine" fetches
+the `lemond` daemon if the package did not include it, starts it on its
+own port, and downloads the dictation model (about 1 GB, once, into the
+HuggingFace cache other local-AI apps share). "Use a custom endpoint"
+takes a base URL and an optional key for any OpenAI-compatible server.
 
-`DICTATR_SETUP_STEP=N` opens straight on one page, for looking at a page
-without walking the whole wizard.
+**2. Typing.** Dictation types at your cursor, which needs one permission
+from the desktop. "Allow typing" shows your desktop's dialog once and the
+grant is remembered. Desktops without that portal are offered the ydotool
+service instead, which needs no root because the package ships a udev
+rule. Either way the page types a test line into its own text box, so you
+see the answer rather than being told it. Skipping is fine: transcripts
+go to the clipboard, which always works.
+
+**3. Hotkeys.** Asks the desktop to reserve Ctrl+Alt+D (dictate),
+Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel) and Ctrl+Alt+A (always-on),
+then shows what it actually got, since a desktop may hand back different
+keys if something else holds them. You can change them later in your
+desktop's own shortcut settings.
+
+**4. Try it.** One real dictation into a box. Green means the whole chain
+works.
+
+Closing the wizard at any point is fine; it will not ask again on its
+own. `DICTATE_NO_SETUP=1` stops the offer entirely.
 
 ## The tray and the menu
 
