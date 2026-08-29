@@ -17,66 +17,54 @@ dictatr just writes a listenr-compatible archive.
 
 ## Install
 
-**Packages**: rpm and deb builds are attached to
-[GitHub releases](https://github.com/Rebreda/dictatr/releases). They set
-up everything below except Lemonade, including rootless typing:
+rpm and deb builds are attached to
+[GitHub releases](https://github.com/Rebreda/dictatr/releases).
 
 ```bash
 sudo dnf install ./dictatr-*.rpm        # or: sudo apt install ./dictatr_*.deb
-dictate-hotkeys                                   # bind KDE shortcuts (once)
-systemctl --user enable --now dictatr-ydotoold    # type-at-cursor daemon
 ```
 
-Then do step 1 (Lemonade) and you're dictating. Details in
-[docs/packaging.md](docs/packaging.md). Installing from source instead:
-all four steps.
+That is the whole install. The tray autostarts and offers a setup wizard
+the first time it runs; `dictate-setup` opens it again whenever you want.
+It walks four pages:
 
-**1. Lemonade**, the local inference server everything runs on. Install
-[Lemonade Server](https://lemonade-server.ai) and make sure it's running:
+| Page | What it does |
+| --- | --- |
+| Engine | finds a running Lemonade, or installs and starts a private one and pulls the speech model, or points at any OpenAI-compatible endpoint |
+| Typing | asks the desktop for permission to type at the cursor, then types a test line to prove it |
+| Hotkeys | binds Ctrl+Alt+D, Ctrl+Alt+Space, Ctrl+Alt+C and Ctrl+Alt+A through the shortcuts portal |
+| Try it | one real dictation, so you leave knowing the chain works |
 
-```bash
-lemonade pull Moonshine-Medium-Streaming   # dictation model (required)
-lemonade status                            # verify the server is up
+Nothing here needs root and nothing is written outside your home
+directory. Package details are in [docs/packaging.md](docs/packaging.md).
 
-# optional models:
-# lemonade pull Whisper-Large-v3-Turbo     # `dictate file` transcription
-# lemonade pull Qwen3.5-4B-GGUF            # ask mode
-# lemonade pull nomic-embed-text-v1-GGUF   # ask-mode recall
-# lemonade pull kokoro-v1                  # spoken answers (TTS)
-```
-
-**2. Distro packages** (Fedora names; adapt for your distro):
+**From source** (Fedora names; adapt for your distro):
 
 ```bash
 sudo dnf install pipewire-utils wl-clipboard libnotify   # mic, clipboard, notifications
-
-# optional:
-# sudo dnf install gtk4 python3-gobject gtk4-layer-shell            # floating menu
-# sudo dnf install ydotool && sudo systemctl enable --now ydotool   # type at cursor
-```
-
-Without ydotool, transcripts go to the clipboard instead of typing at the
-cursor. On Fedora the stock ydotool service also needs a socket fix or
-typing silently fails; see
-[docs/guide.md](docs/guide.md#typing-at-the-cursor-ydotool). Without
-gtk4-layer-shell the menu still works as a centered window (GNOME has no
-layer-shell protocol).
-
-**3. dictatr:**
-
-```bash
-./install.sh   # uv sync, symlinks into ~/.local/bin, .desktop entries, KDE hotkeys
+sudo dnf install gtk4 python3-gobject gtk4-layer-shell   # tray, menu, wizard
+./install.sh                                             # uv sync, symlinks, autostart
+dictate setup                                            # same wizard
 ```
 
 [uv](https://docs.astral.sh/uv/) manages the env; `websockets` is the only
-Python dependency.
+Python dependency. Without gtk4-layer-shell the menu still works as a
+centered window (GNOME has no layer-shell protocol).
 
-**4. Hotkeys.** On KDE, `install.sh` binds Ctrl+Alt+D (dictate toggle),
-Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel), and Ctrl+Alt+A (always-on
-capture toggle); Plasma loads them at next login, or assign them now in
-System Settings → Shortcuts ("Dictate"). On other desktops bind
-`dictate type`, `dictate-menu`, and `dictate cancel` in your own shortcut
-settings; everything but the hotkey registration is desktop-agnostic.
+### The inference engine
+
+dictatr talks to one Lemonade-compatible server. The wizard picks between
+three provider kinds, and `dictate backend status` says which is live:
+
+| Provider | Where it comes from |
+| --- | --- |
+| `managed` | a private `lemond` dictatr installs and runs itself, on its own port, models in the shared HuggingFace cache |
+| `system` | a [Lemonade](https://lemonade-server.ai) already running on this machine (port 13305, or 8080) |
+| `custom` | any OpenAI-compatible endpoints, configured per capability |
+
+Dictation needs one model, `Moonshine-Medium-Streaming`, which the wizard
+pulls. Ask mode, recall and spoken answers need more; see
+[docs/guide.md](docs/guide.md#backends).
 
 ## Usage
 
@@ -85,9 +73,11 @@ dictate            listen, auto-stop on silence, type at cursor
 dictate clip       same, deliver to clipboard
 dictate cancel     abort without transcribing
 dictate file PATH  transcribe an audio file to the clipboard
-dictate-menu       floating radial menu (toggle; 1-4 keys, Esc)
+dictate-menu       floating radial menu (toggle; number keys, Esc)
 dictate listen     always-on capture into the archive
 dictate gc         quarantine junk archive clips, purge old trash
+dictate setup      the setup wizard again (also dictate-setup)
+dictate backend    inference backend: status, start, stop, pull, models
 dictate-tray       tray icon: state at a glance, quick actions (autostarts)
 dictate-chat       floating voice chat: live transcript, spoken answers
 ```

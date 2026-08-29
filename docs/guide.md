@@ -2,6 +2,48 @@
 
 The details behind the short version in the [README](../README.md).
 
+## Setup
+
+`dictate setup` (or `dictate-setup`, or "Set up dictatr" in the tray
+menu) opens the wizard. The tray offers it once, the first time it ever
+starts: it writes a `setup_done` key whether you finish or close it, and
+only the absence of that key triggers the offer, so it never nags twice.
+`DICTATE_NO_SETUP=1` suppresses the offer entirely.
+
+Four pages, each one a probe plus a single action, so every page doubles
+as a diagnostic you can come back to:
+
+1. **Engine.** Probes for a managed instance, then a system Lemonade on
+   13305 and 8080, then configured custom endpoints. If it finds one it
+   records the choice and moves on. If it finds nothing, "Set up the
+   built-in engine" fetches the pinned `lemond` when the packages did
+   not vendor it, starts it on a private port, pulls
+   `Moonshine-Medium-Streaming` with live progress on the emblem arc,
+   and pins it. "Use a custom endpoint" takes a base URL and an optional
+   key, calls `/models` to check them, and writes them to config.
+2. **Typing.** Runs the read-only portal probe. With the RemoteDesktop
+   portal present, "Allow typing" performs the grant dance once and
+   stores the token; without it, the page offers the ydotool user
+   service instead. Either way it finishes by typing a test line into
+   the page's own entry, so the result is observed rather than assumed.
+3. **Hotkeys.** Binds the four defaults through the GlobalShortcuts
+   portal and shows the triggers the desktop actually assigned, which
+   are not always the ones requested. It also starts the tray if it is
+   not running, since the tray owns the live shortcut session. Desktops
+   with no portal get the `dictate-hotkeys` KDE config writer instead.
+4. **Try it.** One real dictation into a text box, through whatever the
+   previous pages configured.
+
+The wizard is drawn in the radial kit's vocabulary (`ui/radial.py`): the
+page emblem is a `ProgressBubble` orbited by one bubble per step, and the
+orbit rotates to bring the current step to the top, so going back is the
+same motion in reverse. Escape backs up one page, and closes the wizard
+on the first. Every probe, download and portal call runs on a worker
+thread; the window never blocks.
+
+`DICTATR_SETUP_STEP=N` opens straight on one page, for looking at a page
+without walking the whole wizard.
+
 ## The tray and the menu
 
 <p align="center">
@@ -34,9 +76,9 @@ level and number keys pick from the visible ring.
 
 ## Global hotkeys
 
-The tray binds the four defaults through the GlobalShortcuts desktop
-portal at startup: Ctrl+Alt+D dictate, Ctrl+Alt+Space menu, Ctrl+Alt+C
-cancel, Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
+The setup wizard binds these, and the tray re-binds them through the
+GlobalShortcuts desktop portal at every startup: Ctrl+Alt+D dictate,
+Ctrl+Alt+Space menu, Ctrl+Alt+C cancel, Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
 System Settings natively and are remembered; GNOME 48+ asks once with a
 consent dialog. When the portal bind succeeds while old
 `bin/dictate-hotkeys` entries exist in kglobalshortcutsrc, the tray
@@ -55,9 +97,10 @@ truthful ("Typed:" only when text was really typed, "Copied" otherwise):
    remembered across sessions on Plasma 6.1+ / GNOME 46+ as a token in
    `~/.local/state/dictatr/portal-typing-token`, so the permission
    dialog appears once ever. A dictation never pops that dialog
-   mid-flow: without a stored token this tier is skipped entirely. To
-   grant deliberately, run `python3 ui/portal_typed.py --grant`;
-   `--check` prints what the portal offers without any dialog.
+   mid-flow: without a stored token this tier is skipped entirely. The
+   setup wizard's typing page performs the grant; to do it by hand, run
+   `python3 ui/portal_typed.py --grant`, and `--check` prints what the
+   portal offers without any dialog.
 2. **ydotool**: kernel-level input, works on any Wayland or X11 desktop
    (setup below).
 3. **Clipboard**: `wl-copy` plus a "Copied" notification.
@@ -67,7 +110,8 @@ this so its ydotool shim keeps capturing the typing).
 
 **Package installs**: the rpm/deb ships a udev rule that grants the
 logged-in user access to `/dev/uinput`, so the daemon runs rootless as
-a user service. Just enable it once:
+a user service. The wizard's typing page enables it when the portal is
+missing, or do it by hand:
 
 ```bash
 systemctl --user enable --now dictatr-ydotoold
@@ -137,7 +181,7 @@ fallback since streaming models don't serve it.
 ## Ask mode
 
 <p align="center">
-  <img src="voicechat.gif" width="700" alt="Voice chat demo: the radial menu blooms, the Ask-the-AI bubble is clicked, and a two-turn spoken conversation streams into floating pills — question, drafted answer, then a snappier redraft">
+  <img src="voicechat.gif" width="700" alt="Voice chat demo: the radial menu blooms, the Ask-the-AI bubble is clicked, and a two-turn spoken conversation streams into floating pills: question, drafted answer, then a snappier redraft">
 </p>
 <p align="center">
   <img src="desktop-chat.png" width="700" alt="Floating voice chat mid-conversation on a staged desktop: message pills float over the wallpaper between a DM window and a notes editor, history fading with age, the mic hub re-armed green">
@@ -149,7 +193,7 @@ preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings
 or `speak_answers = false`). `dictate-chat` (the menu's "Ask the AI"
 bubble) is the continued-conversation flavor: your words stream into a
 floating pill as you speak, the answer appears beneath, and the mic
-re-opens for the follow-up — history and all, entirely by voice. Before answering, the question is
+re-opens for the follow-up, history and all, entirely by voice. Before answering, the question is
 semantically matched against your dictation archive (listenr's
 embed-once-and-cache approach, via Lemonade's `/embeddings` endpoint and
 the 75 MB nomic-embed-text model) and relevant past dictations are given
@@ -239,7 +283,17 @@ environment.
 
 The package mirrors listenr's module layout (settings / storage / batch /
 realtime client) so it can be merged into listenr as a `listenr dictate`
-subcommand later.
+subcommand later. `src/dictatr/` is stdlib-only apart from `websockets`;
+everything needing PyGObject lives in `ui/` and is shelled out to.
+
+| Path | What lives there |
+|---|---|
+| `src/dictatr/backend/` | the provider seam: config, detection, managed lemond, client |
+| `ui/radial.py` | the shared visual kit: bubbles, twirl transitions, submenus, progress arcs |
+| `ui/menu.py`, `ui/chat.py`, `ui/tray.py` | the radial menu, voice chat, tray icon |
+| `ui/setup.py` | the setup wizard |
+| `ui/portal_typed.py` | RemoteDesktop portal typing helper |
+| `packaging/` | `stage.sh` (the install tree), rpm spec, deb builder |
 
 The demo assets in the README are generated by a reproducible capture
 harness; see [docs/demo/README.md](demo/README.md).

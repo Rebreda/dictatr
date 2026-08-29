@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Symlink dictatr into ~/.local/bin, install launchers, bind hotkeys.
+# Symlink dictatr into ~/.local/bin, install launchers, start the tray.
+# Hotkeys, typing permission and the inference engine are the setup
+# wizard's job: the tray offers it on its first ever start.
 set -eu
 
 here=$(dirname "$(readlink -f "$0")")
@@ -12,6 +14,7 @@ ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
 ln -sf "$here/bin/dictate-tray" ~/.local/bin/dictate-tray
 ln -sf "$here/bin/dictate-chat" ~/.local/bin/dictate-chat
+ln -sf "$here/bin/dictate-setup" ~/.local/bin/dictate-setup
 ln -sf "$here/bin/dictate-hotkeys" ~/.local/bin/dictate-hotkeys
 
 # Tray icon: autostart at login, and start it now (single-instance safe).
@@ -44,7 +47,6 @@ StartupNotify=false
 EOF
 done
 
-"$here/bin/dictate-hotkeys" || true
 
 # Systemd user units for always-on capture + daily archive gc. Installed
 # but never enabled here: an always-hot mic must be an explicit choice.
@@ -55,9 +57,10 @@ for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer \
 done
 command -v systemctl >/dev/null && systemctl --user daemon-reload || true
 
-echo "Installed. Shortcuts load at next login, or assign them now in"
-echo "System Settings -> Shortcuts (search \"Dictate\")."
+echo "Installed. The tray is running and will offer setup: engine,"
+echo "typing permission, hotkeys, and a test dictation. Or run it now:"
+echo "  dictate setup"
 echo
-echo "Optional — always-on capture (archives everything you say; opt-in):"
+echo "Optional, always-on capture (archives everything you say; opt-in):"
 echo "  systemctl --user enable --now dictatr-listen"
 echo "  systemctl --user enable --now dictatr-gc.timer   # daily junk sweep"

@@ -6,24 +6,29 @@ source checkout can't do without sudo:
 - app tree under `/usr/lib/dictatr`, launchers symlinked into `/usr/bin`
   (the `dictate` shim detects the missing dev venv and runs
   `python3 -m dictatr` against the distro's `python3-websockets`)
-- desktop entries for the hotkey launchers, tray autostart for every
-  session (`/etc/xdg/autostart`)
+- desktop entries for the hotkey launchers plus a visible "Set up
+  dictatr" entry, and tray autostart for every session
+  (`/etc/xdg/autostart`)
+- optionally the pinned embeddable `lemond` under `/usr/lib/dictatr/lemond`
+  (about 7 MB; CI fetches and checksums it per
+  `packaging/lemond-version.env`), so the managed backend needs no
+  download at all
 - systemd user units: `dictatr-listen`, `dictatr-gc.timer`, and
   `dictatr-ydotoold` (rootless typing daemon)
 - a udev rule (`70-dictatr-uinput.rules`) tagging `/dev/uinput` with
   `uaccess`, so the logged-in user can run `ydotoold` as a user service;
   no root daemon, no socket mismatch, no manual sudo step
 
-After installing a package:
+Installing runs no user-visible post-install step and prints no shell
+instructions. Per-user work cannot happen in a package script anyway (it
+has no session, no bus and no idea who will log in), so the tray offers
+the setup wizard the first time it starts and it does that work in the
+session where it applies. See the
+[guide](guide.md#setup).
 
-```bash
-dictate-hotkeys                                   # bind KDE shortcuts (once)
-systemctl --user enable --now dictatr-ydotoold    # type-at-cursor daemon
-```
-
-Lemonade and its models stay per-user and are never packaged (they are
-gigabytes, shared by other apps, and released on their own cadence);
-install it per the README.
+Models stay per-user and are never packaged: they are gigabytes and
+shared with other local-AI apps through the HuggingFace cache. The
+wizard pulls the dictation model on first run.
 
 ## Building
 
