@@ -4,7 +4,7 @@
 Every capture happens on an isolated headless desktop (see lib/session.py),
 so results are pixel-stable and nothing touches the host session.
 
-  demo stills   regenerate docs/desktop-menu.png and docs/desktop-chat.png
+  demo stills   regenerate the desktop stills in docs/assets/
   demo video    record a scene (hero/chat/voicechat) -> gif + mp4
   demo voice    (re)synthesize the demo voice with kokoro via Lemonade
   demo shell    boot the stage and hold it for manual poking
@@ -30,7 +30,7 @@ sys.path[:0] = [str(DEMO / "lib"), str(DEMO / "scenes")]
 
 from session import Session  # noqa: E402
 
-DOCS = DEMO.parent
+ASSETS = DEMO.parent / "assets"   # rendered captures live here
 OUT = DEMO / "out"
 SCENES = ["hero", "chat", "voicechat"]   # video scenes with voice lines
 
@@ -103,17 +103,17 @@ def cmd_stills(args):
     with Session(keep=args.keep).start({}) as s:
         d = Director(s)
         stills.desktop(d)
-        stills.menu(d, str(DOCS / "desktop-menu.png"))
-        print(f"wrote {DOCS / 'desktop-menu.png'}")
-        stills.setup(d, str(DOCS / "desktop-setup.png"))
-    print(f"wrote {DOCS / 'desktop-setup.png'}")
+        stills.menu(d, str(ASSETS / "desktop-menu.png"))
+        print(f"wrote {ASSETS / 'desktop-menu.png'}")
+        stills.setup(d, str(ASSETS / "desktop-setup.png"))
+    print(f"wrote {ASSETS / 'desktop-setup.png'}")
     # The chat still replays the real two-turn conversation, so it needs
     # a fresh stage with the voicechat scenario on the stub.
     voices = _voices_ready("voicechat", voicechat)
     with Session(keep=args.keep).start(_scenario(voicechat, voices)) as s:
         d = Director(s)
-        voicechat.still(d, voices, str(DOCS / "desktop-chat.png"))
-    print(f"wrote {DOCS / 'desktop-chat.png'}")
+        voicechat.still(d, voices, str(ASSETS / "desktop-chat.png"))
+    print(f"wrote {ASSETS / 'desktop-chat.png'}")
 
 
 def cmd_video(args):
@@ -139,8 +139,8 @@ def cmd_video(args):
          "--gif", str(OUT / f"{scene}.gif")],
         check=True)
     # The gif is a README asset; the mp4 (for sharing) stays in out/.
-    shutil.copy(OUT / f"{scene}.gif", DOCS / f"{scene}.gif")
-    print(f"wrote {DOCS / f'{scene}.gif'} and {OUT / f'{scene}.mp4'}")
+    shutil.copy(OUT / f"{scene}.gif", ASSETS / f"{scene}.gif")
+    print(f"wrote {ASSETS / f'{scene}.gif'} and {OUT / f'{scene}.mp4'}")
 
 
 def cmd_shell(args):

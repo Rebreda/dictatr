@@ -47,3 +47,29 @@ def add_css(window: Gtk.Window, *sheets: bytes):
         Gtk.StyleContext.add_provider_for_display(
             window.get_display(), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+
+# Placeholder content. Props are backdrop: the eye belongs on dictatr's
+# UI, so a prop only spells out real text when the scenario turns on it
+# (the messenger's DM does; a browser page behind the chat card does
+# not). Everything else is muted skeleton bars.
+SKELETON_CSS = b"""
+.skel { background: alpha(#e8eaf1, 0.09); border-radius: 4px;
+        min-height: 9px; }
+.skel.strong { background: alpha(#e8eaf1, 0.16); min-height: 13px; }
+.skel.faint { background: alpha(#e8eaf1, 0.05); }
+"""
+
+
+def skeleton(widths, spacing: int = 11, strong_first: bool = False):
+    """A stack of muted placeholder bars — text-shaped, unreadable, so
+    it never competes with the dictatr surface in front of it."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+    for i, w in enumerate(widths):
+        bar = Gtk.Box(halign=Gtk.Align.START)
+        bar.add_css_class("skel")
+        if strong_first and i == 0:
+            bar.add_css_class("strong")
+        bar.set_size_request(w, -1)
+        box.append(bar)
+    return box

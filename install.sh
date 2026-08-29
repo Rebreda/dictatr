@@ -24,7 +24,7 @@ cat >~/.config/autostart/dictatr-tray.desktop <<EOF
 Type=Application
 Name=Dictate tray
 Exec=$HOME/.local/bin/dictate-tray
-Icon=$here/docs/logo.png
+Icon=$here/docs/assets/logo.png
 X-KDE-StartupNotify=false
 EOF
 nohup "$HOME/.local/bin/dictate-tray" >/dev/null 2>&1 &
@@ -38,7 +38,7 @@ Type=Application
 Name=dictatr
 Comment=Hotkey voice dictation
 Exec=$HOME/.local/bin/dictate-menu
-Icon=$here/docs/logo.png
+Icon=$here/docs/assets/logo.png
 Categories=Utility;AudioVideo;
 StartupNotify=false
 EOF
@@ -48,7 +48,7 @@ Type=Application
 Name=Set up dictatr
 Comment=Choose an inference engine, allow typing, bind hotkeys
 Exec=$HOME/.local/bin/dictate-setup
-Icon=$here/docs/logo.png
+Icon=$here/docs/assets/logo.png
 Categories=Utility;Settings;
 StartupNotify=true
 EOF
@@ -67,7 +67,7 @@ for name in dictate dictate-menu dictate-cancel dictate-listen; do
 Type=Application
 Name=$label
 Exec=$exec
-Icon=$here/docs/logo.png
+Icon=$here/docs/assets/logo.png
 NoDisplay=true
 StartupNotify=false
 EOF

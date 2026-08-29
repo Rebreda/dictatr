@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Word-processor prop for demo captures — toolbar and a white page.
+"""Word-processor prop for demo captures — toolbar, and a blank page.
 
-Purely a stage prop: titlebar, a formatting toolbar (font, size, bold /
-italic / underline, alignment) and a bright document page with a draft
-of the release notes the demo's storyline is working toward. The page
-is a Gtk.TextView, so staged typing lands in it if a scene wants that.
+A stage prop, deliberately mute: the formatting toolbar and the bright
+sheet on a dark desk are what make it read as a word processor, so the
+document itself is skeleton bars. A scene that actually dictates INTO
+the page can pass --live for a real (empty, focused) text view instead.
 No file IO, nothing real.
 """
 
@@ -19,81 +19,74 @@ from gi.repository import Gtk  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import props  # noqa: E402
 
-WIN_W, WIN_H = 620, 640
-
-DOC = """dictatr 0.9 — release notes (draft)
-
-Highlights
-•  Tray icon rewrite: plain-DBus StatusNotifierItem, works on
-   Plasma and most Wayland bars
-•  Always-on capture tuned against measured room noise
-•  Floating voice chat: a continued conversation with the AI,
-   entirely by voice
-
-Fixes
-•  Muted microphones are detected instead of listened to
-•  Realtime deltas no longer double mid-utterance
-"""
+WIN_W, WIN_H = 560, 600
 
 CSS = b"""
 window { background: #23252c; }
-.toolbar { background: #2b2d34; padding: 6px 12px; }
+.toolbar { background: #2b2d34; padding: 7px 12px; }
 .tool { color: #b6bac4; -gtk-icon-size: 14px; }
-.tool-sep { background: #4a4e59; min-width: 1px; margin: 2px 6px; }
-.fontpill {
-  background: #17181d; border-radius: 6px; padding: 3px 12px;
-  color: #cdd1da; font-size: 12px;
-}
+.tool-sep { background: #4a4e59; min-width: 1px; margin: 3px 6px; }
+.fontpill { background: #17181d; border-radius: 6px; padding: 6px 12px; }
 .deskspace { background: #17181d; }
 .sheet { background: #f6f5f1; border-radius: 3px; }
+/* On the white sheet the skeleton inverts: ink, not light. */
+.sheet .skel { background: alpha(#2a2c33, 0.16); }
+.sheet .skel.strong { background: alpha(#2a2c33, 0.34); }
 textview.doc, textview.doc text { background: #f6f5f1; color: #2a2c33; }
 """
 
 
 class WriterWindow(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, live: bool = False):
         super().__init__(application=app, title="Writer",
                          default_width=WIN_W, default_height=WIN_H)
-        props.add_css(self, CSS)
+        props.add_css(self, props.SKELETON_CSS, CSS)
+        self.text = None
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        outer.append(props.titlebar("release-notes.odt — Writer"))
+        outer.append(props.titlebar("Untitled 1 — Writer"))
         outer.append(self._toolbar())
 
         desk = Gtk.Box(vexpand=True)
         desk.add_css_class("deskspace")
-        sheet = Gtk.Box(hexpand=True,
-                        margin_top=18, margin_bottom=0,
-                        margin_start=26, margin_end=26)
+        sheet = Gtk.Box(hexpand=True, margin_top=20,
+                        margin_start=28, margin_end=28)
         sheet.add_css_class("sheet")
-        self.text = Gtk.TextView(editable=True, cursor_visible=True,
-                                 wrap_mode=Gtk.WrapMode.WORD,
-                                 left_margin=34, right_margin=30,
-                                 top_margin=30, hexpand=True)
-        self.text.add_css_class("doc")
-        buf = self.text.get_buffer()
-        buf.set_text(DOC)
-        buf.place_cursor(buf.get_end_iter())
-        sheet.append(self.text)
+        sheet.append(self._live_page() if live else self._skeleton_page())
         desk.append(sheet)
         outer.append(desk)
         self.set_child(outer)
 
+    def _live_page(self):
+        """A real, empty page — for scenes that dictate into it."""
+        self.text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD,
+                                 left_margin=34, right_margin=30,
+                                 top_margin=32, hexpand=True)
+        self.text.add_css_class("doc")
+        return self.text
+
+    def _skeleton_page(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22,
+                       hexpand=True, margin_top=34, margin_start=36,
+                       margin_end=32)
+        page.append(props.skeleton([210], strong_first=True))
+        page.append(props.skeleton([380, 400, 356, 392, 300]))
+        page.append(props.skeleton([392, 370, 240]))
+        page.append(Gtk.Box(vexpand=True))
+        return page
+
     def _toolbar(self):
         bar = Gtk.Box(spacing=8)
         bar.add_css_class("toolbar")
-        font = Gtk.Box(spacing=6)
-        font.add_css_class("fontpill")
-        font.append(Gtk.Label(label="Cantarell"))
-        font.append(Gtk.Image(icon_name="pan-down-symbolic",
-                              css_classes=["tool"]))
-        bar.append(font)
-        size = Gtk.Box(spacing=6)
-        size.add_css_class("fontpill")
-        size.append(Gtk.Label(label="11"))
-        size.append(Gtk.Image(icon_name="pan-down-symbolic",
-                              css_classes=["tool"]))
-        bar.append(size)
+        for width in (74, 22):   # font family, size
+            pill = Gtk.Box(spacing=6)
+            pill.add_css_class("fontpill")
+            field = props.skeleton([width])
+            field.set_valign(Gtk.Align.CENTER)
+            pill.append(field)
+            pill.append(Gtk.Image(icon_name="pan-down-symbolic",
+                                  css_classes=["tool"]))
+            bar.append(pill)
         bar.append(Gtk.Box(css_classes=["tool-sep"]))
         for icon in ("format-text-bold-symbolic",
                      "format-text-italic-symbolic",
@@ -105,22 +98,22 @@ class WriterWindow(Gtk.ApplicationWindow):
                      "format-justify-fill-symbolic"):
             bar.append(Gtk.Image(icon_name=icon, css_classes=["tool"]))
         bar.append(Gtk.Box(css_classes=["tool-sep"]))
-        bar.append(Gtk.Image(icon_name="insert-image-symbolic",
-                             css_classes=["tool"]))
-        bar.append(Gtk.Image(icon_name="insert-link-symbolic",
-                             css_classes=["tool"]))
+        for icon in ("insert-image-symbolic", "insert-link-symbolic"):
+            bar.append(Gtk.Image(icon_name=icon, css_classes=["tool"]))
         return bar
 
 
 class WriterApp(Gtk.Application):
-    def __init__(self):
+    def __init__(self, live: bool):
         super().__init__(application_id="demo.writer")
+        self.live = live
 
     def do_activate(self):
-        win = WriterWindow(self)
+        win = WriterWindow(self, live=self.live)
         win.present()
-        win.text.grab_focus()
+        if win.text is not None:
+            win.text.grab_focus()
 
 
 if __name__ == "__main__":
-    WriterApp().run([])
+    WriterApp(live="--live" in sys.argv).run([])

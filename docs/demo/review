@@ -26,9 +26,12 @@ from html import escape
 from pathlib import Path
 
 DEMO = Path(__file__).resolve().parent
+sys.path.insert(0, str(DEMO / "lib"))
+from session import W, H  # noqa: E402
+
 OUT = DEMO / "out"
 THUMBS = OUT / "review"
-LOGICAL = (1600, 900)   # plan coordinate space; the raw master is 2x
+LOGICAL = (W, H)   # plan coordinate space; the raw master is 2x
 
 SCENES = ("hero", "chat", "voicechat")
 

@@ -3,7 +3,7 @@
 A Director wraps a running Session with everything a scene script needs:
 sway IPC queries, eased pointer glides, clicks, cue logging/waiting,
 screenshots (grim) and recordings (wf-recorder). All coordinates are
-logical (1920x1080); captures are physical (3840x2160).
+logical (see session.W/H); captures are physical (2x that).
 """
 
 import json
@@ -98,7 +98,7 @@ class Director:
     # -- capture --------------------------------------------------------
     def screenshot(self, path, crop=None, scale=None):
         """grim the stage; crop is a logical (x, y, w, h) box; scale is
-        an output (w, h) — e.g. (1920, 1080) to downsample the 4K grab."""
+        an output (w, h) — e.g. (W, H) to downsample the 2x grab."""
         subprocess.run(["grim", "-c", str(path)], env=self.s.env, check=True)
         if crop or scale:
             from PIL import Image

@@ -36,8 +36,10 @@ REQUIRED = ["sway", "swaymsg", "grim", "wf-recorder", "wtype", "mako",
 
 # Logical stage geometry (physical is 2x for crisp captures). Kept
 # compact so the staged windows dominate the frame instead of floating
-# in empty wallpaper.
-W, H = 1600, 900
+# in empty wallpaper — and small enough that captures stay cheap: the
+# camera pass only ever zooms IN, so a 2x master is all the headroom
+# the 1280-wide output needs.
+W, H = 1280, 720
 SCALE = 2
 
 

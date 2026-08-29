@@ -1,4 +1,4 @@
-# <img src="docs/logo.svg" width="40" align="top" alt=""> dictatr
+# <img src="docs/assets/logo.svg" width="40" align="top" alt=""> dictatr
 
 Hotkey voice dictation for Linux desktops, backed by a local
 [Lemonade](https://lemonade-server.ai) Whisper server. Press a hotkey, speak,
@@ -12,7 +12,7 @@ dictation doubles as ASR fine-tuning data. listenr itself is not required;
 dictatr just writes a listenr-compatible archive.
 
 <p align="center">
-  <img src="docs/hero.gif" width="800" alt="Demo: Ctrl+Alt+D in an editor, a Listening notification appears, and the spoken sentence lands at the cursor in real time; recording stops by itself">
+  <img src="docs/assets/hero.gif" width="800" alt="Demo: Ctrl+Alt+D in an editor, a Listening notification appears, and the spoken sentence lands at the cursor in real time; recording stops by itself">
 </p>
 
 ## Install

@@ -33,8 +33,8 @@ done
 for f in "$repo"/bin/*; do
     install -Dpm755 "$f" "$lib/bin/$(basename "$f")"
 done
-install -Dpm644 "$repo/docs/logo.svg" "$lib/docs/logo.svg"
-install -Dpm644 "$repo/docs/logo.png" "$lib/docs/logo.png"
+install -Dpm644 "$repo/docs/assets/logo.svg" "$lib/docs/assets/logo.svg"
+install -Dpm644 "$repo/docs/assets/logo.png" "$lib/docs/assets/logo.png"
 
 # --- managed lemond (optional vendoring) ----------------------------
 # DICTATR_LEMOND_TARBALL: the pinned embeddable tarball (version and
@@ -135,5 +135,5 @@ install -Dpm644 "$repo/packaging/70-dictatr-uinput.rules" \
     "$DESTDIR/usr/lib/udev/rules.d/70-dictatr-uinput.rules"
 
 # --- icon ------------------------------------------------------------
-install -Dpm644 "$repo/docs/logo.svg" \
+install -Dpm644 "$repo/docs/assets/logo.svg" \
     "$DESTDIR/usr/share/icons/hicolor/scalable/apps/dictatr.svg"

@@ -1,7 +1,7 @@
 """Post-production: eased camera (zoom/pan) over a 4K stage recording.
 
 The recording is captured at 3840x2160; the camera is a crop window that
-glides between keyframes and is rendered out at 1920x1080, so every zoom
+glides between keyframes and is rendered out at half the master, so zoom
 magnifies real pixels. Keyframe times are anchored to cues (events logged
 during the scene) and the recording is synchronized to the cue clock by a
 sync flash: the scene blanks the output for an instant before starting,
@@ -10,7 +10,7 @@ and the first big frame delta marks that cue in video time.
 Camera plan (JSON):
   {"keyframes": [
       {"at": {"t": 0.0},                        "zoom": 1.0, "center": [960, 540]},
-      {"at": {"cue": "speech_started", "offset": -0.4}, "zoom": 1.5, "center": [1600, 140]},
+      {"at": {"cue": "speech_started", "offset": -0.4}, "zoom": 1.5, "center": [980, 140]},
       ...
    ],
    "end": {"cue": "type_end", "offset": 3.0}}

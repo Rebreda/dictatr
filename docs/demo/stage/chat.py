@@ -22,11 +22,11 @@ import props  # noqa: E402
 WIN_W, WIN_H = 700, 620
 SIDEBAR_W = 240
 
+# The one thing on set that DOES spell out real text: the demo's whole
+# premise is answering this question by voice.
 THREAD = [
-    ("out", "morning! running the last release checks now"),
-    ("in", "hey! how's the release prep going?"),
-    ("in", "any chance you can summarize where "
-           "things stand? want to mention it in standup"),
+    ("out", "running the last release checks now"),
+    ("in", "can you summarize where things stand?"),
 ]
 
 # Sidebar rows: (avatar_label or None for skeleton, active, unread)

@@ -6,7 +6,7 @@ For hacking on dictatr itself, see [development.md](development.md).
 ## Setup
 
 <p align="center">
-  <img src="desktop-setup.png" width="700" alt="The setup wizard on the desktop: a mic emblem orbited by three green checkmarks, the Try it page with a text box, and Finish and Start dictation buttons">
+  <img src="assets/desktop-setup.png" width="700" alt="The setup wizard on the desktop: a mic emblem orbited by three green checkmarks, the Try it page with a text box, and Finish and Start dictation buttons">
 </p>
 
 The tray offers the wizard the first time it ever starts. To open it
@@ -47,10 +47,10 @@ own. `DICTATE_NO_SETUP=1` stops the offer entirely.
 ## The tray and the menu
 
 <p align="center">
-  <img src="chat.gif" width="700" alt="Answering a chat message by voice: the radial menu blooms, the dictate bubble is clicked, and the spoken reply streams into the compose box and is sent">
+  <img src="assets/chat.gif" width="700" alt="Answering a chat message by voice: the radial menu blooms, the dictate bubble is clicked, and the spoken reply streams into the compose box and is sent">
 </p>
 <p align="center">
-  <img src="desktop-menu.png" width="700" alt="Radial menu bloomed at the cursor over a notes editor: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
+  <img src="assets/desktop-menu.png" width="700" alt="Radial menu bloomed at the cursor over a notes editor: round action bubbles around a mic hub; the record bubble glows green while always-on capture is live">
 </p>
 
 The tray icon is a StatusNotifierItem implemented over plain DBus; it
@@ -181,10 +181,10 @@ fallback since streaming models don't serve it.
 ## Ask mode
 
 <p align="center">
-  <img src="voicechat.gif" width="700" alt="Voice chat demo: the radial menu blooms, the Ask-the-AI bubble is clicked, and a two-turn spoken conversation streams into floating pills: question, drafted answer, then a snappier redraft">
+  <img src="assets/voicechat.gif" width="700" alt="Voice chat demo: the radial menu blooms, the Ask-the-AI bubble is clicked, and a two-turn spoken conversation streams into floating pills: question, drafted answer, then a snappier redraft">
 </p>
 <p align="center">
-  <img src="desktop-chat.png" width="700" alt="Floating voice chat mid-conversation on a staged desktop: message pills float over the wallpaper between a DM window and a notes editor, history fading with age, the mic hub re-armed green">
+  <img src="assets/desktop-chat.png" width="700" alt="Floating voice chat mid-conversation on a staged desktop: message pills float over the wallpaper between a DM window and a notes editor, history fading with age, the mic hub re-armed green">
 </p>
 
 The ask bubble (or `dictatr ask`) captures a spoken question and answers

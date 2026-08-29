@@ -7,10 +7,10 @@ session. Every asset shares one motif: the palette in
 top bar with the live tray icon.
 
 ```bash
-./docs/demo/demo stills          # docs/desktop-menu.png + desktop-chat.png
-./docs/demo/demo video           # docs/hero.gif  (notes scene, hotkey path)
-./docs/demo/demo video chat      # docs/chat.gif  (DM scene, radial-menu path)
-./docs/demo/demo video voicechat # docs/voicechat.gif  (two-turn AI chat)
+./docs/demo/demo stills          # docs/assets/desktop-menu.png, -setup, -chat
+./docs/demo/demo video           # docs/assets/hero.gif  (notes scene, hotkey path)
+./docs/demo/demo video chat      # docs/assets/chat.gif  (DM scene, radial-menu path)
+./docs/demo/demo video voicechat # docs/assets/voicechat.gif  (two-turn AI chat)
 ./docs/demo/demo voice           # resynthesize voices (needs Lemonade + kokoro-v1)
 ./docs/demo/demo shell           # boot the stage and hold it for manual poking
 ```

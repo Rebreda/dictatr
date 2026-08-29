@@ -12,6 +12,7 @@ Typing is a ladder, most portable and least privileged first:
   notify-send - freedesktop notifications, any desktop
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -76,13 +77,20 @@ def _portal_token() -> Path:
 
 
 def _gi_python() -> str:
-    """A python that can import PyGObject. Plain "python3" is right for a
-    packaged install; inside a dev venv it resolves to the venv, which has
-    no gi (uv sync builds it without system site-packages), and the portal
-    tier would silently drop out. Fall back to the system interpreter."""
-    if sys.prefix != sys.base_prefix and Path("/usr/bin/python3").exists():
-        return "/usr/bin/python3"
-    return "python3"
+    """A python that can import PyGObject, for running ui/portal_typed.py.
+
+    Asking "am I in a venv?" is the wrong question: what matters is the
+    interpreter about to be executed. A process started from a shell with
+    a venv activated inherits that venv on PATH, so `python3` is the venv
+    even when this process is the system python; PyGObject is missing
+    there and the portal tier silently drops out. So: use this
+    interpreter when it already has gi, and otherwise name the system one
+    outright rather than trusting PATH.
+    """
+    if importlib.util.find_spec("gi") is not None:
+        return sys.executable or "python3"
+    system = Path("/usr/bin/python3")
+    return str(system) if system.exists() else "python3"
 
 
 def _type_portal(text: str) -> bool:
