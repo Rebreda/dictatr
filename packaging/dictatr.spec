@@ -4,7 +4,7 @@
 %global _binaries_in_noarch_packages_terminate_build 0
 
 Name:           dictatr
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Hotkey voice dictation for Linux desktops, backed by a local Lemonade Whisper server
 License:        MIT
@@ -63,6 +63,16 @@ bash packaging/stage.sh %{buildroot}
 /usr/share/icons/hicolor/scalable/apps/dictatr.svg
 
 %changelog
+* Sat Aug 29 2026 Rebreda - 0.4.0-1
+- Type as you speak: words land at the cursor while the utterance is
+  still being transcribed, erasing back to the part that still matches
+  when the engine revises a word (live_typing = false to insert once)
+- The tray closes its shortcut session on exit, so restarting it no
+  longer races its own teardown and leaves the hotkeys bound to nothing
+- The setup wizard hands the live shortcut session back to the tray
+  instead of leaving the keys with the session it is about to close
+- tools/typeprobe types into its own window and reports what arrived,
+  so keysym injection can be checked without an editor or a screenshot
 * Sat Aug 29 2026 Rebreda - 0.3.0-1
 - Drop ydotool: typing is the desktop portal, then the clipboard. No
   uinput device, no udev rule, no root step in the install
