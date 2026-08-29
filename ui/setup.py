@@ -420,8 +420,13 @@ class HotkeysStep(Step):
         w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
     def _ensure_tray(self):
-        """The tray owns the live shortcut session; if it is not up, the
-        keys would bind to nothing after this window closes."""
+        """Hand the live shortcut session back to the tray.
+
+        Binding above happened in this window's own portal session, and
+        that session dies with the window: whichever session bound last
+        owns the keys, so leaving it there is what made the shortcuts go
+        quiet after setup. A running tray is told to rebind; a missing
+        one is started, and binds on the way up."""
         if not _name_has_owner(TRAY_BUS):
             try:
                 subprocess.Popen([str(REPO / "bin" / "dictate-tray")],
@@ -430,6 +435,15 @@ class HotkeysStep(Step):
                                  stderr=subprocess.DEVNULL)
             except OSError:
                 pass
+            return
+        try:
+            Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
+                TRAY_BUS, "/Shortcuts",
+                "io.github.rebreda.dictatr.Shortcuts", "Rebind",
+                None, None, Gio.DBusCallFlags.NONE, 5000, None)
+        except GLib.Error as e:
+            print(f"dictatr setup: tray rebind failed: {e.message}",
+                  file=sys.stderr)
 
     def _legacy(self):
         self.wiz.busy(True)

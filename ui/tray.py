@@ -108,6 +108,12 @@ SNI_XML = """<node>
  </interface>
 </node>"""
 
+CONTROL_XML = """<node>
+ <interface name="io.github.rebreda.dictatr.Shortcuts">
+  <method name="Rebind"/>
+ </interface>
+</node>"""
+
 MENU_XML = """<node>
  <interface name="com.canonical.dbusmenu">
   <property name="Version" type="u" access="read"/>
@@ -409,9 +415,31 @@ class Shortcuts:
                 Gio.DBusCallFlags.NONE, 3000, None)
         except GLib.Error:
             pass
+        self._open()
+
+    def _open(self):
         self._request("CreateSession", "(a{sv})", (),
                       {"session_handle_token": GLib.Variant("s", "dictatr")},
                       self._on_session)
+
+    def rebind(self):
+        """Take the live key match back.
+
+        A second session binding the same ids wins them, and the setup
+        wizard's session does exactly that and then closes: the keys are
+        left pointing at a session nobody owns, so kglobalaccel still
+        knows the shortcut but pressing it reaches no one. Reopening our
+        session makes this process the owner again."""
+        old, self.session = self.session, None
+        if old:
+            try:
+                self.bus.call_sync(PORTAL_BUS, old,
+                                   "org.freedesktop.portal.Session", "Close",
+                                   None, None, Gio.DBusCallFlags.NONE,
+                                   3000, None)
+            except GLib.Error:
+                pass
+        self._open()
 
     def _fail(self, msg: str) -> None:
         print(f"dictatr tray: portal hotkeys unavailable: {msg}; "
@@ -566,10 +594,20 @@ def main():
     shortcuts = None
     if os.environ.get("DICTATE_NO_PORTAL") != "1":
         try:
-            shortcuts = Shortcuts()   # noqa: F841 (kept alive by scope)
+            shortcuts = Shortcuts()
         except Exception as e:
             print(f"dictatr tray: portal hotkeys unavailable: {e}",
                   file=sys.stderr)
+
+    # Rebind: the setup wizard calls this after its own bind, which would
+    # otherwise leave the keys owned by its closed session.
+    def on_call(_bus, _sender, _path, _iface, method, _params, inv):
+        if method == "Rebind" and shortcuts is not None:
+            shortcuts.rebind()
+        inv.return_value(None)
+
+    iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]
+    bus.register_object("/Shortcuts", iface, on_call, None, None)
     loop.run()
     return 0
 
