@@ -567,6 +567,25 @@ class SpeakStep(Step):
         self.wiz.mark_complete()
         self.wiz.close()
 
+def portal_bus() -> Gio.DBusConnection:
+    """A private session-bus connection for portal work.
+
+    The portal ties an app id to the connection that first speaks to it,
+    and a connection can only be registered once. GTK has already used
+    the shared session bus by the time the wizard runs (the Settings
+    portal, for the colour scheme), so the shared connection arrives
+    associated with an empty id, Register then fails with "already
+    associated", and GlobalShortcuts refuses the session with "An app id
+    is required". On a connection of our own, Register goes first.
+    """
+    addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+    return Gio.DBusConnection.new_for_address_sync(
+        addr,
+        Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+        None, None)
+
+
 class Binder:
     """One GlobalShortcuts bind dance: CreateSession, BindShortcuts, read
     back the triggers the desktop actually assigned, then close the
@@ -575,7 +594,7 @@ class Binder:
 
     def __init__(self, done):
         self.done = done
-        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.bus = portal_bus()
         self._sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
         self._n = 0
         self.session = None

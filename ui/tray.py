@@ -343,6 +343,47 @@ def first_run() -> None:
         print(f"dictatr tray: could not offer setup: {e}", file=sys.stderr)
 
 
+def portal_bus() -> Gio.DBusConnection:
+    """A private session-bus connection for portal work.
+
+    The portal ties an app id to the connection that first speaks to it,
+    and a connection can only be registered once. Anything that reaches
+    the portal on the shared session bus first (GTK does, for the colour
+    scheme) leaves it associated with an empty id, and GlobalShortcuts
+    then refuses the session with "An app id is required". On a
+    connection of our own, Register always goes first.
+    """
+    addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+    return Gio.DBusConnection.new_for_address_sync(
+        addr,
+        Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+        None, None)
+
+
+QT_MODIFIERS = {"SHIFT": 0x02000000, "CTRL": 0x04000000,
+                "ALT": 0x08000000, "META": 0x10000000,
+                "SUPER": 0x10000000, "LOGO": 0x10000000}
+
+
+def _qt_keycode(trigger: str) -> int | None:
+    """Portal trigger ("CTRL+ALT+d") to the Qt key code kglobalaccel
+    speaks. Qt numbers plain keys by their uppercase ASCII value, so a
+    letter or space needs no table. None when it is anything fancier."""
+    parts = trigger.upper().split("+")
+    code = 0
+    for mod in parts[:-1]:
+        if mod not in QT_MODIFIERS:
+            return None
+        code |= QT_MODIFIERS[mod]
+    key = parts[-1]
+    if key == "SPACE":
+        return code | 0x20
+    if len(key) == 1:
+        return code | ord(key)
+    return None
+
+
 class Shortcuts:
     """Global hotkeys via the GlobalShortcuts portal, hosted here since
     the tray is the resident process. Fully asynchronous: the portal's
@@ -353,18 +394,19 @@ class Shortcuts:
 
     IFACE = "org.freedesktop.portal.GlobalShortcuts"
 
-    def __init__(self, bus: Gio.DBusConnection):
-        self.bus = bus
+    def __init__(self):
+        self.bus = portal_bus()
         self.session = None
-        self._sender = bus.get_unique_name().lstrip(":").replace(".", "_")
+        self._sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
         self._n = 0
         # Portal >= 1.20 wants non-sandboxed apps to self-identify
         # before their first session; older portals lack the interface.
         try:
-            bus.call_sync(PORTAL_BUS, PORTAL_PATH,
-                          "org.freedesktop.host.portal.Registry", "Register",
-                          GLib.Variant("(sa{sv})", (APP_ID, {})), None,
-                          Gio.DBusCallFlags.NONE, 3000, None)
+            self.bus.call_sync(
+                PORTAL_BUS, PORTAL_PATH,
+                "org.freedesktop.host.portal.Registry", "Register",
+                GLib.Variant("(sa{sv})", (APP_ID, {})), None,
+                Gio.DBusCallFlags.NONE, 3000, None)
         except GLib.Error:
             pass
         self._request("CreateSession", "(a{sv})", (),
@@ -419,11 +461,47 @@ class Shortcuts:
         self._request("BindShortcuts", "(oa(sa{sv})sa{sv})",
                       (session, shorts, ""), {}, self._on_bound)
 
-    def _on_bound(self, code, _results):
+    def _on_bound(self, code, results):
         if code:
             self._fail(f"BindShortcuts refused ({code})")
             return
+        triggers = {sid: (meta.get("trigger_description") or "")
+                    for sid, meta in results.get("shortcuts", [])}
+        if any(triggers.values()):
+            self._retire_legacy()
+            return
+        # Accepted, but with no key on any action. KDE does this when
+        # something already holds the combinations - including the legacy
+        # entries about to be retired - and it does not revisit them once
+        # they are free. Free them, then assign the triggers directly.
         self._retire_legacy()
+        if not self._assign_kde():
+            self._fail("the portal bound no keys")
+
+    def _assign_kde(self) -> bool:
+        """Assign the preferred triggers through kglobalaccel, the same
+        call System Settings makes when a user picks a shortcut by hand.
+        KDE registers portal shortcuts there but leaves them unbound
+        (kglobalshortcutsrc shows `none`) whenever it saw a conflict."""
+        done = False
+        for sid, desc, trig, _cmd in PORTAL_SHORTCUTS:
+            keycode = _qt_keycode(trig)
+            if keycode is None:
+                continue
+            try:
+                self.bus.call_sync(
+                    "org.kde.kglobalaccel", "/kglobalaccel",
+                    "org.kde.KGlobalAccel", "setForeignShortcut",
+                    GLib.Variant("(asai)",
+                                 ([APP_ID, sid, "dictatr", desc], [keycode])),
+                    None, Gio.DBusCallFlags.NONE, 3000, None)
+            except GLib.Error:
+                return False
+            done = True
+        if done:
+            print("dictatr tray: portal left the hotkeys unbound; assigned "
+                  "the defaults via kglobalaccel", file=sys.stderr)
+        return done
 
     def _deactivated(self, _bus, _sender, _path, _iface, _sig, params):
         session = params.unpack()[0]
@@ -488,7 +566,7 @@ def main():
     shortcuts = None
     if os.environ.get("DICTATE_NO_PORTAL") != "1":
         try:
-            shortcuts = Shortcuts(bus)   # noqa: F841 (kept alive by scope)
+            shortcuts = Shortcuts()   # noqa: F841 (kept alive by scope)
         except Exception as e:
             print(f"dictatr tray: portal hotkeys unavailable: {e}",
                   file=sys.stderr)
