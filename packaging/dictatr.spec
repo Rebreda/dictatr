@@ -60,6 +60,7 @@ udevadm trigger --name-match=uinput 2>/dev/null || :
 /usr/share/applications/dictate-menu.desktop
 /usr/share/applications/dictate-cancel.desktop
 /usr/share/applications/dictate-listen.desktop
+/usr/share/applications/io.github.rebreda.dictatr.desktop
 /usr/share/applications/dictatr-setup.desktop
 %config(noreplace) /etc/xdg/autostart/dictatr-tray.desktop
 /usr/lib/systemd/user/dictatr-listen.service

@@ -83,8 +83,22 @@ desktop dictate-menu   "Dictate menu"               "/usr/bin/dictate-menu"
 desktop dictate-cancel "Dictate cancel"             "/usr/bin/dictate cancel"
 desktop dictate-listen "Dictate always-on (toggle)" "/usr/bin/dictate listen --toggle"
 
-# The wizard is the one entry a person should be able to find in the
-# launcher, so it is the only one that is not NoDisplay.
+# The portal will not hand out global shortcuts (or anything else) to an
+# app whose id has no desktop file behind it: Register fails with "App
+# info not found" and every later portal call is refused. So this entry
+# is named for APP_ID in ui/tray.py, not for its command.
+cat >"$apps/io.github.rebreda.dictatr.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=dictatr
+Comment=Hotkey voice dictation
+Exec=/usr/bin/dictate-menu
+Icon=dictatr
+Categories=Utility;AudioVideo;
+StartupNotify=false
+EOF
+
+# The wizard is the other entry worth finding in the launcher.
 cat >"$apps/dictatr-setup.desktop" <<EOF
 [Desktop Entry]
 Type=Application

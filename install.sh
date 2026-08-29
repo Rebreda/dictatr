@@ -29,6 +29,32 @@ X-KDE-StartupNotify=false
 EOF
 nohup "$HOME/.local/bin/dictate-tray" >/dev/null 2>&1 &
 
+# The desktop portal refuses every request from an app id it cannot find
+# a desktop file for ("App info not found"), which silently kills global
+# shortcuts. This entry is named for APP_ID in ui/tray.py.
+cat >~/.local/share/applications/io.github.rebreda.dictatr.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=dictatr
+Comment=Hotkey voice dictation
+Exec=$HOME/.local/bin/dictate-menu
+Icon=$here/docs/logo.png
+Categories=Utility;AudioVideo;
+StartupNotify=false
+EOF
+cat >~/.local/share/applications/dictatr-setup.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Set up dictatr
+Comment=Choose an inference engine, allow typing, bind hotkeys
+Exec=$HOME/.local/bin/dictate-setup
+Icon=$here/docs/logo.png
+Categories=Utility;Settings;
+StartupNotify=true
+EOF
+command -v update-desktop-database >/dev/null && \
+    update-desktop-database ~/.local/share/applications 2>/dev/null || true
+
 for name in dictate dictate-menu dictate-cancel dictate-listen; do
     case $name in
     dictate) label="Dictate (toggle)" exec="$HOME/.local/bin/dictate type" ;;
