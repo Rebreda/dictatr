@@ -92,48 +92,45 @@ settings; the tray logs one line and stays out of the way.
 Delivery tries three tiers in order, and the outcome notification stays
 truthful ("Typed:" only when text was really typed, "Copied" otherwise):
 
-1. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
-   through xdg-desktop-portal, no special privileges. The grant is
-   remembered across sessions on Plasma 6.1+ / GNOME 46+ as a token in
+1. **ydotool**: a uinput device of its own, which presses and releases
+   its own keys and applies shift itself. The packages ship a udev rule
+   granting the logged-in user access to `/dev/uinput`, so the daemon
+   runs rootless as a user service:
+
+   ```bash
+   systemctl --user enable --now dictatr-ydotoold
+   ```
+
+2. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
+   through xdg-desktop-portal, needing no device access at all.
+   **Opt-in**, with `portal_typing = true` in config, because it injects
+   bare keysyms and lets the compositor derive the modifiers. That makes
+   the compositor track modifier state for a virtual keyboard and the
+   real one at the same time, and dictation is usually triggered by a
+   held chord (Ctrl+Alt+D), so injection lands while those keys are
+   still physically down. The two views drift apart and the desktop is
+   left acting as though Ctrl is stuck. If that happens, press and
+   release the modifier on the real keyboard to resync it.
+
+   With the opt-in set, the grant is remembered across sessions on
+   Plasma 6.1+ and GNOME 46+ as a token in
    `~/.local/state/dictatr/portal-typing-token`, so the permission
-   dialog appears once ever. A dictation never pops that dialog
-   mid-flow: without a stored token this tier is skipped entirely. The
-   setup wizard's typing page performs the grant; to do it by hand, run
-   `python3 ui/portal_typed.py --grant`, and `--check` prints what the
-   portal offers without any dialog.
-2. **ydotool**: kernel-level input, works on any Wayland or X11 desktop
-   (setup below).
-3. **Clipboard**: `wl-copy` plus a "Copied" notification.
+   dialog appears once. A dictation never pops that dialog mid-flow:
+   without a stored token the tier is skipped. `DICTATE_NO_PORTAL=1`
+   disables it regardless of config.
 
-Set `DICTATE_NO_PORTAL=1` to skip the portal tier (the demo harness does
-this so its ydotool shim keeps capturing the typing).
+3. **Clipboard**: `wl-copy` plus a "Copied" notification. Always works,
+   and it is where dictation lands when neither tier above is set up.
 
-**Package installs**: the rpm/deb ships a udev rule that grants the
-logged-in user access to `/dev/uinput`, so the daemon runs rootless as
-a user service. The wizard's typing page enables it when the portal is
-missing, or do it by hand:
+**Source installs** do not get the udev rule, so `/dev/uinput` stays
+root-only and ydotool cannot run as your user. Either install the
+package, or add the rule by hand:
 
 ```bash
+sudo install -Dm644 packaging/70-dictatr-uinput.rules \
+    /usr/lib/udev/rules.d/70-dictatr-uinput.rules
+sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
 systemctl --user enable --now dictatr-ydotoold
-```
-
-**Source installs** hit a stock-unit trap instead: Fedora's
-`ydotool.service` runs the daemon as root with its socket at
-`/tmp/.ydotool_socket` (root-only), while the `ydotool` client looks for
-`/run/user/<uid>/.ydotool_socket`; with that mismatch every `ydotool
-type` fails. Point the daemon at the client's path and hand the socket
-to your user (replace 1000 with your uid):
-
-```bash
-sudo mkdir -p /etc/systemd/system/ydotool.service.d
-sudo tee /etc/systemd/system/ydotool.service.d/override.conf <<'EOF'
-[Service]
-ExecStart=
-ExecStart=/usr/bin/ydotoold --socket-path=/run/user/1000/.ydotool_socket --socket-own=1000:1000
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart ydotool
-ydotool type ''   # exits 0 when the socket is reachable
 ```
 
 ## Always-on capture

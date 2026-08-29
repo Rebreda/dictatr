@@ -74,6 +74,9 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.setattr(deliver.runstate, "mark_done", lambda: None)
     monkeypatch.setattr(deliver, "notify", lambda *a, **k: None)
     monkeypatch.setattr(deliver.shutil, "which", lambda name: f"/bin/{name}")
+    # The portal tier is opt-in; these tests exercise the ladder, so turn
+    # it on and let each case decide whether it gets that far.
+    monkeypatch.setattr(deliver, "_portal_enabled", lambda: True)
 
     def fake_run(cmd, **kw):
         tool = "portal" if str(deliver._PORTAL_HELPER) in cmd else Path(cmd[0]).name
@@ -89,33 +92,63 @@ def ladder(tmp_path, monkeypatch):
     return calls, rc, with_token
 
 
-def test_portal_first_when_token_stored(ladder):
+def test_ydotool_is_tried_first(ladder):
+    """The portal desyncs the compositor's modifier state when it injects
+    alongside a held hotkey chord, so it is the fallback, not the default."""
     calls, _rc, with_token = ladder
     with_token()
+    assert deliver.deliver("hi") == "typed"
+    assert calls == ["ydotool"]
+
+
+def test_no_ydotool_falls_to_portal(ladder, monkeypatch):
+    calls, _rc, with_token = ladder
+    with_token()
+    monkeypatch.setattr(deliver.shutil, "which",
+                        lambda name: None if name == "ydotool" else f"/bin/{name}")
     assert deliver.deliver("hi") == "typed"
     assert calls == ["portal"]
 
 
-def test_no_token_skips_portal(ladder):
-    calls, _rc, _ = ladder
-    assert deliver.deliver("hi") == "typed"
-    assert calls == ["ydotool"]
-
-
-def test_env_escape_hatch_skips_portal(ladder, monkeypatch):
-    calls, _rc, with_token = ladder
-    with_token()
-    monkeypatch.setenv("DICTATE_NO_PORTAL", "1")
-    assert deliver.deliver("hi") == "typed"
-    assert calls == ["ydotool"]
-
-
-def test_portal_failure_falls_to_ydotool(ladder):
+def test_ydotool_failure_falls_to_portal(ladder):
     calls, rc, with_token = ladder
     with_token()
-    rc["portal"] = 1
+    rc["ydotool"] = 1
     assert deliver.deliver("hi") == "typed"
-    assert calls == ["portal", "ydotool"]
+    assert calls == ["ydotool", "portal"]
+
+
+def test_no_token_skips_portal(ladder):
+    calls, rc, _ = ladder
+    rc["ydotool"] = 1
+    assert deliver.deliver("hi") == "clipboard"
+    assert calls == ["ydotool", "wl-copy"]
+
+
+def test_portal_is_opt_in(ladder, monkeypatch):
+    """Default config: ydotool, then the clipboard. Never the portal."""
+    calls, rc, with_token = ladder
+    with_token()
+    rc["ydotool"] = 1
+    monkeypatch.setattr(deliver, "_portal_enabled", lambda: False)
+    assert deliver.deliver("hi") == "clipboard"
+    assert calls == ["ydotool", "wl-copy"]
+
+
+def test_portal_opt_in_reads_config(monkeypatch):
+    from dictatr import settings as settings_mod
+    monkeypatch.delenv("DICTATE_NO_PORTAL", raising=False)
+    monkeypatch.setattr(settings_mod.settings.typing, "portal", False)
+    assert deliver._portal_enabled() is False
+    monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
+    assert deliver._portal_enabled() is True
+
+
+def test_env_overrides_the_opt_in(monkeypatch):
+    from dictatr import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
+    monkeypatch.setenv("DICTATE_NO_PORTAL", "1")
+    assert deliver._portal_enabled() is False
 
 
 def test_all_typing_fails_lands_on_clipboard(ladder):
@@ -123,7 +156,7 @@ def test_all_typing_fails_lands_on_clipboard(ladder):
     with_token()
     rc["portal"] = rc["ydotool"] = 1
     assert deliver.deliver("hi") == "clipboard"
-    assert calls == ["portal", "ydotool", "wl-copy"]
+    assert calls == ["ydotool", "portal", "wl-copy"]
 
 
 def test_prefer_typing_false_goes_straight_to_clipboard(ladder):

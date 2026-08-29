@@ -7,7 +7,6 @@
 #   ./dev logs      follow the tray log
 #   ./dev test      the test suite
 #   ./dev doctor    find a second dictatr competing with this one
-#   ./dev unstick   release modifier keys a killed dictation left held
 #
 # The tray is the resident process: it owns the hotkeys and the setup
 # offer, so code changes to it (or to anything it launches) need a
@@ -52,12 +51,6 @@ restart)
 stop) stop ;;
 logs) tail -f "$log" ;;
 test) exec "$here/.venv/bin/python" -m pytest -q "${@:2}" ;;
-unstick)
-    # A dictation killed between a key press and its release leaves that
-    # key down in the compositor; a stuck Shift turns the mouse wheel
-    # sideways, which reads as "scrolling broke".
-    exec "$py" "$here/ui/portal_typed.py" --release
-    ;;
 status)
     echo "checkout:  $here ($(git -C "$here" rev-parse --short HEAD 2>/dev/null))"
     for name in tray menu chat setup; do

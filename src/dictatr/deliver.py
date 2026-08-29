@@ -1,15 +1,27 @@
 """Get transcribed text to the user: type at the cursor when possible,
 clipboard otherwise. Desktop notifications for state feedback.
 
-Typing is a ladder, most portable and least privileged first:
+Typing is a ladder, most reliable first:
+  ydotool  - its own uinput device, which presses and releases its own
+             keys and applies shift itself. It never participates in the
+             compositor's modifier bookkeeping, so it cannot desync it.
   portal   - RemoteDesktop portal keysym injection (ui/portal_typed.py,
-             PyGObject lives there so this package stays stdlib-only);
-             used only when a persisted grant token is already stored,
-             because a dictation must never pop a permission dialog
-             mid-flow. DICTATE_NO_PORTAL=1 skips the tier.
-  ydotool  - kernel-level typing, works on any Wayland/X11 desktop
+             PyGObject lives there so this package stays stdlib-only).
+             OPT-IN: needs `portal_typing = true` in config as well as a
+             stored grant token, because of the modifier desync below.
+             DICTATE_NO_PORTAL=1 skips the tier outright.
   wl-copy  - Wayland clipboard (wl-clipboard)
   notify-send - freedesktop notifications, any desktop
+
+Why ydotool goes first, despite needing a uinput device: the portal
+hands the compositor bare keysyms and lets it work out which physical
+key and which modifiers produce them. That means the compositor is
+tracking modifier state for a virtual keyboard and the real one at the
+same time. Dictation is normally triggered by a held chord (Ctrl+Alt+D),
+so injection routinely lands while real modifiers are still down, and
+the two views drift apart: the compositor is left believing Ctrl is held
+after the user let go, and the whole desktop behaves as though Ctrl is
+stuck. ydotool sidesteps the entire class of problem.
 """
 
 import importlib.util
@@ -93,11 +105,23 @@ def _gi_python() -> str:
     return str(system) if system.exists() else "python3"
 
 
-def _type_portal(text: str) -> bool:
-    """RemoteDesktop portal typing. Only attempted with a stored grant
-    token: without one the portal would raise a permission dialog in the
-    middle of a dictation, so fall through to ydotool instead."""
+def _portal_enabled() -> bool:
+    """The portal tier is off unless asked for. It desyncs the
+    compositor's modifier tracking (see the module docstring), which
+    leaves the whole desktop acting as though Ctrl is held; that is far
+    worse than falling back to the clipboard, so nobody gets it by
+    accident."""
     if os.environ.get("DICTATE_NO_PORTAL") == "1":
+        return False
+    from .settings import settings
+    return settings.typing.portal
+
+
+def _type_portal(text: str) -> bool:
+    """RemoteDesktop portal typing. Needs the opt-in above and a stored
+    grant token: without a token the portal would pop a permission dialog
+    in the middle of a dictation."""
+    if not _portal_enabled():
         return False
     if not _portal_token().exists() or not _PORTAL_HELPER.exists():
         return False
@@ -120,12 +144,12 @@ def _type_ydotool(text: str) -> bool:
 
 def type_text(text: str) -> str | None:
     """Type *text* at the cursor through the best available tier; returns
-    the tier that worked ("portal" / "ydotool"), or None when none could.
+    the tier that worked ("ydotool" / "portal"), or None when none could.
     The setup wizard uses this to test typing without delivering."""
-    if _type_portal(text):
-        return "portal"
     if _type_ydotool(text):
         return "ydotool"
+    if _type_portal(text):
+        return "portal"
     return None
 
 

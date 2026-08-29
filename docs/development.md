@@ -29,7 +29,6 @@ Calling `python3 ui/menu.py` from an activated venv fails with
 ./dev logs       # follow the tray log
 ./dev test       # pytest
 ./dev doctor     # find a second dictatr competing with this one
-./dev unstick    # release modifier keys a killed dictation left held
 ```
 
 **Restart after almost any change.** The tray is the resident process: it
@@ -82,14 +81,27 @@ $ ./dev doctor
   ok: app id registers (hotkeys and portal typing can work)
 ```
 
-## When typing leaves a key stuck
+## When the keyboard goes strange after a dictation
 
-Dictation presses and releases each key through the portal. Kill it
-between the two (`deliver.py` does exactly that on its 150 s timeout) and
-the compositor still thinks that key is down. A stuck Shift turns every
-mouse wheel into a sideways scroll, which reads as "scrolling broke"
-rather than "dictation broke". `./dev unstick` releases every modifier;
-releasing a key that is not held does nothing, so it is always safe.
+If the desktop starts behaving as though Ctrl or Shift is held (every
+keystroke acts like a shortcut, the mouse wheel scrolls sideways),
+**press and release that modifier on the real keyboard**. That resyncs
+the compositor and is the only recovery worth trusting.
+
+Do not try to fix it by injecting release events for keys nobody
+pressed. An earlier version of this document claimed that was harmless;
+it is not verified, and unpaired releases are exactly the kind of input
+the compositor's bookkeeping is bad at.
+
+The cause is the portal typing tier, which is why it is now opt-in
+(`portal_typing` in config). It hands the compositor bare keysyms and
+lets it derive the modifiers, so the compositor tracks state for our
+virtual keyboard and the real one at once. Dictation is usually
+triggered by a held chord, so injection lands while Ctrl+Alt are still
+physically down and the two views drift apart. ydotool has its own
+uinput device and applies shift itself, so it never joins that
+bookkeeping; it is the default tier and needs `/dev/uinput` access,
+which the packages grant with a udev rule.
 
 ## Tests
 
@@ -108,7 +120,8 @@ that would need those is exercised by hand or on the demo stage instead.
 | `DICTATE_INPUT=clip.wav` | stream a wav instead of the mic (colon-separated list for one wav per turn in voice chat) |
 | `DICTATE_INPUT_PACED=1` | feed that wav in real time rather than as fast as it reads |
 | `LEMONADE_URL=...` | force one server URL, skipping all backend detection |
-| `DICTATE_NO_PORTAL=1` | skip the portal typing tier (falls to ydotool, then clipboard) |
+| `DICTATE_NO_PORTAL=1` | skip the portal typing tier outright |
+| `DICTATE_PORTAL_TYPING=1` | opt into the portal tier (off by default) |
 | `DICTATE_NO_SETUP=1` | stop the tray offering the setup wizard |
 | `DICTATR_SETUP_STEP=N` | open the wizard straight on page N (0 to 3) |
 | `RADIAL_DEMO=progress` | `python3 ui/radial.py` shows the progress bubble on its own |
