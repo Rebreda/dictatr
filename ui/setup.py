@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """First-run setup wizard for dictatr, in the radial visual language.
 
-Four pages, each a probe plus one action: engine, typing, hotkeys, and a
-live dictation to prove the chain works. Short, skippable, re-runnable
-(`dictate setup`), so the packages never have to print shell
-instructions after install.
+Three pages, each a probe plus one action: the inference engine, the
+hotkeys, and a real dictation that also asks for the typing permission
+it needs. Short, skippable, re-runnable (`dictate setup`), so the
+packages never have to print shell instructions after install.
 
 The chrome is the radial kit (ui/radial.py): the page emblem is a
 ProgressBubble at the center of a small orbit of step bubbles, and the
@@ -51,7 +51,6 @@ PORTAL_BUS = "org.freedesktop.portal.Desktop"
 PORTAL_PATH = "/org/freedesktop/portal/desktop"
 GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
 TRAY_BUS = "io.github.rebreda.dictatr.tray"
-TEST_PHRASE = "dictatr can type here"
 
 # Same four actions the tray binds; see PORTAL_SHORTCUTS in ui/tray.py.
 SHORTCUTS = [
@@ -418,17 +417,30 @@ class EngineStep(Step):
         w.set_actions(primary=("Continue", w.advance))
 
 
-class TypingStep(Step):
-    key, icon = "typing", "dictatr-typing-symbolic"
-    title = "Typing at the cursor"
+class SpeakStep(Step):
+    """Permission and proof on one page.
+
+    This used to be two: a typing page that auto-typed a canned phrase
+    into a box, and a separate page that ran a real dictation. Watching a
+    fixed string appear proves the portal grant and nothing else, and it
+    reads as a demo rather than the tool working. So the permission is
+    still asked for here, but the thing that verifies it is the user's
+    own voice, which exercises the whole chain at once.
+    """
+
+    key, icon = "speak", "dictatr-mic-symbolic"
+    title = "Try it"
 
     def enter(self):
         w = self.wiz
-        w.set_body("To drop text straight into whatever you are writing in, "
-                   "dictatr needs one permission from your desktop. Without "
-                   "it, transcripts go to the clipboard instead.")
+        w.set_body("Dictation types wherever your cursor is, which needs "
+                   "one permission from your desktop. Then say a sentence "
+                   "and watch it land.")
         w.set_status("Checking…")
         w.busy(True)
+        self.entry = Gtk.Entry(placeholder_text="your words land here",
+                               hexpand=True)
+        w.set_extra(self.entry)
         _in_background(self._probe)
 
     def _probe(self):
@@ -444,43 +456,29 @@ class TypingStep(Step):
     def _probed(self, portal, granted, ydotool, service_up):
         w = self.wiz
         w.busy(False)
-        w.set_extra(self._test_entry())
-        if granted:
-            w.set_status("Typing is already allowed on this desktop", "good")
-            w.set_actions(primary=("Test it", self._test),
-                          secondary=("Skip", w.advance))
+        if granted or (ydotool and service_up):
+            self._ready("Typing is allowed on this desktop", "good")
         elif portal:
             w.set_status("Your desktop can grant this. The dialog appears "
                          "once and the permission is remembered.")
             w.set_actions(primary=("Allow typing", self._grant),
-                          secondary=("Skip, use the clipboard", w.advance))
+                          secondary=("Skip, use the clipboard", self._ready))
         elif ydotool:
-            if service_up:
-                w.set_status("No typing portal here, but the ydotool service "
-                             "is running", "good")
-                w.set_actions(primary=("Test it", self._test),
-                              secondary=("Skip", w.advance))
-            else:
-                w.set_status("No typing portal on this desktop. dictatr can "
-                             "use ydotool instead, as your own user.")
-                w.set_actions(primary=("Enable the typing service",
-                                       self._enable_ydotoold),
-                              secondary=("Skip, use the clipboard", w.advance))
+            w.set_status("No typing portal on this desktop. dictatr can "
+                         "use ydotool instead, as your own user.")
+            w.set_actions(primary=("Enable the typing service",
+                                   self._enable_ydotoold),
+                          secondary=("Skip, use the clipboard", self._ready))
         else:
-            w.set_status("Nothing here can type at the cursor. Transcripts "
-                         "will go to the clipboard, which always works.",
-                         "bad")
-            w.set_actions(primary=("Continue", w.advance))
+            self._ready("Nothing here can type at the cursor, so transcripts "
+                        "go to the clipboard. Dictation still works.", "bad")
 
-    def _test_entry(self):
-        self.entry = Gtk.Entry(placeholder_text="the test types in here",
-                               hexpand=True)
-        return self.entry
-
+    # --- permission -----------------------------------------------------
     def _grant(self):
         w = self.wiz
         w.busy(True)
         w.set_status("Waiting for your desktop's permission dialog…")
+        w.set_actions()
         _in_background(self._grant_worker)
 
     def _grant_worker(self):
@@ -492,17 +490,17 @@ class TypingStep(Step):
         w = self.wiz
         w.busy(False)
         if ok:
-            w.set_status("Permission granted", "good")
-            self._test()
+            self._ready("Permission granted", "good")
         else:
             w.set_status(msg or "The request was refused", "bad")
             w.set_actions(primary=("Try again", self._grant),
-                          secondary=("Skip, use the clipboard", w.advance))
+                          secondary=("Skip, use the clipboard", self._ready))
 
     def _enable_ydotoold(self):
         w = self.wiz
         w.busy(True)
         w.set_status("Starting the typing service…")
+        w.set_actions()
         _in_background(self._enable_worker)
 
     def _enable_worker(self):
@@ -514,47 +512,56 @@ class TypingStep(Step):
                       (r.stderr or "").strip())
 
     def _enabled(self, ok, msg):
-        w = self.wiz
-        w.busy(False)
+        self.wiz.busy(False)
         if ok:
-            w.set_status("Typing service running", "good")
-            self._test()
+            self._ready("Typing service running", "good")
         else:
-            w.set_status(msg or "Could not start the service", "bad")
-            w.set_actions(primary=("Continue anyway", w.advance))
+            self._ready(msg or "Could not start the service", "bad")
 
-    # --- the live test ---------------------------------------------------
-    def _test(self):
+    # --- the dictation ---------------------------------------------------
+    def _ready(self, status="Ready when you are", tone=""):
+        w = self.wiz
+        w.set_status(status, tone)
+        w.set_actions(primary=("Start dictation", self._go),
+                      secondary=("Finish", self._finish))
+
+    def _go(self):
         w = self.wiz
         self.entry.set_text("")
         self.entry.grab_focus()
         w.busy(True)
-        w.set_status("Typing a test line…")
+        w.set_status("Listening. Say something, then pause.")
         w.set_actions()
-        _in_background(self._test_worker)
+        _in_background(self._worker)
 
-    def _test_worker(self):
-        time.sleep(0.4)      # let the focus land before keys arrive
-        tier = deliver.type_text(TEST_PHRASE)
-        GLib.idle_add(self._tested, tier)
+    def _worker(self):
+        r = _run([DICTATE, "type"], timeout=120)
+        tail = (r.stderr or "").strip().splitlines()
+        GLib.idle_add(self._done, r.returncode == 0, tail[-1] if tail else "")
 
-    def _tested(self, tier):
+    def _done(self, ok, tail):
         w = self.wiz
         w.busy(False)
-        landed = self.entry.get_text().strip() == TEST_PHRASE
-        if landed:
-            w.set_status(f"Typing works ({tier})", "good")
-            w.set_actions(primary=("Continue", w.advance))
-        elif tier:
-            w.set_status(f"Sent through {tier}, but nothing arrived in the "
-                         "box. Keep this window focused and try again.",
-                         "bad")
-            w.set_actions(primary=("Try again", self._test),
-                          secondary=("Continue", w.advance))
+        text = self.entry.get_text().strip()
+        if text:
+            w.set_status(f"Heard: {text}", "good")
+            w.set_actions(primary=("Finish", self._finish),
+                          secondary=("Again", self._go))
+        elif ok:
+            w.set_status("Transcribed, but the text did not land here. It is "
+                         "on the clipboard: press Ctrl+V in the box.", "bad")
+            w.set_actions(primary=("Finish", self._finish),
+                          secondary=("Again", self._go))
         else:
-            w.set_status("Nothing could type. dictatr will use the "
-                         "clipboard.", "bad")
-            w.set_actions(primary=("Continue", w.advance))
+            w.set_status(tail or "Dictation failed. Check the engine step.",
+                         "bad")
+            w.set_actions(primary=("Try again", self._go),
+                          secondary=("Finish", self._finish))
+
+    def _finish(self):
+        write_config({"setup_done": True})
+        self.wiz.mark_complete()
+        self.wiz.close()
 
 
 class HotkeysStep(Step):
@@ -668,60 +675,6 @@ class HotkeysStep(Step):
         w.set_actions(primary=("Continue", w.advance))
 
 
-class TryStep(Step):
-    key, icon = "try", "dictatr-mic-symbolic"
-    title = "Try it"
-
-    def enter(self):
-        w = self.wiz
-        w.set_body("One real dictation, using everything you just set up. "
-                   "Press the button, say a sentence, then stop talking.")
-        self.entry = Gtk.Entry(placeholder_text="your words land here",
-                               hexpand=True)
-        w.set_extra(self.entry)
-        w.set_status("Ready when you are")
-        w.set_actions(primary=("Start dictation", self._go),
-                      secondary=("Finish", self._finish))
-
-    def _go(self):
-        w = self.wiz
-        self.entry.set_text("")
-        self.entry.grab_focus()
-        w.busy(True)
-        w.set_status("Listening. Say something, then pause.")
-        w.set_actions()
-        _in_background(self._worker)
-
-    def _worker(self):
-        r = _run([DICTATE, "type"], timeout=120)
-        GLib.idle_add(self._done, r.returncode == 0,
-                      (r.stderr or "").strip().splitlines()[-1:] or [""])
-
-    def _done(self, ok, tail):
-        w = self.wiz
-        w.busy(False)
-        text = self.entry.get_text().strip()
-        if text:
-            w.set_status(f"Heard: {text}", "good")
-            w.set_actions(primary=("Finish", self._finish),
-                          secondary=("Again", self._go))
-        elif ok:
-            w.set_status("Transcribed, but the text did not land here. It is "
-                         "on the clipboard: press Ctrl+V in the box.", "bad")
-            w.set_actions(primary=("Finish", self._finish),
-                          secondary=("Again", self._go))
-        else:
-            w.set_status(tail[0] or "Dictation failed. Check the engine "
-                                    "step.", "bad")
-            w.set_actions(primary=("Try again", self._go),
-                          secondary=("Finish", self._finish))
-
-    def _finish(self):
-        write_config({"setup_done": True})
-        self.wiz.mark_complete()
-        self.wiz.close()
-
-
 class Binder:
     """One GlobalShortcuts bind dance: CreateSession, BindShortcuts, read
     back the triggers the desktop actually assigned, then close the
@@ -823,8 +776,11 @@ class Wizard(Gtk.ApplicationWindow):
         self.add_css_class("setup")
         self.set_default_size(560, 620)
 
-        self.steps = [EngineStep(self), TypingStep(self), HotkeysStep(self),
-                      TryStep(self)]
+        # Engine first because everything needs it, hotkeys next
+        # because they are pure configuration, and the dictation last
+        # so the wizard ends on the user's own words appearing.
+        self.steps = [EngineStep(self), HotkeysStep(self),
+                      SpeakStep(self)]
         self.index = 0
         self.reached = 0
         self.completed = False

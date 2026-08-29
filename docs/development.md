@@ -83,25 +83,17 @@ $ ./dev doctor
 
 ## When the keyboard goes strange after a dictation
 
-If the desktop starts behaving as though Ctrl or Shift is held (every
-keystroke acts like a shortcut, the mouse wheel scrolls sideways),
-**press and release that modifier on the real keyboard**. That resyncs
-the compositor and is the only recovery worth trusting.
+If the desktop starts acting as though Ctrl or Shift is held, **press
+and release that modifier on the real keyboard**. That resyncs the
+compositor and is the only recovery worth trusting. Do not inject
+release events for keys nobody pressed; an earlier version of this file
+claimed that was harmless, which was never verified.
 
-Do not try to fix it by injecting release events for keys nobody
-pressed. An earlier version of this document claimed that was harmless;
-it is not verified, and unpaired releases are exactly the kind of input
-the compositor's bookkeeping is bad at.
-
-The cause is the portal typing tier, which is why it is now opt-in
-(`portal_typing` in config). It hands the compositor bare keysyms and
-lets it derive the modifiers, so the compositor tracks state for our
-virtual keyboard and the real one at once. Dictation is usually
-triggered by a held chord, so injection lands while Ctrl+Alt are still
-physically down and the two views drift apart. ydotool has its own
-uinput device and applies shift itself, so it never joins that
-bookkeeping; it is the default tier and needs `/dev/uinput` access,
-which the packages grant with a udev rule.
+The cause and the fix are in [the guide](guide.md#typing-at-the-cursor):
+portal typing now waits for the hotkey chord to be released before it
+injects, because dictation is a toggle and the press that ends a
+recording is still down when the transcript is ready. `runstate.CHORD`
+carries that state from the tray to whichever process is delivering.
 
 ## Tests
 
@@ -121,7 +113,6 @@ that would need those is exercised by hand or on the demo stage instead.
 | `DICTATE_INPUT_PACED=1` | feed that wav in real time rather than as fast as it reads |
 | `LEMONADE_URL=...` | force one server URL, skipping all backend detection |
 | `DICTATE_NO_PORTAL=1` | skip the portal typing tier outright |
-| `DICTATE_PORTAL_TYPING=1` | opt into the portal tier (off by default) |
 | `DICTATE_NO_SETUP=1` | stop the tray offering the setup wizard |
 | `DICTATR_SETUP_STEP=N` | open the wizard straight on page N (0 to 3) |
 | `RADIAL_DEMO=progress` | `python3 ui/radial.py` shows the progress bubble on its own |

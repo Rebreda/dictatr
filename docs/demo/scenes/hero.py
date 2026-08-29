@@ -33,16 +33,16 @@ CAMERA_PLAN = {
     "keyframes": [
         # Set the scene, then hold wide through the hotkey beat so the
         # keycaps and the "Listening" notification both read.
-        {"at": {"t": 0.0}, "zoom": 1.0, "center": [800, 450]},
+        {"at": {"t": 0.0}, "zoom": 1.0, "center": [640, 360]},
         {"at": {"cue": "speech_started", "offset": 0.5},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [640, 360]},
         # Then onto the cursor while the transcription lands in chunks.
         {"at": {"cue": "speech_started", "offset": 1.5},
-         "zoom": 1.6, "center": [470, 330]},
+         "zoom": 1.6, "center": [376, 264]},
         {"at": {"cue": "type_end", "offset": 0.6},
-         "zoom": 1.6, "center": [470, 330]},
+         "zoom": 1.6, "center": [376, 264]},
         {"at": {"cue": "type_end", "offset": 2.6},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [640, 360]},
     ],
     "end": {"cue": "type_end", "offset": 3.8},
     # Screen-space keycap badge: the hotkey that starts dictation.
@@ -71,7 +71,7 @@ def speech_duration(voice_wav: str) -> float:
 
 def run(d: Director, voice_wav: str, raw_out: str):
     stills.desktop(d)
-    d.move_to(1300, 620)   # park the cursor somewhere neutral
+    d.move_to(1040, 500)   # park the cursor somewhere neutral
 
     d.start_recording(raw_out)
     time.sleep(0.6)

@@ -1,8 +1,8 @@
 """Voice-chat video: a two-turn conversation with the AI, hands-free.
 
 Storyboard (about 28 seconds):
-  a lived-in desk — the DM window where Robin just asked "where do
-  things stand?", the notes editor behind it
+  a working desk — the DM where Robin asked where things stand,
+  a browser off to the side
   ->  the radial menu blooms; pointer CLICKS the "Ask the AI" bubble
   ->  the chat hub lands at the pointer; the mic goes green
   ->  turn 1: the spoken request streams word-by-word into a green
@@ -17,12 +17,11 @@ scripted word-level deltas paced to the audio, and the answers come from
 the stub's chat endpoint. Nothing in the UI is faked.
 """
 
-import shutil
 import time
 
 from director import Director
 from hero import speech_duration
-from session import DEMO, REPO, STAGE, W, H
+from session import DEMO, REPO, W, H
 
 TRANSCRIPTS = [
     "Draft a status update for Robin: tray rewrite merged, voice "
@@ -54,39 +53,45 @@ def scenario(voices: list[str]) -> dict:
     }
 
 
-# The set (logical px): a triptych. DM window left, browser with the
-# release-checklist issue right, and the center alley belongs to the
-# chat column. Overlay surfaces never see pointer motion on the
-# headless stage, so menu and chat both settle at their FALLBACK spots:
-# the menu at the surface center, the chat hub low-center (ui/chat.py
-# places it at 62% height). The desk is designed around those points.
-BR_X, BR_Y, BR_W, BR_H = 980, 170, 600, 540
-DM_X, DM_Y, DM_W, DM_H = 60, 200, 560, 600
+# The set (logical px). Two props, both backdrop: the DM that motivates
+# the question on the left, a browser on the right. Neither says
+# anything the viewer has to read — the eye belongs on the chat column
+# in the middle alley.
+#
+# Overlay surfaces never see pointer motion on the headless stage, so
+# menu and chat both settle at their FALLBACK spots: the menu at the
+# surface center, the chat hub at 62% height. The desk is built around
+# those two points (measured on the 1280x720 stage).
+DM_X, DM_Y, DM_W, DM_H = 20, 150, 440, 476
+BR_X, BR_Y, BR_W, BR_H = 832, 128, 440, 430
 
-MENU_CX, MENU_CY = 800, 461      # overlay surface center (below the bar)
+MENU_CX, MENU_CY = W // 2, 371     # overlay surface center (below the bar)
 # "Ask the AI" is bubble 2 of the 6-bubble ring (dictate, clipboard,
 # ask, always-on, More, cancel): angle -90° + 2·60° = 30°, r=84.
 CHAT_BUBBLE = (MENU_CX + 73, MENU_CY + 42)
-HUB = (800, 566)                 # chat fallback: hub low-center
-PARK = (HUB[0] + 122, HUB[1] + 48)  # cursor rest: clear of the satellites
-COLUMN = (HUB[0], 430)           # chat column mid-height, for the camera
+HUB = (W // 2, 456)                # chat fallback: hub at 62% height
+PARK = (HUB[0] + 118, HUB[1] + 44)  # cursor rest: clear of the satellites
+# Camera target for the conversation. Sits BELOW the hub on purpose:
+# it lifts the whole column in frame, leaving the bottom strip free
+# for the caption HUD instead of letting it collide with the hub.
+COLUMN = (HUB[0], 358)
 
 CAMERA_PLAN = {
     "keyframes": [
-        {"at": {"t": 0.0}, "zoom": 1.0, "center": [800, 450]},
+        {"at": {"t": 0.0}, "zoom": 1.0, "center": [W // 2, H // 2]},
         {"at": {"cue": "menu_open", "offset": 1.4},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [W // 2, H // 2]},
         {"at": {"cue": "menu_open", "offset": 2.6},
-         "zoom": 1.35, "center": [MENU_CX, MENU_CY - 30]},
+         "zoom": 1.3, "center": [MENU_CX, MENU_CY - 20]},
         {"at": {"cue": "menu_click", "offset": 0.4},
-         "zoom": 1.35, "center": [MENU_CX, MENU_CY - 30]},
+         "zoom": 1.3, "center": [MENU_CX, MENU_CY - 20]},
         # Settle on the chat column for both turns of the conversation.
         {"at": {"cue": "menu_click", "offset": 1.6},
-         "zoom": 1.5, "center": list(COLUMN)},
+         "zoom": 1.28, "center": list(COLUMN)},
         {"at": {"cue": "chat_answer", "index": 1, "offset": 1.8},
-         "zoom": 1.5, "center": list(COLUMN)},
+         "zoom": 1.28, "center": list(COLUMN)},
         {"at": {"cue": "chat_answer", "index": 1, "offset": 3.6},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [W // 2, H // 2]},
     ],
     "end": {"cue": "chat_answer", "index": 1, "offset": 5.4},
     # The spoken turns, as live caption bubbles — the voice track of a
@@ -103,16 +108,15 @@ CAMERA_PLAN = {
 
 
 def dress(d: Director):
-    """The desk: tray, DM conversation left, release checklist right."""
+    """The desk: tray, the DM that prompts the question, a browser."""
     d.s.start_tray()
-    d.run_app(["python3", str(DEMO / "stage/browser.py")])
-    d.wait_window("demo.browser")
-    d.swaymsg(f'[app_id="demo.browser"] resize set {BR_W} {BR_H}, '
-              f'move position {BR_X} {BR_Y}')
-    d.run_app(["python3", str(DEMO / "stage/chat.py")])
-    d.wait_window("demo.chat")
-    d.swaymsg(f'[app_id="demo.chat"] resize set {DM_W} {DM_H}, '
-              f'move position {DM_X} {DM_Y}')
+    for prop, args, (x, y, w, h) in (
+            ("browser", [], (BR_X, BR_Y, BR_W, BR_H)),
+            ("chat", ["--idle"], (DM_X, DM_Y, DM_W, DM_H))):
+        d.run_app(["python3", str(DEMO / f"stage/{prop}.py"), *args])
+        d.wait_window(f"demo.{prop}")
+        d.swaymsg(f'[app_id="demo.{prop}"] resize set {w} {h}, '
+                  f'move position {x} {y}')
     # Focus the backdrop, not the DM composer — no focus ring pulling
     # the eye toward the entry.
     d.swaymsg('[app_id="demo.browser"] focus')

@@ -165,17 +165,8 @@ class GCSettings:
 
 
 @dataclass
-class TypingSettings:
-    # The portal tier is opt-in: it injects bare keysyms and lets the
-    # compositor derive modifiers, which desyncs modifier state when a
-    # dictation is triggered by a held chord. See deliver.py.
-    portal: bool = _b("DICTATE_PORTAL_TYPING", "portal_typing", "false")
-
-
-@dataclass
 class Settings:
     whisper: WhisperSettings = field(default_factory=WhisperSettings)
-    typing: TypingSettings = field(default_factory=TypingSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     vad: VADSettings = field(default_factory=VADSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)

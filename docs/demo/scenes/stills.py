@@ -11,13 +11,13 @@ import shutil
 import time
 
 from director import Director
-from session import REPO, STAGE, W, H
+from session import DEMO, REPO, STAGE, W, H
 
 MENU_APP_ID = "io.github.rebreda.dictatr.menu"
 
 # Editor placement, shared with the hero video scene. Sized so the
 # notes fill the window instead of floating in an empty slab.
-ED_X, ED_Y, ED_W, ED_H = 110, 160, 900, 480
+ED_X, ED_Y, ED_W, ED_H = 88, 128, 720, 384
 # nano cursor: line 7 col 3 of stage/notes.md ("- " continuation bullet)
 NANO_POS = "+7,3"
 
@@ -44,12 +44,35 @@ def desktop(d: Director):
     time.sleep(1.5)   # tray registered, editor painted
 
 
+SETUP_APP_ID = "io.github.rebreda.dictatr.setup"
+
+# The menu still gets its own backdrop: two mute props flanking the
+# middle alley, so the ring blooms over clean wallpaper instead of
+# straddling a window edge and chewing through text.
+WR_X, WR_Y, WR_W, WR_H = 40, 130, 420, 500
+BR_X, BR_Y, BR_W, BR_H = 830, 140, 430, 420
+
+
+def desk(d: Director):
+    """Backdrop for the overlay stills: a word processor and a browser,
+    both deliberately unreadable — the dictatr surface is the subject."""
+    d.s.start_tray()
+    for prop, (x, y, w, h) in (("writer", (WR_X, WR_Y, WR_W, WR_H)),
+                               ("browser", (BR_X, BR_Y, BR_W, BR_H))):
+        d.run_app(["python3", str(DEMO / f"stage/{prop}.py")])
+        d.wait_window(f"demo.{prop}")
+        d.swaymsg(f'[app_id="demo.{prop}"] resize set {w} {h}, '
+                  f'move position {x} {y}')
+    time.sleep(1.5)
+
+
 def menu(d: Director, out: str):
+    desk(d)
     _fake_listen_live(d)
     # Park the cursor at the overlay's center: whether placement comes
     # from a pointer event or the app's centered fallback, menu and
     # cursor land together — the composition is identical either way.
-    cx, cy = 800, 461
+    cx, cy = W // 2, 371
     d.move_to(cx, cy)
     time.sleep(0.2)
     d.run_app([str(REPO / "bin/dictate-menu")])
@@ -70,10 +93,7 @@ def menu(d: Director, out: str):
     time.sleep(1.0)
 
 
-SETUP_APP_ID = "io.github.rebreda.dictatr.setup"
-
-
-def setup(d: Director, out: str, step: int = 3):
+def setup(d: Director, out: str, step: int = 2):
     """The wizard on the same desk. Launched without bin/dictate-setup:
     that shim is fine, but going straight to the module keeps the
     gtk4-layer-shell preload (exported for the menu) away from a plain

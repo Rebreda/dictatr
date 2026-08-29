@@ -74,9 +74,8 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.setattr(deliver.runstate, "mark_done", lambda: None)
     monkeypatch.setattr(deliver, "notify", lambda *a, **k: None)
     monkeypatch.setattr(deliver.shutil, "which", lambda name: f"/bin/{name}")
-    # The portal tier is opt-in; these tests exercise the ladder, so turn
-    # it on and let each case decide whether it gets that far.
-    monkeypatch.setattr(deliver, "_portal_enabled", lambda: True)
+    # Typing waits for the hotkey chord to be released; no chord here.
+    monkeypatch.setattr(deliver.runstate, "chord_held", lambda *a: False)
 
     def fake_run(cmd, **kw):
         tool = "portal" if str(deliver._PORTAL_HELPER) in cmd else Path(cmd[0]).name
@@ -125,30 +124,46 @@ def test_no_token_skips_portal(ladder):
     assert calls == ["ydotool", "wl-copy"]
 
 
-def test_portal_is_opt_in(ladder, monkeypatch):
-    """Default config: ydotool, then the clipboard. Never the portal."""
+def test_env_disables_portal(ladder, monkeypatch):
     calls, rc, with_token = ladder
     with_token()
     rc["ydotool"] = 1
-    monkeypatch.setattr(deliver, "_portal_enabled", lambda: False)
+    monkeypatch.setenv("DICTATE_NO_PORTAL", "1")
     assert deliver.deliver("hi") == "clipboard"
     assert calls == ["ydotool", "wl-copy"]
 
 
-def test_portal_opt_in_reads_config(monkeypatch):
-    from dictatr import settings as settings_mod
-    monkeypatch.delenv("DICTATE_NO_PORTAL", raising=False)
-    monkeypatch.setattr(settings_mod.settings.typing, "portal", False)
-    assert deliver._portal_enabled() is False
-    monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
-    assert deliver._portal_enabled() is True
+def test_typing_waits_for_the_chord_to_be_released(ladder, monkeypatch):
+    """Injecting while Ctrl+Alt are still physically down is what leaves
+    the desktop acting as though Ctrl is stuck."""
+    calls, rc, with_token = ladder
+    with_token()
+    rc["ydotool"] = 1
+    held = {"n": 3}
+
+    def chord_held(*_a):
+        held["n"] -= 1
+        return held["n"] > 0
+
+    monkeypatch.setattr(deliver.runstate, "chord_held", chord_held)
+    monkeypatch.setattr(deliver.time, "sleep", lambda _s: None)
+    assert deliver.deliver("hi") == "typed"
+    assert held["n"] == 0            # it waited until the chord cleared
+    assert calls == ["ydotool", "portal"]
 
 
-def test_env_overrides_the_opt_in(monkeypatch):
-    from dictatr import settings as settings_mod
-    monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
-    monkeypatch.setenv("DICTATE_NO_PORTAL", "1")
-    assert deliver._portal_enabled() is False
+def test_chord_wait_is_bounded(ladder, monkeypatch):
+    """A chord nobody releases must not hang delivery forever."""
+    calls, rc, with_token = ladder
+    with_token()
+    rc["ydotool"] = 1
+    monkeypatch.setattr(deliver.runstate, "chord_held", lambda *_a: True)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(deliver.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(deliver.time, "sleep",
+                        lambda s: clock.__setitem__("t", clock["t"] + s))
+    assert deliver.deliver("hi") == "typed"
+    assert calls == ["ydotool", "portal"]
 
 
 def test_all_typing_fails_lands_on_clipboard(ladder):

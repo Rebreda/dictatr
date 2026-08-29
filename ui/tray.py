@@ -408,6 +408,11 @@ class Shortcuts:
         self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Activated",
                                   PORTAL_PATH, None,
                                   Gio.DBusSignalFlags.NONE, self._activated)
+        # Deactivated is the chord coming back up. Typing waits on this:
+        # see CHORD in runstate.py.
+        self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Deactivated",
+                                  PORTAL_PATH, None,
+                                  Gio.DBusSignalFlags.NONE, self._deactivated)
         shorts = [(sid, {"description": GLib.Variant("s", desc),
                          "preferred_trigger": GLib.Variant("s", trig)})
                   for sid, desc, trig, _ in PORTAL_SHORTCUTS]
@@ -420,10 +425,16 @@ class Shortcuts:
             return
         self._retire_legacy()
 
+    def _deactivated(self, _bus, _sender, _path, _iface, _sig, params):
+        session = params.unpack()[0]
+        if session == self.session:
+            runstate.chord_down(False)
+
     def _activated(self, _bus, _sender, _path, _iface, _sig, params):
         session, sid, _ts, _opts = params.unpack()
         if session != self.session:
             return
+        runstate.chord_down(True)
         for wanted, _desc, _trig, cmd in PORTAL_SHORTCUTS:
             if wanted == sid:
                 subprocess.Popen(cmd)

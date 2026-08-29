@@ -7,21 +7,27 @@ Typing is a ladder, most reliable first:
              compositor's modifier bookkeeping, so it cannot desync it.
   portal   - RemoteDesktop portal keysym injection (ui/portal_typed.py,
              PyGObject lives there so this package stays stdlib-only).
-             OPT-IN: needs `portal_typing = true` in config as well as a
-             stored grant token, because of the modifier desync below.
-             DICTATE_NO_PORTAL=1 skips the tier outright.
+             Needs no device access and so no root, which is why it is
+             the tier most people get. Tried only with a stored grant
+             token, so a dictation never pops a permission dialog
+             mid-flow. DICTATE_NO_PORTAL=1 skips it.
   wl-copy  - Wayland clipboard (wl-clipboard)
   notify-send - freedesktop notifications, any desktop
 
-Why ydotool goes first, despite needing a uinput device: the portal
-hands the compositor bare keysyms and lets it work out which physical
-key and which modifiers produce them. That means the compositor is
-tracking modifier state for a virtual keyboard and the real one at the
-same time. Dictation is normally triggered by a held chord (Ctrl+Alt+D),
-so injection routinely lands while real modifiers are still down, and
-the two views drift apart: the compositor is left believing Ctrl is held
-after the user let go, and the whole desktop behaves as though Ctrl is
-stuck. ydotool sidesteps the entire class of problem.
+The portal hands the compositor bare keysyms and lets it work out which
+physical key and modifiers produce them, so the compositor is tracking
+modifier state for a virtual keyboard and the real one at once. Inject
+while real modifiers are down and the two views drift apart: the
+compositor is left believing Ctrl is held after the user let go, and the
+whole desktop behaves as though Ctrl is stuck.
+
+That is not rare. Dictation is a toggle bound to Ctrl+Alt+D, so the
+press that ENDS a recording is still held when the transcript is ready
+milliseconds later. Hence _wait_for_chord below: the tray records when a
+shortcut chord is down and clears it on release, and typing waits for
+that. ydotool has none of this problem (its own device, its own shift
+handling), so it goes first where it is available, but it needs uinput
+access and the portal needs nothing at all.
 """
 
 import importlib.util
@@ -29,6 +35,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import runstate
@@ -106,25 +113,30 @@ def _gi_python() -> str:
 
 
 def _portal_enabled() -> bool:
-    """The portal tier is off unless asked for. It desyncs the
-    compositor's modifier tracking (see the module docstring), which
-    leaves the whole desktop acting as though Ctrl is held; that is far
-    worse than falling back to the clipboard, so nobody gets it by
-    accident."""
     if os.environ.get("DICTATE_NO_PORTAL") == "1":
         return False
-    from .settings import settings
-    return settings.typing.portal
+    return True
+
+
+def _wait_for_chord(timeout: float = 3.0) -> None:
+    """Block until the hotkey chord that triggered this dictation is
+    released, so keysym injection never overlaps real modifiers held
+    down. Bounded: a chord nobody releases must not hang delivery."""
+    deadline = time.monotonic() + timeout
+    while runstate.chord_held() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.06)   # let the compositor settle the release it just saw
 
 
 def _type_portal(text: str) -> bool:
-    """RemoteDesktop portal typing. Needs the opt-in above and a stored
-    grant token: without a token the portal would pop a permission dialog
-    in the middle of a dictation."""
+    """RemoteDesktop portal typing. Needs a stored grant token: without
+    one the portal would pop a permission dialog in the middle of a
+    dictation."""
     if not _portal_enabled():
         return False
     if not _portal_token().exists() or not _PORTAL_HELPER.exists():
         return False
+    _wait_for_chord()
     try:
         r = subprocess.run([_gi_python(), str(_PORTAL_HELPER)],
                            input=text.encode(), check=False,

@@ -102,7 +102,7 @@ def cmd_stills(args):
     from director import Director
     with Session(keep=args.keep).start({}) as s:
         d = Director(s)
-        stills.desktop(d)
+        # menu() dresses its own desk (stills.desk); setup() reuses it.
         stills.menu(d, str(ASSETS / "desktop-menu.png"))
         print(f"wrote {ASSETS / 'desktop-menu.png'}")
         stills.setup(d, str(ASSETS / "desktop-setup.png"))

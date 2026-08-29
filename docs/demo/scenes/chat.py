@@ -31,33 +31,33 @@ SCENARIO = {
 
 # Chat window placement (logical px): snug under the bar, near the
 # clock. Width/sidebar must match stage/chat.py (WIN_W / SIDEBAR_W).
-CHAT_X, CHAT_Y = 30, 40
-CHAT_W, CHAT_H = 700, 620
-MENU_CX, MENU_CY = 800, 461      # overlay surface center (below the bar)
+CHAT_X, CHAT_Y = 24, 32
+CHAT_W, CHAT_H = 560, 520
+MENU_CX, MENU_CY = 640, 371      # overlay surface center (below the bar)
 TYPE_BUBBLE = (MENU_CX, MENU_CY - 84)   # top bubble: Dictate
 # The round send button, bottom-right of the composer.
 SEND_BTN = (CHAT_X + CHAT_W - 30, CHAT_Y + CHAT_H - 28)
 # The compose entry, where the transcript lands live.
-COMPOSE = (CHAT_X + 240 + 190, CHAT_Y + CHAT_H - 40)
+COMPOSE = (CHAT_X + 168 + 180, CHAT_Y + CHAT_H - 40)
 
 CAMERA_PLAN = {
     "keyframes": [
-        {"at": {"t": 0.0}, "zoom": 1.0, "center": [800, 450]},
+        {"at": {"t": 0.0}, "zoom": 1.0, "center": [640, 360]},
         {"at": {"cue": "menu_open", "offset": 1.8},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [640, 360]},
         {"at": {"cue": "menu_open", "offset": 3.0},
-         "zoom": 1.3, "center": [770, 400]},
+         "zoom": 1.3, "center": [616, 320]},
         {"at": {"cue": "menu_click", "offset": 0.3},
-         "zoom": 1.3, "center": [770, 400]},
+         "zoom": 1.3, "center": [616, 320]},
         # Tight on the compose box: the words land here, live.
         {"at": {"cue": "speech_started", "offset": 0.7},
          "zoom": 1.9, "center": [COMPOSE[0], COMPOSE[1] - 50]},
         {"at": {"cue": "sent", "offset": 0.4},
          "zoom": 1.9, "center": [COMPOSE[0], COMPOSE[1] - 50]},
         {"at": {"cue": "sent", "offset": 1.8},
-         "zoom": 1.3, "center": [420, 400]},
+         "zoom": 1.3, "center": [336, 320]},
         {"at": {"cue": "sent", "offset": 3.4},
-         "zoom": 1.0, "center": [800, 450]},
+         "zoom": 1.0, "center": [640, 360]},
     ],
     "end": {"cue": "sent", "offset": 4.6},
 }

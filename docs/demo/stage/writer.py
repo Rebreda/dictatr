@@ -19,7 +19,7 @@ from gi.repository import Gtk  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import props  # noqa: E402
 
-WIN_W, WIN_H = 560, 600
+WIN_W, WIN_H = 420, 520
 
 CSS = b"""
 window { background: #23252c; }
@@ -49,8 +49,8 @@ class WriterWindow(Gtk.ApplicationWindow):
 
         desk = Gtk.Box(vexpand=True)
         desk.add_css_class("deskspace")
-        sheet = Gtk.Box(hexpand=True, margin_top=20,
-                        margin_start=28, margin_end=28)
+        sheet = Gtk.Box(hexpand=True, margin_top=18,
+                        margin_start=22, margin_end=22)
         sheet.add_css_class("sheet")
         sheet.append(self._live_page() if live else self._skeleton_page())
         desk.append(sheet)
@@ -67,11 +67,11 @@ class WriterWindow(Gtk.ApplicationWindow):
 
     def _skeleton_page(self):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22,
-                       hexpand=True, margin_top=34, margin_start=36,
-                       margin_end=32)
-        page.append(props.skeleton([210], strong_first=True))
-        page.append(props.skeleton([380, 400, 356, 392, 300]))
-        page.append(props.skeleton([392, 370, 240]))
+                       hexpand=True, margin_top=30, margin_start=28,
+                       margin_end=24)
+        page.append(props.skeleton([150], strong_first=True))
+        page.append(props.skeleton([260, 244, 252, 230, 180]))
+        page.append(props.skeleton([252, 236, 160]))
         page.append(Gtk.Box(vexpand=True))
         return page
 

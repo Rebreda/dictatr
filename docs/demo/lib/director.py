@@ -54,8 +54,17 @@ class Director:
         self.s.pointerd.stdin.write(json.dumps(cmd) + "\n")
         self.s.pointerd.stdin.flush()
 
+    @staticmethod
+    def _clamp(x, y):
+        """Keep the cursor on the stage. An off-screen pointer is not a
+        harmless no-op: stop_recording() wakes wf-recorder by wiggling
+        it, and a cursor parked outside the output damages nothing, so
+        the recorder never notices the signal and the capture hangs."""
+        return (min(max(int(x), 0), W - 1), min(max(int(y), 0), H - 1))
+
     def move_to(self, x, y):
-        self._ptr(op="move", x=int(x), y=int(y))
+        x, y = self._clamp(x, y)
+        self._ptr(op="move", x=x, y=y)
         self.pointer = (x, y)
 
     def glide_to(self, x, y, duration: float = 0.6):
@@ -64,10 +73,10 @@ class Director:
         steps = max(2, int(duration * 90))
         for i in range(1, steps + 1):
             e = _smootherstep(i / steps)
-            self._ptr(op="move", x=int(x0 + (x - x0) * e),
-                      y=int(y0 + (y - y0) * e))
+            px, py = self._clamp(x0 + (x - x0) * e, y0 + (y - y0) * e)
+            self._ptr(op="move", x=px, y=py)
             time.sleep(duration / steps)
-        self.pointer = (x, y)
+        self.pointer = self._clamp(x, y)
 
     def click(self, btn: str = "left"):
         self._ptr(op="button", btn=btn, state=1)
@@ -128,17 +137,22 @@ class Director:
         # wf-recorder only notices the signal when a frame event arrives,
         # and a static screen produces none — wiggle the cursor until it
         # wakes up and exits.
-        x, y = self.pointer
+        x, y = self._clamp(*self.pointer)
         for i in range(100):
             if self.recorder.poll() is not None:
                 break
-            self._ptr(op="move", x=int(x + i % 2), y=int(y))
+            px, py = self._clamp(x + i % 2, y)
+            self._ptr(op="move", x=px, y=py)
             time.sleep(0.1)
         try:
             self.recorder.wait(20)
         except subprocess.TimeoutExpired:
             self.recorder.terminate()
-            self.recorder.wait(10)
+            try:
+                self.recorder.wait(10)
+            except subprocess.TimeoutExpired:
+                self.recorder.kill()
+                self.recorder.wait(10)
         self.recorder = None
 
     def stream_type(self, text: str, duration: float,

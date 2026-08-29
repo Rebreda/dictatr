@@ -5,6 +5,9 @@ Purely a stage prop: a skeleton sidebar (abstract conversation rows),
 preset incoming messages, a focused compose entry (so wtype-typed
 dictation lands in it), and Enter / the send button posts the draft as
 an outgoing bubble. Styled to the demo palette. No network, nothing real.
+
+--idle stages it as pure backdrop: no focus ring on the composer to
+pull the eye off whatever dictatr surface is in front of it.
 """
 
 import sys
@@ -19,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import props  # noqa: E402
 
 # Keep in sync with scenes/chat.py (window placement + camera targets).
-WIN_W, WIN_H = 700, 620
-SIDEBAR_W = 240
+WIN_W, WIN_H = 560, 520
+SIDEBAR_W = 150
 
 # The one thing on set that DOES spell out real text: the demo's whole
 # premise is answering this question by voice.
@@ -93,7 +96,8 @@ def _bar(width, cls="skl"):
 
 
 class ChatWindow(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, idle: bool = False):
+        self.idle = idle
         super().__init__(application=app, title="Robin",
                          default_width=WIN_W, default_height=WIN_H)
         props.add_css(self, CSS)
@@ -157,14 +161,14 @@ class ChatWindow(Gtk.ApplicationWindow):
             if avatar_label:  # the live conversation: real text
                 name = Gtk.Label(label="Robin", xalign=0.0)
                 name.add_css_class("row-name")
-                preview = Gtk.Label(label="any chance you can summari…",
+                preview = Gtk.Label(label="can you summarize where thi…",
                                     xalign=0.0)
                 preview.add_css_class("row-preview")
                 col.append(name)
                 col.append(preview)
             else:     # skeleton row: abstract name + preview bars
-                col.append(_bar(84))
-                col.append(_bar(128, "skl dim"))
+                col.append(_bar(64))
+                col.append(_bar(96, "skl dim"))
             row.append(col)
             if unread:
                 dot = Gtk.Box(valign=Gtk.Align.CENTER)
@@ -191,7 +195,7 @@ class ChatWindow(Gtk.ApplicationWindow):
 
     def _bubble(self, side, text):
         lab = Gtk.Label(label=text, wrap=True, xalign=0.0,
-                        max_width_chars=26)
+                        max_width_chars=24)
         lab.add_css_class("bubble")
         lab.add_css_class(side)
         lab.set_halign(Gtk.Align.START if side == "in" else Gtk.Align.END)
@@ -201,7 +205,8 @@ class ChatWindow(Gtk.ApplicationWindow):
     def _composer(self):
         box = Gtk.Box(spacing=10)
         box.add_css_class("composer")
-        self.entry = Gtk.Entry(placeholder_text="Message", hexpand=True)
+        self.entry = Gtk.Entry(placeholder_text="Message", hexpand=True,
+                               can_focus=not self.idle)
         self.entry.add_css_class("compose")
         self.entry.connect("activate", self.on_send)
         box.append(self.entry)
@@ -226,14 +231,16 @@ class ChatWindow(Gtk.ApplicationWindow):
 
 
 class ChatApp(Gtk.Application):
-    def __init__(self):
+    def __init__(self, idle: bool):
         super().__init__(application_id="demo.chat")
+        self.idle = idle
 
     def do_activate(self):
-        win = ChatWindow(self)
+        win = ChatWindow(self, idle=self.idle)
         win.present()
-        win.entry.grab_focus()
+        if not self.idle:
+            win.entry.grab_focus()
 
 
 if __name__ == "__main__":
-    ChatApp().run([])
+    ChatApp(idle="--idle" in sys.argv).run([])

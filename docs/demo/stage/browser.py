@@ -19,7 +19,7 @@ from gi.repository import Gtk  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import props  # noqa: E402
 
-WIN_W, WIN_H = 600, 540
+WIN_W, WIN_H = 440, 430
 
 CSS = b"""
 window { background: #17181d; }
@@ -54,7 +54,7 @@ class BrowserWindow(Gtk.ApplicationWindow):
         bar = Gtk.CenterBox()
         bar.add_css_class("chrome")
         tabs = Gtk.Box(spacing=4, margin_top=6, margin_start=8)
-        for width, active in ((124, True), (86, False)):
+        for width, active in ((104, True), (72, False)):
             tab = Gtk.Box()
             tab.add_css_class("tab")
             if not active:
@@ -86,7 +86,7 @@ class BrowserWindow(Gtk.ApplicationWindow):
         pill = Gtk.Box(spacing=8, hexpand=True)
         pill.add_css_class("urlpill")
         pill.append(Gtk.Image(icon_name="system-lock-screen-symbolic"))
-        url = props.skeleton([150])
+        url = props.skeleton([124])
         url.set_valign(Gtk.Align.CENTER)
         pill.append(url)
         row.append(pill)
@@ -97,13 +97,13 @@ class BrowserWindow(Gtk.ApplicationWindow):
     def _page(self):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20,
                        vexpand=True, margin_top=22, margin_bottom=18,
-                       margin_start=26, margin_end=26)
+                       margin_start=20, margin_end=20)
         page.add_css_class("page")
-        page.append(props.skeleton([300], strong_first=True))
+        page.append(props.skeleton([210], strong_first=True))
         hero = Gtk.Box()
         hero.add_css_class("hero")
         page.append(hero)
-        page.append(props.skeleton([460, 430, 470, 300]))
+        page.append(props.skeleton([310, 286, 300, 190]))
         page.append(Gtk.Box(vexpand=True))   # page bg fills to the bottom
         return page
 

@@ -7,6 +7,7 @@ live so an utterance is never archived twice.
 """
 
 import os
+import time
 from pathlib import Path
 
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dictatr"
@@ -18,6 +19,13 @@ MODE = RUN / "mode"
 # Touched on successful delivery; the tray flashes a checkmark while
 # this file is fresh.
 DONE = RUN / "done"
+# The tray touches this while a global-shortcut chord is held down and
+# removes it on release. Typing waits for it to clear: injecting keysyms
+# while the real Ctrl+Alt are still down desyncs the compositor's
+# modifier tracking, and the desktop is left acting as though Ctrl is
+# stuck. Dictation is a toggle, so the second press is still held when
+# the transcript is ready.
+CHORD = RUN / "chord"
 
 
 def live_pid(pidfile: Path) -> int | None:
@@ -59,3 +67,22 @@ def done_age() -> float | None:
         return time.time() - DONE.stat().st_mtime
     except OSError:
         return None
+
+
+def chord_down(held: bool) -> None:
+    if held:
+        RUN.mkdir(parents=True, exist_ok=True)
+        CHORD.touch()
+    else:
+        CHORD.unlink(missing_ok=True)
+
+
+def chord_held(stale_after: float = 5.0) -> bool:
+    """True while a hotkey chord is down. A missed release (the tray
+    died mid-press) would otherwise block typing forever, so the flag
+    expires."""
+    try:
+        age = time.time() - CHORD.stat().st_mtime
+    except OSError:
+        return False
+    return age < stale_after

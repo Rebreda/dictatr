@@ -92,46 +92,34 @@ settings; the tray logs one line and stays out of the way.
 Delivery tries three tiers in order, and the outcome notification stays
 truthful ("Typed:" only when text was really typed, "Copied" otherwise):
 
-1. **ydotool**: a uinput device of its own, which presses and releases
-   its own keys and applies shift itself. The packages ship a udev rule
-   granting the logged-in user access to `/dev/uinput`, so the daemon
-   runs rootless as a user service:
-
-   ```bash
-   systemctl --user enable --now dictatr-ydotoold
-   ```
-
+1. **ydotool**, when it is available: its own uinput device, its own
+   shift handling, no involvement in the compositor's keyboard state.
+   Rootless once `/dev/uinput` is accessible, which the packages arrange
+   with a udev rule, then `systemctl --user enable --now dictatr-ydotoold`.
 2. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
-   through xdg-desktop-portal, needing no device access at all.
-   **Opt-in**, with `portal_typing = true` in config, because it injects
-   bare keysyms and lets the compositor derive the modifiers. That makes
-   the compositor track modifier state for a virtual keyboard and the
-   real one at the same time, and dictation is usually triggered by a
-   held chord (Ctrl+Alt+D), so injection lands while those keys are
-   still physically down. The two views drift apart and the desktop is
-   left acting as though Ctrl is stuck. If that happens, press and
-   release the modifier on the real keyboard to resync it.
+   through xdg-desktop-portal. No device access, no root, nothing to
+   install, so this is the tier most people actually get. It runs only
+   with a stored grant token, so a dictation never pops a permission
+   dialog mid-flow. `DICTATE_NO_PORTAL=1` skips it.
+3. **Clipboard**: `wl-copy` plus a "Copied" notification.
 
-   With the opt-in set, the grant is remembered across sessions on
-   Plasma 6.1+ and GNOME 46+ as a token in
-   `~/.local/state/dictatr/portal-typing-token`, so the permission
-   dialog appears once. A dictation never pops that dialog mid-flow:
-   without a stored token the tier is skipped. `DICTATE_NO_PORTAL=1`
-   disables it regardless of config.
+**Typing waits for your hotkey to come up first.** The portal hands the
+compositor bare keysyms and lets it work out which physical key and
+modifiers make them, so the compositor is tracking modifier state for a
+virtual keyboard and your real one at the same time. Inject while real
+modifiers are down and the two drift apart: the compositor keeps
+believing Ctrl is held after you let go, and the desktop behaves as
+though Ctrl is stuck on everything.
 
-3. **Clipboard**: `wl-copy` plus a "Copied" notification. Always works,
-   and it is where dictation lands when neither tier above is set up.
+That is the normal case, not an edge case: dictation is a toggle bound
+to Ctrl+Alt+D, so the press that *ends* a recording is still held when
+the transcript is ready milliseconds later. The tray records when a
+shortcut chord goes down and clears it on release, and delivery waits
+for that (bounded to three seconds, in case a release is never seen).
 
-**Source installs** do not get the udev rule, so `/dev/uinput` stays
-root-only and ydotool cannot run as your user. Either install the
-package, or add the rule by hand:
-
-```bash
-sudo install -Dm644 packaging/70-dictatr-uinput.rules \
-    /usr/lib/udev/rules.d/70-dictatr-uinput.rules
-sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
-systemctl --user enable --now dictatr-ydotoold
-```
+If a desktop does end up stuck this way, press and release the modifier
+on your real keyboard; that resyncs it. Do not try to fix it by
+injecting release events for keys nobody pressed.
 
 ## Always-on capture
 
