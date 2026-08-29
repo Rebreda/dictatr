@@ -29,6 +29,7 @@ Calling `python3 ui/menu.py` from an activated venv fails with
 ./dev logs       # follow the tray log
 ./dev test       # pytest
 ./dev doctor     # find a second dictatr competing with this one
+./dev keywatch   # print global-shortcut events as they fire
 ```
 
 **Restart after almost any change.** The tray is the resident process: it
@@ -113,6 +114,7 @@ that would need those is exercised by hand or on the demo stage instead.
 | `DICTATE_INPUT_PACED=1` | feed that wav in real time rather than as fast as it reads |
 | `LEMONADE_URL=...` | force one server URL, skipping all backend detection |
 | `DICTATE_NO_PORTAL=1` | skip the portal typing tier outright |
+| `portal_typing = false` | same, from config, for a desktop where it misbehaves |
 | `DICTATE_NO_SETUP=1` | stop the tray offering the setup wizard |
 | `DICTATR_SETUP_STEP=N` | open the wizard straight on page N (0 to 3) |
 | `RADIAL_DEMO=progress` | `python3 ui/radial.py` shows the progress bubble on its own |

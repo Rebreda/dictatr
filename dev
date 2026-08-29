@@ -7,6 +7,7 @@
 #   ./dev logs      follow the tray log
 #   ./dev test      the test suite
 #   ./dev doctor    find a second dictatr competing with this one
+#   ./dev keywatch  print global-shortcut and typing events as they happen
 #
 # The tray is the resident process: it owns the hotkeys and the setup
 # offer, so code changes to it (or to anything it launches) need a
@@ -51,6 +52,32 @@ restart)
 stop) stop ;;
 logs) tail -f "$log" ;;
 test) exec "$here/.venv/bin/python" -m pytest -q "${@:2}" ;;
+keywatch)
+    # Answers "does my hotkey actually reach us through the portal?"
+    # Run it, then press the hotkey.
+    exec "$py" -u - <<'PY'
+from gi.repository import Gio, GLib
+
+BUS = "org.freedesktop.portal.Desktop"
+PATH = "/org/freedesktop/portal/desktop"
+GS = "org.freedesktop.portal.GlobalShortcuts"
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+
+def show(kind):
+    def cb(_bus, _sender, _path, _iface, _signal, params):
+        vals = params.unpack()
+        print(f"{kind:12} {vals[1] if len(vals) > 1 else ''}")
+    return cb
+
+
+for name in ("Activated", "Deactivated"):
+    bus.signal_subscribe(BUS, GS, name, PATH, None,
+                         Gio.DBusSignalFlags.NONE, show(name))
+print("watching global shortcuts; press your dictate hotkey (Ctrl-C to stop)")
+GLib.MainLoop().run()
+PY
+    ;;
 status)
     echo "checkout:  $here ($(git -C "$here" rev-parse --short HEAD 2>/dev/null))"
     for name in tray menu chat setup; do

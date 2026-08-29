@@ -165,8 +165,18 @@ class GCSettings:
 
 
 @dataclass
+class TypingSettings:
+    # Portal keysym injection can leave the compositor's modifier state
+    # desynced on some desktops, which makes the whole session act as
+    # though Ctrl is held. Escape hatch while that is being chased:
+    # portal_typing = false falls back to the clipboard instead.
+    portal: bool = _b("DICTATE_PORTAL_TYPING", "portal_typing", "true")
+
+
+@dataclass
 class Settings:
     whisper: WhisperSettings = field(default_factory=WhisperSettings)
+    typing: TypingSettings = field(default_factory=TypingSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     vad: VADSettings = field(default_factory=VADSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)

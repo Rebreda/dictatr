@@ -76,6 +76,10 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.setattr(deliver.shutil, "which", lambda name: f"/bin/{name}")
     # Typing waits for the hotkey chord to be released; no chord here.
     monkeypatch.setattr(deliver.runstate, "chord_held", lambda *a: False)
+    # The portal tier has a config escape hatch; the ladder tests are
+    # about ordering, so keep it on and let each case opt out.
+    from dictatr import settings as settings_mod
+    monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
 
     def fake_run(cmd, **kw):
         tool = "portal" if str(deliver._PORTAL_HELPER) in cmd else Path(cmd[0]).name
@@ -120,6 +124,16 @@ def test_ydotool_failure_falls_to_portal(ladder):
 def test_no_token_skips_portal(ladder):
     calls, rc, _ = ladder
     rc["ydotool"] = 1
+    assert deliver.deliver("hi") == "clipboard"
+    assert calls == ["ydotool", "wl-copy"]
+
+
+def test_config_can_disable_portal(ladder, monkeypatch):
+    from dictatr import settings as settings_mod
+    calls, rc, with_token = ladder
+    with_token()
+    rc["ydotool"] = 1
+    monkeypatch.setattr(settings_mod.settings.typing, "portal", False)
     assert deliver.deliver("hi") == "clipboard"
     assert calls == ["ydotool", "wl-copy"]
 

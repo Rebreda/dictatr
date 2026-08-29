@@ -115,7 +115,8 @@ def _gi_python() -> str:
 def _portal_enabled() -> bool:
     if os.environ.get("DICTATE_NO_PORTAL") == "1":
         return False
-    return True
+    from .settings import settings
+    return settings.typing.portal
 
 
 def _wait_for_chord(timeout: float = 3.0) -> None:
