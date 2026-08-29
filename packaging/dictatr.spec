@@ -4,7 +4,7 @@
 %global _binaries_in_noarch_packages_terminate_build 0
 
 Name:           dictatr
-Version:        0.2.0
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Hotkey voice dictation for Linux desktops, backed by a local Lemonade Whisper server
 License:        MIT
@@ -63,6 +63,20 @@ bash packaging/stage.sh %{buildroot}
 /usr/share/icons/hicolor/scalable/apps/dictatr.svg
 
 %changelog
+* Sat Aug 29 2026 Rebreda - 0.3.0-1
+- Drop ydotool: typing is the desktop portal, then the clipboard. No
+  uinput device, no udev rule, no root step in the install
+- The setup wizard is a radial overlay now, the same surface as the
+  menu, rather than a dialog
+- Fix global hotkeys, which were bound to nothing on KDE: portal work
+  runs on a private connection so Register succeeds, and empty triggers
+  are repaired through kglobalaccel after retiring legacy entries
+- Portal typing holds Shift itself instead of leaving the compositor to
+  synthesise it, which used to latch Shift for the rest of the session
+- Typing waits for the hotkey chord to be released, so injected keysyms
+  are not resolved against modifiers that are still physically down
+- DICTATE_TYPE_CMD overrides the typing command, for test harnesses
+
 * Sat Aug 29 2026 Rebreda - 0.2.0-1
 - Setup wizard: engine, typing permission, hotkeys, test dictation
 - Backend providers: bundled lemond, detected system server, or custom

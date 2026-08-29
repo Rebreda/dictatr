@@ -1,6 +1,6 @@
 [project]
 name = "dictatr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hotkey voice dictation for Linux desktops, backed by a local Lemonade Whisper server"
 readme = "README.md"
 requires-python = ">=3.11"
