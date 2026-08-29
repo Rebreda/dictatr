@@ -33,8 +33,27 @@ def pretty(trigger: str) -> str:
     return " + ".join(parts)
 
 
+def desktop_name(sid: str) -> str:
+    """The .desktop basename for a shortcut, which is also the group
+    bin/dictate-hotkeys writes into kglobalshortcutsrc."""
+    return "dictate" if sid == "dictate" else f"dictate-{sid}"
+
+
+def command(cmd: list) -> str:
+    """The command as a desktop entry spells it: the launcher's name
+    plus its arguments, for the caller to prefix with its bindir."""
+    return " ".join([Path(cmd[0]).name, *cmd[1:]])
+
+
 if __name__ == "__main__":
-    # bin/dictate-hotkeys reads this: "<id>\t<trigger>\t<description>".
-    for sid, desc, trigger, _cmd in SHORTCUTS:
-        keys = pretty(trigger).replace(" ", "")
-        print(f"{sid}\t{keys}\t{desc}")
+    # Emitted for the shell that installs things, so the desktop entries,
+    # the KDE fallback bindings and the portal registration cannot drift.
+    #   --kde      "<id>\t<keys>\t<description>"
+    #   --desktop  "<basename>\t<label>\t<command>"
+    import sys
+    mode = sys.argv[1] if len(sys.argv) > 1 else "--kde"
+    for sid, desc, trigger, cmd in SHORTCUTS:
+        if mode == "--desktop":
+            print(f"{desktop_name(sid)}\t{desc}\t{command(cmd)}")
+        else:
+            print(f"{sid}\t{pretty(trigger).replace(' ', '')}\t{desc}")

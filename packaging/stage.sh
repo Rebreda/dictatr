@@ -78,11 +78,10 @@ NoDisplay=true
 StartupNotify=false
 EOF
 }
-desktop dictate        "Dictate (toggle)"           "/usr/bin/dictate type"
-desktop dictate-menu   "Dictate menu"               "/usr/bin/dictate-menu"
-desktop dictate-cancel "Dictate cancel"             "/usr/bin/dictate cancel"
-desktop dictate-listen "Dictate always-on (toggle)" "/usr/bin/dictate listen --toggle"
-desktop dictate-chat   "Ask the AI (voice chat)"     "/usr/bin/dictate-chat"
+python3 "$repo/ui/shortcuts.py" --desktop |
+    while IFS=$'\t' read -r name label cmd; do
+        desktop "$name" "$label" "/usr/bin/$cmd"
+    done
 
 # The portal will not hand out global shortcuts (or anything else) to an
 # app whose id has no desktop file behind it: Register fails with "App
