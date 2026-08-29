@@ -104,7 +104,9 @@ def cmd_stills(args):
         d = Director(s)
         stills.desktop(d)
         stills.menu(d, str(DOCS / "desktop-menu.png"))
-    print(f"wrote {DOCS / 'desktop-menu.png'}")
+        print(f"wrote {DOCS / 'desktop-menu.png'}")
+        stills.setup(d, str(DOCS / "desktop-setup.png"))
+    print(f"wrote {DOCS / 'desktop-setup.png'}")
     # The chat still replays the real two-turn conversation, so it needs
     # a fresh stage with the voicechat scenario on the stub.
     voices = _voices_ready("voicechat", voicechat)

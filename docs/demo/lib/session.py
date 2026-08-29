@@ -328,6 +328,11 @@ sys.exit(rc)
             # ydotool shim above, and the tray must not touch the host's
             # xdg-desktop-portal from the demo bus.
             DICTATE_NO_PORTAL="1",
+            # The stage config has no setup_done key, so the tray would
+            # otherwise open the wizard three seconds in and land it on
+            # top of whatever is being captured. Scenes that want the
+            # wizard launch it themselves.
+            DICTATE_NO_SETUP="1",
             GTK_THEME="Adwaita:dark",
             GSK_RENDERER="cairo",
             GTK_A11Y="none",

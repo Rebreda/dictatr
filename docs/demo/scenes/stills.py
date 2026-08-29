@@ -1,10 +1,10 @@
 """Full-desktop stills: the whole staged desktop, not isolated widgets.
 
-Both shots share the hero scene's set — wallpaper, top bar with the tray
-icon, and the notes editor — so stills and video read as one desktop.
+Every shot shares the hero scene's set (wallpaper, top bar with the tray
+icon, the notes editor) so stills and video read as one desktop.
 
-  desktop-menu.png      radial menu bloomed at the cursor, mid-work
-  desktop-settings.png  settings window floating on the same desktop
+  desktop-menu.png   radial menu bloomed at the cursor, mid-work
+  desktop-setup.png  the setup wizard, mid-walk
 """
 
 import shutil
@@ -68,6 +68,38 @@ def menu(d: Director, out: str):
     d.screenshot(out, scale=(W, H))
     d.run_app([str(REPO / "bin/dictate-menu")])   # toggle closed
     time.sleep(1.0)
+
+
+SETUP_APP_ID = "io.github.rebreda.dictatr.setup"
+
+
+def setup(d: Director, out: str, step: int = 3):
+    """The wizard on the same desk. Launched without bin/dictate-setup:
+    that shim is fine, but going straight to the module keeps the
+    gtk4-layer-shell preload (exported for the menu) away from a plain
+    window, which the stage would otherwise turn into a fullscreen layer
+    surface.
+
+    The last page is the shot worth having: the orbit carries its three
+    green checks, the mic emblem is lit, and the page holds a text field
+    and both buttons, so the whole vocabulary is visible at once. It is
+    also the one page whose text does not depend on what the machine
+    happens to have: the earlier pages report this stage's private bus
+    (no portals) rather than what a real desktop would say.
+    """
+    # Own config dir: the wizard writes a setup_done key when it closes,
+    # and the stage's checked-in config.toml is not its to edit.
+    d.run_app(["python3", str(REPO / "ui/setup.py")],
+              DICTATR_SETUP_STEP=str(step), HOME="/home/user",
+              XDG_CONFIG_HOME=str(d.s.run / "wizard-config"))
+    rect = d.wait_window(SETUP_APP_ID)
+    d.swaymsg(f'[app_id="{SETUP_APP_ID}"] move position '
+              f'{(W - rect["width"]) // 2 + 150} {(H - rect["height"]) // 2}')
+    d.move_to(W - 150, H - 150)   # cursor off the window, on open wallpaper
+    time.sleep(2.5)               # probes settle, buttons appear
+    d.screenshot(out, scale=(W, H))
+    d.swaymsg(f'[app_id="{SETUP_APP_ID}"] kill')
+    time.sleep(0.6)
 
 
 def settings(d: Director, out: str):

@@ -54,20 +54,19 @@ def scenario(voices: list[str]) -> dict:
     }
 
 
-# The set (logical px): a triptych. DM window left, notes editor right
-# (smaller type — it's set dressing), and the center alley belongs to
-# the chat column. Overlay surfaces never see pointer motion on the
+# The set (logical px): a triptych. DM window left, browser with the
+# release-checklist issue right, and the center alley belongs to the
+# chat column. Overlay surfaces never see pointer motion on the
 # headless stage, so menu and chat both settle at their FALLBACK spots:
 # the menu at the surface center, the chat hub low-center (ui/chat.py
 # places it at 62% height). The desk is designed around those points.
-ED_X, ED_Y, ED_W, ED_H = 980, 170, 600, 400
-ED_FONT = "font=Noto Sans Mono:size=10.5"   # 65 cols fit in 600px
+BR_X, BR_Y, BR_W, BR_H = 980, 170, 600, 540
 DM_X, DM_Y, DM_W, DM_H = 60, 200, 560, 600
-NANO_POS = "+7,3"   # continuation bullet in stage/notes.md
 
 MENU_CX, MENU_CY = 800, 461      # overlay surface center (below the bar)
-# "Ask the AI" is action index 3 of 7: angle -90° + 3·(360/7)°, r=84.
-CHAT_BUBBLE = (MENU_CX + 36, MENU_CY + 76)
+# "Ask the AI" is bubble 2 of the 6-bubble ring (dictate, clipboard,
+# ask, always-on, More, cancel): angle -90° + 2·60° = 30°, r=84.
+CHAT_BUBBLE = (MENU_CX + 73, MENU_CY + 42)
 HUB = (800, 566)                 # chat fallback: hub low-center
 PARK = (HUB[0] + 122, HUB[1] + 48)  # cursor rest: clear of the satellites
 COLUMN = (HUB[0], 430)           # chat column mid-height, for the camera
@@ -104,23 +103,19 @@ CAMERA_PLAN = {
 
 
 def dress(d: Director):
-    """The desk: tray, DM conversation left, notes editor right."""
+    """The desk: tray, DM conversation left, release checklist right."""
     d.s.start_tray()
-    notes = d.s.run / "notes.md"
-    shutil.copy(STAGE / "notes.md", notes)
-    d.run_app(["foot", "--app-id=demo-editor", "--title=notes.md",
-               "-o", ED_FONT,
-               "-e", "nano", "--zero", NANO_POS, str(notes)])
-    d.wait_window("demo-editor")
-    d.swaymsg(f'[app_id="demo-editor"] resize set {ED_W} {ED_H}, '
-              f'move position {ED_X} {ED_Y}')
+    d.run_app(["python3", str(DEMO / "stage/browser.py")])
+    d.wait_window("demo.browser")
+    d.swaymsg(f'[app_id="demo.browser"] resize set {BR_W} {BR_H}, '
+              f'move position {BR_X} {BR_Y}')
     d.run_app(["python3", str(DEMO / "stage/chat.py")])
     d.wait_window("demo.chat")
     d.swaymsg(f'[app_id="demo.chat"] resize set {DM_W} {DM_H}, '
               f'move position {DM_X} {DM_Y}')
-    # Editor keeps keyboard focus: solid nano cursor, and no focus ring
-    # on the DM composer pulling the eye.
-    d.swaymsg('[app_id="demo-editor"] focus')
+    # Focus the backdrop, not the DM composer — no focus ring pulling
+    # the eye toward the entry.
+    d.swaymsg('[app_id="demo.browser"] focus')
     time.sleep(1.5)   # tray registered, windows painted
 
 
