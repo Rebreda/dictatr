@@ -54,6 +54,7 @@ bash packaging/stage.sh %{buildroot}
 /usr/share/applications/dictate-menu.desktop
 /usr/share/applications/dictate-cancel.desktop
 /usr/share/applications/dictate-listen.desktop
+/usr/share/applications/dictate-chat.desktop
 /usr/share/applications/io.github.rebreda.dictatr.desktop
 /usr/share/applications/dictatr-setup.desktop
 %config(noreplace) /etc/xdg/autostart/dictatr-tray.desktop

@@ -37,21 +37,13 @@ ICONS = REPO / "ui" / "icons"
 sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
 
+sys.path.insert(0, str(REPO / "ui"))
+from shortcuts import SHORTCUTS as PORTAL_SHORTCUTS  # noqa: E402
+
 BUS_NAME = "io.github.rebreda.dictatr.tray"
 APP_ID = "io.github.rebreda.dictatr"
 PORTAL_BUS = "org.freedesktop.portal.Desktop"
 PORTAL_PATH = "/org/freedesktop/portal/desktop"
-# (shortcut id, description, preferred trigger, command) — the same
-# actions the .desktop files launch, bound via the GlobalShortcuts
-# portal instead of desktop-specific config.
-PORTAL_SHORTCUTS = [
-    ("dictate", "Dictate at cursor", "CTRL+ALT+d", [DICTATE, "type"]),
-    ("menu", "Open the dictate menu", "CTRL+ALT+space",
-     [str(REPO / "bin" / "dictate-menu")]),
-    ("cancel", "Cancel dictation", "CTRL+ALT+c", [DICTATE, "cancel"]),
-    ("listen", "Toggle always-on capture", "CTRL+ALT+a",
-     [DICTATE, "listen", "--toggle"]),
-]
 # Theme-icon fallbacks, used only if the bundled pixmaps fail to load.
 ICON_IDLE = "audio-input-microphone"
 ICON_LIVE = "media-record"

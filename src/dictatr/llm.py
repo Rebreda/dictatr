@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import urllib.request
 
+from . import context as desktop
 from . import tools as toolbox
 from .backend import client as backend
 from .settings import settings
@@ -58,8 +59,13 @@ def _post_chat(payload: dict, timeout: float = 180.0) -> dict:
         return json.load(r)["choices"][0]["message"]
 
 
+def _desktop_context() -> str:
+    names = [n.strip() for n in settings.llm.context.split(",") if n.strip()]
+    return desktop.prompt_section(desktop.gather(names)) if names else ""
+
+
 def _system_prompt(context: list[dict] | None) -> str:
-    system = SYSTEM_PROMPT
+    system = SYSTEM_PROMPT + _desktop_context()
     memories = toolbox.load_memories()
     if memories:
         system += ("\nLasting facts you remembered about the user:\n"

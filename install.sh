@@ -55,12 +55,13 @@ EOF
 command -v update-desktop-database >/dev/null && \
     update-desktop-database ~/.local/share/applications 2>/dev/null || true
 
-for name in dictate dictate-menu dictate-cancel dictate-listen; do
+for name in dictate dictate-menu dictate-cancel dictate-listen dictate-chat; do
     case $name in
     dictate) label="Dictate (toggle)" exec="$HOME/.local/bin/dictate type" ;;
     dictate-menu) label="Dictate menu" exec="$HOME/.local/bin/dictate-menu" ;;
     dictate-cancel) label="Dictate cancel" exec="$HOME/.local/bin/dictate cancel" ;;
     dictate-listen) label="Dictate always-on (toggle)" exec="$HOME/.local/bin/dictate listen --toggle" ;;
+    dictate-chat) label="Ask the AI (voice chat)" exec="$HOME/.local/bin/dictate-chat" ;;
     esac
     cat >~/.local/share/applications/$name.desktop <<EOF
 [Desktop Entry]

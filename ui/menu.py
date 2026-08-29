@@ -338,16 +338,30 @@ class SettingsWindow(Gtk.Window):
             nbox.append(cb)
         row(7, "Notifications", nbox)
 
+        # What ask mode may read from the desktop when you ask it
+        # something about "this".
+        self.ctx_checks = {}
+        cbox = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                           max_children_per_line=3, column_spacing=6)
+        have = {n.strip() for n in settings.llm.context.split(",")}
+        for key, label in (("selection", "Selected text"),
+                           ("clipboard", "Clipboard")):
+            cb = Gtk.CheckButton(label=label)
+            cb.set_active(key in have)
+            self.ctx_checks[key] = cb
+            cbox.append(cb)
+        row(8, "Ask can read", cbox)
+
         note = Gtk.Label(
             label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
             xalign=0.0)
         note.add_css_class("dim-label")
-        grid.attach(note, 0, 8, 2, 1)
+        grid.attach(note, 0, 9, 2, 1)
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
         save.connect("clicked", self.on_save)
-        grid.attach(save, 1, 9, 1, 1)
+        grid.attach(save, 1, 10, 1, 1)
 
         self.set_child(grid)
 
@@ -391,6 +405,8 @@ class SettingsWindow(Gtk.Window):
             "speak_answers": self.speak_sw.get_active(),
             "archive": archive,
         }
+        cfg["ask_context"] = ",".join(
+            k for k, cb in self.ctx_checks.items() if cb.get_active())
         for key, cb in self.notify_checks.items():
             cfg[f"notify_{key}"] = cb.get_active()
         # Merging write: the setup wizard owns the backend keys in the

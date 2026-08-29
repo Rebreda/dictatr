@@ -126,6 +126,10 @@ class LLMSettings:
         "1", "true", "yes", "on")
     embed_model: str = _s("DICTATE_EMBED_MODEL", "embed_model",
                           "nomic-embed-text-v1-GGUF")
+    # Context ask mode may read from the desktop: comma-separated
+    # source names (selection, clipboard), empty for none. Selection is
+    # on because highlighting text is a deliberate "I mean this".
+    context: str = _s("DICTATE_ASK_CONTEXT", "ask_context", "selection")
     # Tag archived dictations with LLM-extracted concepts.
     concepts: bool = _s("DICTATE_CONCEPTS", "concepts", "true").lower() in (
         "1", "true", "yes", "on")

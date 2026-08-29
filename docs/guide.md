@@ -33,7 +33,8 @@ share) with progress on the hub. It will also take a base URL and an
 optional key for any OpenAI-compatible server.
 
 **2. Hotkeys.** Asks the desktop to reserve Ctrl+Alt+D (dictate),
-Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel) and Ctrl+Alt+A (always-on),
+Ctrl+Alt+Space (menu), Ctrl+Alt+Q (voice chat), Ctrl+Alt+C (cancel)
+and Ctrl+Alt+A (always-on),
 then shows what it actually got, since a desktop may hand back different
 keys if something else holds them.
 
@@ -79,7 +80,8 @@ level and number keys pick from the visible ring.
 
 The setup wizard binds these, and the tray re-binds them through the
 GlobalShortcuts desktop portal at every startup: Ctrl+Alt+D dictate,
-Ctrl+Alt+Space menu, Ctrl+Alt+C cancel, Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
+Ctrl+Alt+Space menu, Ctrl+Alt+Q voice chat, Ctrl+Alt+C cancel,
+Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
 System Settings natively and are remembered; GNOME 48+ asks once with a
 consent dialog. When the portal bind succeeds while old
 `bin/dictate-hotkeys` entries exist in kglobalshortcutsrc, the tray
@@ -194,6 +196,17 @@ the 75 MB nomic-embed-text model) and relevant past dictations are given
 to the LLM, so "what did I say about X" works. Disable with
 `recall = false`.
 
+**It can see what you are looking at.** Ask "summarise this" and the
+question carries whatever text you have selected, so "this" means
+something. Highlighting is a deliberate act, so the selection is on by
+default; the clipboard is available too and is off, since it holds
+whatever you last copied rather than what you meant. Both are checkboxes
+in Settings ("Ask can read") or `ask_context = selection,clipboard` in
+config, and `ask_context = ""` turns the whole thing off. Screen
+contents are deliberately not a source: reading the screen means a
+screenshot through the portal and a vision model on every question,
+which is a different feature with a different cost.
+
 The default ask model is Qwen3.5-4B with thinking disabled: ~2 s answers
 warm. Reasoning models (gpt-oss, larger Qwen) work but push voice latency
 to 15-45 s. `dictatr ask --quiet` skips TTS and notifications and
@@ -269,6 +282,7 @@ environment.
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
 | `DICTATE_NO_PORTAL` | unset | `1` disables the portal typing tier and the tray's portal hotkeys |
 | `DICTATE_LIVE_TYPING` | `true` | type words as they are transcribed; `false` inserts once at the end |
+| `DICTATE_ASK_CONTEXT` | `selection` | what ask mode may read: `selection`, `clipboard`, both (comma-separated), or empty |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

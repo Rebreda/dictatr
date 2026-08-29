@@ -8,21 +8,21 @@ set -eu
 echo "Note: on Plasma 6 / GNOME 48+ the tray binds hotkeys via the desktop"
 echo "portal automatically; this script is only for other environments."
 command -v kwriteconfig6 >/dev/null || {
-    echo "kwriteconfig6 not found (not KDE?). Bind shortcuts manually:"
-    echo "  dictate type            Ctrl+Alt+D"
-    echo "  dictate-menu            Ctrl+Alt+Space"
-    echo "  dictate cancel          Ctrl+Alt+C"
-    echo "  dictate listen --toggle Ctrl+Alt+A"
+    echo "kwriteconfig6 not found (not KDE?). Bind these by hand:"
+    python3 "$(dirname "$(dirname "$(readlink -f "$0")")")/ui/shortcuts.py" |
+        while IFS=$'\t' read -r _id keys desc; do
+            printf '  %-16s %s\n' "$keys" "$desc"
+        done
     exit 1
 }
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate.desktop --key _launch "Ctrl+Alt+D"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-menu.desktop --key _launch "Ctrl+Alt+Space"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-cancel.desktop --key _launch "Ctrl+Alt+C"
-kwriteconfig6 --file kglobalshortcutsrc --group services \
-    --group dictate-listen.desktop --key _launch "Ctrl+Alt+A"
+# The set lives in ui/shortcuts.py; this reads it rather than keeping a
+# fourth copy. Portal desktops never run this script.
+here=$(dirname "$(dirname "$(readlink -f "$0")")")
+python3 "$here/ui/shortcuts.py" | while IFS=$'\t' read -r id keys desc; do
+    kwriteconfig6 --file kglobalshortcutsrc --group services \
+        --group "$([ "$id" = dictate ] && echo dictate || echo "dictate-$id").desktop" \
+        --key _launch "$keys"
+done
 
 # Plasma <= 6.3 runs a restartable shortcut daemon: reload it so the keys
 # work immediately. Newer Plasma hosts shortcuts inside KWin and only
@@ -34,7 +34,6 @@ else
     echo "Shortcuts registered. LOG OUT AND BACK IN to activate them, or"
     echo "assign them now in System Settings -> Shortcuts (search Dictate):"
 fi
-echo "  Ctrl+Alt+D      dictate (type at cursor)"
-echo "  Ctrl+Alt+Space  radial menu"
-echo "  Ctrl+Alt+C      cancel"
-echo "  Ctrl+Alt+A      always-on capture"
+python3 "$here/ui/shortcuts.py" | while IFS=$'\t' read -r _id keys desc; do
+    printf '  %-16s %s\n' "$keys" "$desc"
+done

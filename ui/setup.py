@@ -50,6 +50,7 @@ from dictatr.settings import settings, write_config  # noqa: E402
 sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
 import radial  # noqa: E402
+from shortcuts import SHORTCUTS, pretty  # noqa: E402
 from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble, Ring  # noqa: E402
 
 APP_ID = "io.github.rebreda.dictatr"
@@ -59,13 +60,6 @@ GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
 TRAY_BUS = "io.github.rebreda.dictatr.tray"
 CARD_W = 460
 
-# Same four actions the tray binds; see PORTAL_SHORTCUTS in ui/tray.py.
-SHORTCUTS = [
-    ("dictate", "Dictate at cursor", "CTRL+ALT+d"),
-    ("menu", "Open the dictate menu", "CTRL+ALT+space"),
-    ("cancel", "Cancel dictation", "CTRL+ALT+c"),
-    ("listen", "Toggle always-on capture", "CTRL+ALT+a"),
-]
 
 SETUP_CSS = f"""
 .card {{
@@ -371,13 +365,11 @@ class HotkeysStep(Step):
     def _table(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.rows = {}
-        for sid, desc, trigger in SHORTCUTS:
+        for sid, desc, trigger, _cmd in SHORTCUTS:
             row = Gtk.Box(spacing=10)
             left = Gtk.Label(label=desc, xalign=0, hexpand=True)
             left.add_css_class("body")
-            right = Gtk.Label(label=trigger.replace("CTRL", "Ctrl")
-                              .replace("ALT", "Alt").replace("+", " + "),
-                              xalign=1)
+            right = Gtk.Label(label=pretty(trigger), xalign=1)
             right.add_css_class("body")
             row.append(left)
             row.append(right)
@@ -661,7 +653,7 @@ class Binder:
             return
         shorts = [(sid, {"description": GLib.Variant("s", desc),
                          "preferred_trigger": GLib.Variant("s", trig)})
-                  for sid, desc, trig in SHORTCUTS]
+                  for sid, desc, trig, _cmd in SHORTCUTS]
         self._request("BindShortcuts", "(oa(sa{sv})sa{sv})",
                       (self.session, shorts, ""), {}, self._on_bound)
 

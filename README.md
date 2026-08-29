@@ -32,7 +32,7 @@ It walks four pages:
 | --- | --- |
 | Engine | finds a running Lemonade, or installs and starts a private one and pulls the speech model, or points at any OpenAI-compatible endpoint |
 | Typing | asks the desktop for permission to type at the cursor, then types a test line to prove it |
-| Hotkeys | binds Ctrl+Alt+D, Ctrl+Alt+Space, Ctrl+Alt+C and Ctrl+Alt+A through the shortcuts portal |
+| Hotkeys | binds Ctrl+Alt+D, Ctrl+Alt+Space, Ctrl+Alt+Q, Ctrl+Alt+C and Ctrl+Alt+A through the shortcuts portal |
 | Try it | one real dictation, so you leave knowing the chain works |
 
 Nothing here needs root and nothing is written outside your home
