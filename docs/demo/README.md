@@ -44,8 +44,8 @@ endpoints. Every take is identical: no models, no GPU, no ASR variance.
 `lib/pointerd.py` holds a wlr-virtual-pointer open for the whole session.
 Headless sway renders no cursor unless the seat has a pointer device, and
 one-shot injectors (wlrctl) destroy theirs on exit. Movement and clicks
-go through it; typing goes through wtype via a `ydotool` shim on PATH
-(real ydotool is uinput; its events would land on the *host* desktop).
+go through it; typing goes through wtype via the shim DICTATE_TYPE_CMD
+points at (the portal does not exist inside the nested compositor).
 
 `lib/director.py` drives scenes: eased pointer glides, window placement
 over sway IPC, cue logging (`cues.jsonl`), grim screenshots, wf-recorder

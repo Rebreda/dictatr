@@ -20,7 +20,6 @@ Requires:       libnotify
 Recommends:     gtk4
 Recommends:     python3-gobject
 Recommends:     gtk4-layer-shell
-Recommends:     ydotool
 
 %description
 Press a hotkey, speak, and the transcript is typed at your cursor (or
@@ -42,11 +41,6 @@ it again any time with `dictate-setup`.
 %install
 bash packaging/stage.sh %{buildroot}
 
-%post
-# Apply the uinput uaccess rule without a reboot (best effort).
-udevadm control --reload 2>/dev/null || :
-udevadm trigger --name-match=uinput 2>/dev/null || :
-
 %files
 %license LICENSE
 /usr/lib/dictatr
@@ -66,8 +60,6 @@ udevadm trigger --name-match=uinput 2>/dev/null || :
 /usr/lib/systemd/user/dictatr-listen.service
 /usr/lib/systemd/user/dictatr-gc.service
 /usr/lib/systemd/user/dictatr-gc.timer
-/usr/lib/systemd/user/dictatr-ydotoold.service
-/usr/lib/udev/rules.d/70-dictatr-uinput.rules
 /usr/share/icons/hicolor/scalable/apps/dictatr.svg
 
 %changelog

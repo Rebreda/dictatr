@@ -8,8 +8,9 @@ off from the host desktop:
   - own session bus: notifications and the tray never touch the real desktop
   - own XDG_RUNTIME_DIR for app processes: host pidfiles can't leak in
   - own XDG_CONFIG_HOME (docs/demo/stage/xdg): mako/foot/dictatr config
-  - a `ydotool` shim on PATH that types via wtype (virtual-keyboard
-    protocol) inside the nested compositor, with a typewriter cadence
+  - a typing shim (DICTATE_TYPE_CMD) that types via wtype
+    (virtual-keyboard protocol) inside the nested compositor, with a
+    typewriter cadence
 
 Tool resolution: PATH first; the DICTATR_DEMO_TOOLS env var may name
 colon-separated prefixes (each containing usr/bin, usr/lib64) to use
@@ -117,7 +118,7 @@ class Session:
         (self.run / "xdg-run").chmod(0o700)
         self.cues_path.touch()
         try:
-            self._write_ydotool_shim()
+            self._write_type_shim()
             self._start_dbus()
             self._render_wallpaper()
             self._start_sway()
@@ -163,19 +164,16 @@ class Session:
             raise SessionError("repo .venv missing — run install.sh first")
 
     # -- pieces ---------------------------------------------------------
-    def _write_ydotool_shim(self):
-        shim = self.run / "bin" / "ydotool"
+    def _write_type_shim(self):
+        shim = self.run / "bin" / "dictatr-type"
         shim.write_text(f"""#!/usr/bin/env python3
-# Demo shim: dictatr types via `ydotool type -- TEXT`. Inside the nested
-# compositor ydotool's uinput events would land on the HOST desktop, so
-# forward to wtype (virtual-keyboard protocol) with a typewriter cadence,
-# and log cues for the camera.
+# Demo shim: DICTATE_TYPE_CMD points here, so dictatr hands us the
+# transcript instead of injecting it. The stage has no desktop portal,
+# and real key injection would land on the HOST desktop, so forward to
+# wtype (virtual-keyboard protocol) with a typewriter cadence, and log
+# cues for the camera.
 import json, os, subprocess, sys, time
-args = sys.argv[1:]
-for tok in ("type", "--"):
-    if args and args[0] == tok:
-        args.pop(0)
-text = " ".join(args)
+text = " ".join(sys.argv[1:])
 cues = os.environ.get("DEMO_CUES")
 def cue(event, **kw):
     if cues:
@@ -326,10 +324,11 @@ sys.exit(rc)
             # (PyGObject for the menu/tray lives in system site-packages)
             PATH=f"{self.run / 'bin'}:/usr/bin:{self.env['PATH']}",
             DEMO_CUES=str(self.cues_path),
-            # No portal tier on the stage: typing must go through the
-            # ydotool shim above, and the tray must not touch the host's
-            # xdg-desktop-portal from the demo bus.
+            # No portal on the stage: typing goes through the shim above,
+            # and the tray must not touch the host's xdg-desktop-portal
+            # from the demo bus.
             DICTATE_NO_PORTAL="1",
+            DICTATE_TYPE_CMD=str(self.run / "bin" / "dictatr-type"),
             # The stage config has no setup_done key, so the tray would
             # otherwise open the wizard three seconds in and land it on
             # top of whatever is being captured. Scenes that want the

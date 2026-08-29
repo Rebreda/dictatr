@@ -13,11 +13,10 @@ source checkout can't do without sudo:
   (about 7 MB; CI fetches and checksums it per
   `packaging/lemond-version.env`), so the managed backend needs no
   download at all
-- systemd user units: `dictatr-listen`, `dictatr-gc.timer`, and
-  `dictatr-ydotoold` (rootless typing daemon)
-- a udev rule (`70-dictatr-uinput.rules`) tagging `/dev/uinput` with
-  `uaccess`, so the logged-in user can run `ydotoold` as a user service;
-  no root daemon, no socket mismatch, no manual sudo step
+- systemd user units: `dictatr-listen` and `dictatr-gc.timer`
+
+Nothing here needs device access or a privileged helper: typing goes
+through the desktop portal, which asks the user once and remembers.
 
 Installing runs no user-visible post-install step and prints no shell
 instructions. Per-user work cannot happen in a package script anyway (it

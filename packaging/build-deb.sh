@@ -24,7 +24,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.11), python3-websockets, pipewire-bin, wl-clipboard, libnotify-bin
-Recommends: python3-gi, gir1.2-gtk-4.0, libgtk4-layer-shell0, ydotool
+Recommends: python3-gi, gir1.2-gtk-4.0, libgtk4-layer-shell0
 Maintainer: Rebreda <Rebreda@users.noreply.github.com>
 Homepage: https://github.com/Rebreda/dictatr
 Description: Hotkey voice dictation backed by a local Lemonade Whisper server
@@ -39,14 +39,6 @@ Description: Hotkey voice dictation backed by a local Lemonade Whisper server
  OpenAI-compatible endpoint), asks the desktop for typing permission and
  hotkeys, and ends with a test dictation. Rerun it with dictate-setup.
 EOF
-
-cat >"$stage/DEBIAN/postinst" <<'EOF'
-#!/bin/sh
-udevadm control --reload 2>/dev/null || :
-udevadm trigger --name-match=uinput 2>/dev/null || :
-exit 0
-EOF
-chmod 755 "$stage/DEBIAN/postinst"
 
 mkdir -p "$repo/dist"
 dpkg-deb --root-owner-group --build "$stage" \

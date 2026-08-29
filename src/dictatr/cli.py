@@ -221,7 +221,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd")
     t = sub.add_parser("toggle", help="start listening / stop current recording")
     t.add_argument("--clip", action="store_true",
-                   help="deliver to clipboard even if ydotool is available")
+                   help="deliver to clipboard even when typing is available")
     a = sub.add_parser("ask", help="speak a question, get an LLM answer (spoken + clipboard)")
     a.add_argument("--quiet", action="store_true",
                    help="no TTS or notification chatter; deliver the answer "

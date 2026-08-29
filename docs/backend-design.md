@@ -1,6 +1,8 @@
 # Backend and onboarding redesign
 
-Status: proposal (2026-08-27). Grounded in three research passes: how
+Status: proposal (2026-08-27), largely built. Where it disagrees
+with the code, the code wins: ydotool and the uinput udev rule
+were dropped, and typing is portal-then-clipboard. Grounded in three research passes: how
 Lemonade ships today, how comparable local-AI apps manage runtimes, and
 current Linux conventions for permissions and first-run setup. Sources
 inline.

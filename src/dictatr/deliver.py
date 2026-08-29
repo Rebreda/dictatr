@@ -1,33 +1,30 @@
 """Get transcribed text to the user: type at the cursor when possible,
 clipboard otherwise. Desktop notifications for state feedback.
 
-Typing is a ladder, most reliable first:
-  ydotool  - its own uinput device, which presses and releases its own
-             keys and applies shift itself. It never participates in the
-             compositor's modifier bookkeeping, so it cannot desync it.
+Wayland has no "insert this text" API, so typing means impersonating a
+keyboard. Two tiers:
   portal   - RemoteDesktop portal keysym injection (ui/portal_typed.py,
              PyGObject lives there so this package stays stdlib-only).
-             Needs no device access and so no root, which is why it is
-             the tier most people get. Tried only with a stored grant
-             token, so a dictation never pops a permission dialog
-             mid-flow. DICTATE_NO_PORTAL=1 skips it.
-  wl-copy  - Wayland clipboard (wl-clipboard)
-  notify-send - freedesktop notifications, any desktop
+             No device access and no root, which is the whole point.
+             Tried only with a stored grant token, so a dictation never
+             pops a permission dialog mid-flow. DICTATE_NO_PORTAL=1 or
+             `portal_typing = false` skips it.
+  wl-copy  - Wayland clipboard, plus a "Copied" notification. Always
+             available, and where transcripts land when the portal is
+             unavailable or turned off.
+
+DICTATE_TYPE_CMD is a test seam, not a tier: the demo stage points it at
+a shim that forwards to wtype inside the nested compositor, because
+neither the portal nor a real keyboard exists in there.
 
 The portal hands the compositor bare keysyms and lets it work out which
-physical key and modifiers produce them, so the compositor is tracking
+physical key and modifiers produce them, so the compositor tracks
 modifier state for a virtual keyboard and the real one at once. Inject
-while real modifiers are down and the two views drift apart: the
-compositor is left believing Ctrl is held after the user let go, and the
-whole desktop behaves as though Ctrl is stuck.
-
-That is not rare. Dictation is a toggle bound to Ctrl+Alt+D, so the
-press that ENDS a recording is still held when the transcript is ready
-milliseconds later. Hence _wait_for_chord below: the tray records when a
-shortcut chord is down and clears it on release, and typing waits for
-that. ydotool has none of this problem (its own device, its own shift
-handling), so it goes first where it is available, but it needs uinput
-access and the portal needs nothing at all.
+while real modifiers are down and the two views drift apart: it keeps
+believing Ctrl is held after the user let go, and the desktop behaves as
+though Ctrl is stuck. Dictation is a toggle, so the press that ENDS a
+recording is still down when the transcript is ready; hence
+_wait_for_chord, which holds off until the tray sees the chord released.
 """
 
 import importlib.util
@@ -147,20 +144,23 @@ def _type_portal(text: str) -> bool:
     return r.returncode == 0
 
 
-def _type_ydotool(text: str) -> bool:
-    if not shutil.which("ydotool"):
+def _type_command(text: str) -> bool:
+    """DICTATE_TYPE_CMD, a test seam. The demo stage runs inside a nested
+    compositor where the portal does not exist, so it points this at a
+    shim that types with wtype and records cues for the camera."""
+    cmd = os.environ.get("DICTATE_TYPE_CMD")
+    if not cmd:
         return False
-    r = subprocess.run(["ydotool", "type", "--", text], check=False,
-                       capture_output=True)
+    r = subprocess.run([cmd, text], check=False, capture_output=True)
     return r.returncode == 0
 
 
 def type_text(text: str) -> str | None:
-    """Type *text* at the cursor through the best available tier; returns
-    the tier that worked ("ydotool" / "portal"), or None when none could.
-    The setup wizard uses this to test typing without delivering."""
-    if _type_ydotool(text):
-        return "ydotool"
+    """Type *text* at the cursor; returns the tier that worked, or None
+    when nothing could type. The setup wizard uses this to test typing
+    without delivering."""
+    if _type_command(text):
+        return "command"
     if _type_portal(text):
         return "portal"
     return None

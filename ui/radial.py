@@ -51,6 +51,10 @@ SUB_OUT_S = 0.18    # ring collapse half of a submenu hop
 SUB_IN_S = 0.26     # ring bloom half of a submenu hop
 SUB_STAGGER_S = 0.04
 
+# progress arc geometry, shared by Ring's hub and ProgressBubble
+ARC_PAD = 5
+ARC_W = 3.0
+
 CSS = f"""
 window {{ background: transparent; }}
 .hub, .bubble {{
@@ -150,10 +154,57 @@ class Ring(Gtk.Fixed):
         hub.add_css_class("hub")
         hub.set_size_request(CENTER_BUBBLE, CENTER_BUBBLE)
         hub.set_opacity(0.0)
+        hub.set_focusable(False)   # same reason as the satellites
         hub.connect("clicked", self._on_hub)
         self.put(hub, self._cx - CENTER_BUBBLE / 2,
                  self._cy - CENTER_BUBBLE / 2)
         self.hub = hub
+
+        # A progress arc around the hub, for rings that front a long
+        # operation (a model download, a probe). Drawn in the same Fixed
+        # so it tracks the hub, and never a target so clicks pass through.
+        self._fraction = 0.0
+        self._spinning = False
+        side = CENTER_BUBBLE + 2 * ARC_PAD
+        self._arc = Gtk.DrawingArea()
+        self._arc.set_size_request(side, side)
+        self._arc.set_can_target(False)
+        self._arc.set_draw_func(self._draw_arc)
+        self.put(self._arc, self._cx - side / 2, self._cy - side / 2)
+
+    # --- hub progress ---------------------------------------------------
+    def set_fraction(self, fraction):
+        self._fraction = _clamp(fraction)
+        self._spinning = False
+        self._arc.queue_draw()
+
+    def set_indeterminate(self, spinning=True):
+        if spinning and not self._spinning:
+            self._spinning = True
+            self._arc.add_tick_callback(
+                lambda *_: (self._arc.queue_draw(), self._spinning)[1])
+        elif not spinning:
+            self._spinning = False
+            self._arc.queue_draw()
+
+    def _draw_arc(self, _area, cr, w, h):
+        if not self._spinning and self._fraction <= 0:
+            return
+        cx, cy = w / 2, h / 2
+        r = CENTER_BUBBLE / 2 + ARC_PAD - ARC_W / 2
+        cr.set_line_width(ARC_W)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.set_source_rgba(1, 1, 1, 0.10)
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.stroke()
+        cr.set_source_rgba(0x8a / 255, 0xb4 / 255, 0xf8 / 255, 1.0)
+        if self._spinning:
+            phase = (GLib.get_monotonic_time() / 1e6) * 1.6 * math.pi
+            cr.arc(cx, cy, r, phase, phase + 0.55 * math.pi)
+        else:
+            top = -math.pi / 2
+            cr.arc(cx, cy, r, top, top + 2 * math.pi * self._fraction)
+        cr.stroke()
 
     # --- construction --------------------------------------------------
     def _make_sats(self, items, below_hub=False):
@@ -166,6 +217,11 @@ class Ring(Gtk.Fixed):
                 b.add_css_class(c)
             b.set_size_request(BUBBLE, BUBBLE)
             b.set_opacity(0.0)
+            # Not focusable on purpose: a focused button activates on
+            # space or Return, so a ring that maps under a stray keypress
+            # would fire an action nobody chose. The ring is driven by
+            # the pointer and by handle_key's number keys.
+            b.set_focusable(False)
             b.connect("clicked", lambda _b, idx=i: self.activate(idx))
             angle = -math.pi / 2 + i * (2 * math.pi / len(items))
             self.put(b, self._cx - BUBBLE / 2, self._cy - BUBBLE / 2)
@@ -316,6 +372,45 @@ class Ring(Gtk.Fixed):
 
         self._drive(SUB_OUT_S, phase_a, phase_b)
 
+    def swap(self, items, hub_icon=None, hub_tooltip=None, forward=True,
+             done=None):
+        """Replace the visible satellites with a new set, in the submenu
+        vocabulary: the old ring spirals into the hub, the hub becomes
+        the new level's icon, the new ring blooms. The wizard walks its
+        steps with this; unlike a submenu it keeps no stack, because a
+        step is a sibling of the last, not a child."""
+        if self._state not in ("open", "opening"):
+            # Mid-animation: a dropped swap would strand the caller's
+            # done callback, and with it whatever it was going to draw.
+            # Land the current one first, then run this.
+            GLib.timeout_add(
+                60, lambda: (self.swap(items, hub_icon, hub_tooltip,
+                                       forward, done), False)[1])
+            return
+        if self._state == "opening":
+            self._snap_open()
+        self._state = "busy"
+        old = self._sats
+
+        def bloom():
+            for b, _, _ in old:
+                self.remove(b)
+            if hub_icon:
+                self.hub.set_icon_name(hub_icon)
+            if hub_tooltip:
+                self.hub.set_tooltip_text(hub_tooltip)
+            self._sats = self._make_sats(items, below_hub=True)
+
+            def settled():
+                self._state = "open"
+                if done is not None:
+                    done()
+
+            self._twirl_in(self._sats, SUB_IN_S, SUB_STAGGER_S, settled)
+
+        self._twirl_out(old, SUB_OUT_S, 0.0 if forward else SUB_STAGGER_S,
+                        bloom)
+
     def back(self):
         """Collapse the submenu and twirl the parent ring back out."""
         if self._state != "open" or not self._stack:
@@ -366,8 +461,8 @@ class ProgressBubble(Gtk.Overlay):
     from the top, or spins when indeterminate. For onboarding and model
     downloads."""
 
-    ARC_PAD = 5      # ring sits this far outside the bubble edge
-    ARC_W = 3.0
+    ARC_PAD = ARC_PAD
+    ARC_W = ARC_W
 
     def __init__(self, icon="folder-download-symbolic", diameter=BUBBLE):
         super().__init__()

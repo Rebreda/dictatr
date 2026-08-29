@@ -17,8 +17,8 @@ The portal session is restored silently from a stored token when one
 exists (persist_mode 2: Plasma >= 6.1.1, GNOME >= 46); without a valid
 token the compositor shows a permission dialog, so deliver.py only calls
 this when a token is stored. Every Start refresh replaces the token; a
-Start that returns none drops it so the next dictation falls through to
-ydotool instead of popping dialogs.
+Start that returns none drops it so the next dictation falls back to
+the clipboard instead of popping dialogs.
 
 Exit codes: 0 typed/granted, 1 portal refused or timed out, 2 no bus.
 Every portal wait is bounded (10 s, 120 s for Start where a dialog may

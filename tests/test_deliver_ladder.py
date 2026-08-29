@@ -68,7 +68,7 @@ def test_token_paths_agree_between_helper_and_deliver(tmp_path, monkeypatch):
 def ladder(tmp_path, monkeypatch):
     """Fake every external: record which tools run, control outcomes."""
     calls = []
-    rc = {"portal": 0, "ydotool": 0}
+    rc = {"portal": 0, "command": 0}
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.delenv("DICTATE_NO_PORTAL", raising=False)
     monkeypatch.setattr(deliver.runstate, "mark_done", lambda: None)
@@ -82,7 +82,12 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_mod.settings.typing, "portal", True)
 
     def fake_run(cmd, **kw):
-        tool = "portal" if str(deliver._PORTAL_HELPER) in cmd else Path(cmd[0]).name
+        if str(deliver._PORTAL_HELPER) in cmd:
+            tool = "portal"
+        elif cmd[0] == "type-shim":
+            tool = "command"
+        else:
+            tool = Path(cmd[0]).name
         calls.append(tool)
         return subprocess.CompletedProcess(cmd, rc.get(tool, 0))
 
@@ -95,56 +100,52 @@ def ladder(tmp_path, monkeypatch):
     return calls, rc, with_token
 
 
-def test_ydotool_is_tried_first(ladder):
-    """The portal desyncs the compositor's modifier state when it injects
-    alongside a held hotkey chord, so it is the fallback, not the default."""
+def test_portal_types_by_default(ladder):
     calls, _rc, with_token = ladder
     with_token()
-    assert deliver.deliver("hi") == "typed"
-    assert calls == ["ydotool"]
-
-
-def test_no_ydotool_falls_to_portal(ladder, monkeypatch):
-    calls, _rc, with_token = ladder
-    with_token()
-    monkeypatch.setattr(deliver.shutil, "which",
-                        lambda name: None if name == "ydotool" else f"/bin/{name}")
     assert deliver.deliver("hi") == "typed"
     assert calls == ["portal"]
 
 
-def test_ydotool_failure_falls_to_portal(ladder):
+def test_type_cmd_seam_wins_when_set(ladder, monkeypatch):
+    """The demo stage sets DICTATE_TYPE_CMD; nothing else does."""
+    calls, _rc, with_token = ladder
+    with_token()
+    monkeypatch.setenv("DICTATE_TYPE_CMD", "type-shim")
+    assert deliver.deliver("hi") == "typed"
+    assert calls == ["command"]
+
+
+def test_type_cmd_failure_falls_to_portal(ladder, monkeypatch):
     calls, rc, with_token = ladder
     with_token()
-    rc["ydotool"] = 1
+    monkeypatch.setenv("DICTATE_TYPE_CMD", "type-shim")
+    rc["command"] = 1
     assert deliver.deliver("hi") == "typed"
-    assert calls == ["ydotool", "portal"]
+    assert calls == ["command", "portal"]
 
 
 def test_no_token_skips_portal(ladder):
-    calls, rc, _ = ladder
-    rc["ydotool"] = 1
+    calls, _rc, _ = ladder
     assert deliver.deliver("hi") == "clipboard"
-    assert calls == ["ydotool", "wl-copy"]
+    assert calls == ["wl-copy"]
 
 
 def test_config_can_disable_portal(ladder, monkeypatch):
     from dictatr import settings as settings_mod
     calls, rc, with_token = ladder
     with_token()
-    rc["ydotool"] = 1
     monkeypatch.setattr(settings_mod.settings.typing, "portal", False)
     assert deliver.deliver("hi") == "clipboard"
-    assert calls == ["ydotool", "wl-copy"]
+    assert calls == ["wl-copy"]
 
 
 def test_env_disables_portal(ladder, monkeypatch):
     calls, rc, with_token = ladder
     with_token()
-    rc["ydotool"] = 1
     monkeypatch.setenv("DICTATE_NO_PORTAL", "1")
     assert deliver.deliver("hi") == "clipboard"
-    assert calls == ["ydotool", "wl-copy"]
+    assert calls == ["wl-copy"]
 
 
 def test_typing_waits_for_the_chord_to_be_released(ladder, monkeypatch):
@@ -152,7 +153,6 @@ def test_typing_waits_for_the_chord_to_be_released(ladder, monkeypatch):
     the desktop acting as though Ctrl is stuck."""
     calls, rc, with_token = ladder
     with_token()
-    rc["ydotool"] = 1
     held = {"n": 3}
 
     def chord_held(*_a):
@@ -163,29 +163,28 @@ def test_typing_waits_for_the_chord_to_be_released(ladder, monkeypatch):
     monkeypatch.setattr(deliver.time, "sleep", lambda _s: None)
     assert deliver.deliver("hi") == "typed"
     assert held["n"] == 0            # it waited until the chord cleared
-    assert calls == ["ydotool", "portal"]
+    assert calls == ["portal"]
 
 
 def test_chord_wait_is_bounded(ladder, monkeypatch):
     """A chord nobody releases must not hang delivery forever."""
     calls, rc, with_token = ladder
     with_token()
-    rc["ydotool"] = 1
     monkeypatch.setattr(deliver.runstate, "chord_held", lambda *_a: True)
     clock = {"t": 0.0}
     monkeypatch.setattr(deliver.time, "monotonic", lambda: clock["t"])
     monkeypatch.setattr(deliver.time, "sleep",
                         lambda s: clock.__setitem__("t", clock["t"] + s))
     assert deliver.deliver("hi") == "typed"
-    assert calls == ["ydotool", "portal"]
+    assert calls == ["portal"]
 
 
 def test_all_typing_fails_lands_on_clipboard(ladder):
     calls, rc, with_token = ladder
     with_token()
-    rc["portal"] = rc["ydotool"] = 1
+    rc["portal"] = 1
     assert deliver.deliver("hi") == "clipboard"
-    assert calls == ["ydotool", "portal", "wl-copy"]
+    assert calls == ["portal", "wl-copy"]
 
 
 def test_prefer_typing_false_goes_straight_to_clipboard(ladder):

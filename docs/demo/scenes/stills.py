@@ -94,32 +94,26 @@ def menu(d: Director, out: str):
 
 
 def setup(d: Director, out: str, step: int = 2):
-    """The wizard on the same desk. Launched without bin/dictate-setup:
-    that shim is fine, but going straight to the module keeps the
-    gtk4-layer-shell preload (exported for the menu) away from a plain
-    window, which the stage would otherwise turn into a fullscreen layer
-    surface.
+    """The wizard on the same desk.
 
-    The last page is the shot worth having: the orbit carries its three
-    green checks, the mic emblem is lit, and the page holds a text field
-    and both buttons, so the whole vocabulary is visible at once. It is
-    also the one page whose text does not depend on what the machine
-    happens to have: the earlier pages report this stage's private bus
-    (no portals) rather than what a real desktop would say.
+    It is a layer-shell overlay now, like the menu, so sway's window
+    tree cannot see it: no wait_window, no move, just the clock. It
+    centers itself, which is where the composition wants it anyway.
+
+    The last step is the shot worth having: the ring offers the two
+    choices that end the walk, and its text does not depend on what the
+    machine has. The earlier steps report this stage's private bus (no
+    portals) rather than what a real desktop would say.
     """
     # Own config dir: the wizard writes a setup_done key when it closes,
     # and the stage's checked-in config.toml is not its to edit.
-    d.run_app(["python3", str(REPO / "ui/setup.py")],
+    d.run_app([str(REPO / "bin/dictate-setup")],
               DICTATR_SETUP_STEP=str(step), HOME="/home/user",
               XDG_CONFIG_HOME=str(d.s.run / "wizard-config"))
-    rect = d.wait_window(SETUP_APP_ID)
-    d.swaymsg(f'[app_id="{SETUP_APP_ID}"] move position '
-              f'{(W - rect["width"]) // 2 + 150} {(H - rect["height"]) // 2}')
-    d.move_to(W - 150, H - 150)   # cursor off the window, on open wallpaper
-    time.sleep(2.5)               # probes settle, buttons appear
-    d.screenshot(out, scale=(W, H))
-    d.swaymsg(f'[app_id="{SETUP_APP_ID}"] kill')
+    time.sleep(4.0)               # GTK startup, probe, ring twirl
+    d.move_to(W - 150, H - 150)   # cursor off the card, on open wallpaper
     time.sleep(0.6)
+    d.screenshot(out, scale=(W, H))
 
 
 def settings(d: Director, out: str):

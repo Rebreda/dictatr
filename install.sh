@@ -77,8 +77,7 @@ done
 # Systemd user units for always-on capture + daily archive gc. Installed
 # but never enabled here: an always-hot mic must be an explicit choice.
 mkdir -p ~/.config/systemd/user
-for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer \
-            dictatr-ydotoold.service; do
+for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer; do
     sed "s|@REPO@|$here|" "$here/systemd/$unit" >~/.config/systemd/user/$unit
 done
 command -v systemctl >/dev/null && systemctl --user daemon-reload || true

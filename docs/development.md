@@ -114,6 +114,7 @@ that would need those is exercised by hand or on the demo stage instead.
 | `DICTATE_INPUT_PACED=1` | feed that wav in real time rather than as fast as it reads |
 | `LEMONADE_URL=...` | force one server URL, skipping all backend detection |
 | `DICTATE_NO_PORTAL=1` | skip the portal typing tier outright |
+| `DICTATE_TYPE_CMD=path` | hand transcripts to a command instead of typing them (the demo stage's seam) |
 | `portal_typing = false` | same, from config, for a desktop where it misbehaves |
 | `DICTATE_NO_SETUP=1` | stop the tray offering the setup wizard |
 | `DICTATR_SETUP_STEP=N` | open the wizard straight on page N (0 to 3) |
@@ -163,22 +164,22 @@ The managed instance keeps everything under
 
 ## The setup wizard
 
-`ui/setup.py` is four `Step` classes over one window. A step's `enter()`
-probes on a worker thread and reports back through `GLib.idle_add`; the
-window owns every widget and the steps only call its `set_body`,
-`set_status`, `set_progress`, `set_extra` and `set_actions`. Nothing
-touches GTK off the main thread and nothing blocks it, which matters
-because one of these steps waits on a portal dialog and another
+`ui/setup.py` is three `Step` classes over one surface. A step's
+`enter()` probes on a worker thread and reports back through
+`GLib.idle_add`; the surface owns every widget and the steps only call
+its `set_body`, `set_status`, `set_progress`, `set_extra` and
+`set_items`. Nothing touches GTK off the main thread and nothing blocks
+it, which matters because one step waits on a portal dialog and another
 downloads a gigabyte.
 
-The chrome is `ui/radial.py`: the emblem is a `ProgressBubble` (spinning
-while a probe runs, filling while a download runs) at the center of the
-menu's own ring geometry, orbited by one marker per step. `_show()`
-rotates the orbit and slides the text block, in opposite directions for
-forward and back.
+The chrome is `ui/radial.py`, and the wizard is a layer-shell overlay
+like the menu, not a dialog: `set_items` hands the step's choices to
+`Ring.swap`, which twirls the old ones into the hub and blooms the new
+ones. The hub carries the step emblem and the progress arc, and acts as
+Back (Close on the first step). The input region is clipped to the card
+and the ring, so clicks elsewhere fall through to the desktop.
 
-`DICTATR_SETUP_STEP=N` opens straight on page N. Page 3 needs no probe
-and no environment, which is why it is the one the demo stage captures.
+`DICTATR_SETUP_STEP=N` opens straight on step N.
 
 ## Where things live
 

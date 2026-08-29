@@ -128,12 +128,6 @@ for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer; do
     sed 's|@REPO@/.venv/bin/dictatr|/usr/bin/dictate|' \
         "$repo/systemd/$unit" >"$units/$unit"
 done
-install -pm644 "$repo/systemd/dictatr-ydotoold.service" "$units/"
-
-# --- udev: user access to uinput (rootless ydotoold) ----------------
-install -Dpm644 "$repo/packaging/70-dictatr-uinput.rules" \
-    "$DESTDIR/usr/lib/udev/rules.d/70-dictatr-uinput.rules"
-
 # --- icon ------------------------------------------------------------
 install -Dpm644 "$repo/docs/assets/logo.svg" \
     "$DESTDIR/usr/share/icons/hicolor/scalable/apps/dictatr.svg"

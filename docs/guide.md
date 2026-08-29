@@ -13,33 +13,34 @@ The tray offers the wizard the first time it ever starts. To open it
 again: `dictate setup`, the `dictate-setup` command, "Set up dictatr" in
 the tray menu, or More in the radial menu.
 
-Four pages. Each one checks something and offers a single button, so you
-can also come back later to see what a machine is actually doing.
+It is the same kind of surface as the menu and the voice chat: a card of
+text floating over the desktop with a ring of choices under it. The ring
+holds that step's actions, the hub wears a progress arc while something
+long runs, and the hub goes back a step (or closes on the first), just
+as the menu's hub does. Escape does the same, and number keys pick from
+the ring. Clicks outside the card and ring fall through to whatever is
+underneath, so setup never holds your desktop hostage.
 
-**1. Engine.** Looks for a Lemonade server: one dictatr already runs, one
-you started yourself (ports 13305 and 8080), or endpoints you configured.
-If it finds one, it uses it. If not, "Set up the built-in engine" fetches
-the `lemond` daemon if the package did not include it, starts it on its
-own port, and downloads the dictation model (about 1 GB, once, into the
-HuggingFace cache other local-AI apps share). "Use a custom endpoint"
-takes a base URL and an optional key for any OpenAI-compatible server.
+Three steps, each a probe plus a choice, so you can also come back later
+to see what a machine is actually doing.
 
-**2. Typing.** Dictation types at your cursor, which needs one permission
-from the desktop. "Allow typing" shows your desktop's dialog once and the
-grant is remembered. Desktops without that portal are offered the ydotool
-service instead, which needs no root because the package ships a udev
-rule. Either way the page types a test line into its own text box, so you
-see the answer rather than being told it. Skipping is fine: transcripts
-go to the clipboard, which always works.
+**1. Engine.** Looks for a Lemonade server: one dictatr already runs,
+one you started yourself (ports 13305 and 8080), or endpoints you
+configured. If it finds one, it uses it. If not, it can fetch the
+`lemond` daemon, start it on its own port, and download the dictation
+model (about 1 GB, once, into the HuggingFace cache other local-AI apps
+share) with progress on the hub. It will also take a base URL and an
+optional key for any OpenAI-compatible server.
 
-**3. Hotkeys.** Asks the desktop to reserve Ctrl+Alt+D (dictate),
+**2. Hotkeys.** Asks the desktop to reserve Ctrl+Alt+D (dictate),
 Ctrl+Alt+Space (menu), Ctrl+Alt+C (cancel) and Ctrl+Alt+A (always-on),
 then shows what it actually got, since a desktop may hand back different
-keys if something else holds them. You can change them later in your
-desktop's own shortcut settings.
+keys if something else holds them.
 
-**4. Try it.** One real dictation into a box. Green means the whole chain
-works.
+**3. Try it.** Asks for the typing permission, then runs one real
+dictation into a box. Your own voice is what verifies the chain, rather
+than a canned string typed for you. Skipping is fine: transcripts go to
+the clipboard, which always works.
 
 Closing the wizard at any point is fine; it will not ask again on its
 own. `DICTATE_NO_SETUP=1` stops the offer entirely.
@@ -89,33 +90,32 @@ settings; the tray logs one line and stays out of the way.
 
 ## Typing at the cursor
 
-Delivery tries three tiers in order, and the outcome notification stays
+Wayland has no "insert this text" API, so typing means impersonating a
+keyboard. Delivery has two tiers, and the outcome notification stays
 truthful ("Typed:" only when text was really typed, "Copied" otherwise):
 
-1. **ydotool**, when it is available: its own uinput device, its own
-   shift handling, no involvement in the compositor's keyboard state.
-   Rootless once `/dev/uinput` is accessible, which the packages arrange
-   with a udev rule, then `systemctl --user enable --now dictatr-ydotoold`.
-2. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
+1. **RemoteDesktop portal** (`ui/portal_typed.py`): keysym injection
    through xdg-desktop-portal. No device access, no root, nothing to
-   install, so this is the tier most people actually get. It runs only
-   with a stored grant token, so a dictation never pops a permission
-   dialog mid-flow. `DICTATE_NO_PORTAL=1` skips it.
-3. **Clipboard**: `wl-copy` plus a "Copied" notification.
+   install. It runs only with a stored grant token, so a dictation never
+   pops a permission dialog mid-flow; the wizard performs the grant, or
+   `python3 ui/portal_typed.py --grant` does it by hand and `--check`
+   reports what the portal offers without any dialog. Turn it off with
+   `portal_typing = false` in config, or `DICTATE_NO_PORTAL=1`.
+2. **Clipboard**: `wl-copy` plus a "Copied" notification. Where
+   transcripts land when the portal is unavailable or switched off.
 
 **Typing waits for your hotkey to come up first.** The portal hands the
 compositor bare keysyms and lets it work out which physical key and
-modifiers make them, so the compositor is tracking modifier state for a
+modifiers make them, so the compositor tracks modifier state for a
 virtual keyboard and your real one at the same time. Inject while real
-modifiers are down and the two drift apart: the compositor keeps
-believing Ctrl is held after you let go, and the desktop behaves as
-though Ctrl is stuck on everything.
+modifiers are down and the two drift apart: it keeps believing Ctrl is
+held after you let go, and the desktop behaves as though Ctrl is stuck.
 
-That is the normal case, not an edge case: dictation is a toggle bound
-to Ctrl+Alt+D, so the press that *ends* a recording is still held when
-the transcript is ready milliseconds later. The tray records when a
-shortcut chord goes down and clears it on release, and delivery waits
-for that (bounded to three seconds, in case a release is never seen).
+That is the normal case, not an edge case: dictation is a toggle, so the
+press that *ends* a recording is still held when the transcript is ready
+milliseconds later. The tray records when a shortcut chord goes down and
+clears it on release, and delivery waits for that, bounded to three
+seconds in case a release is never seen.
 
 If a desktop does end up stuck this way, press and release the modifier
 on your real keyboard; that resyncs it. Do not try to fix it by

@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""First-run setup wizard for dictatr, in the radial visual language.
+"""First-run setup wizard for dictatr, as a radial surface.
 
-Three pages, each a probe plus one action: the inference engine, the
-hotkeys, and a real dictation that also asks for the typing permission
-it needs. Short, skippable, re-runnable (`dictate setup`), so the
-packages never have to print shell instructions after install.
+Three steps, each a probe plus a small ring of choices: the inference
+engine, the hotkeys, and a real dictation that also asks for the typing
+permission it needs. Short, skippable, re-runnable (`dictate setup`), so
+the packages never have to print shell instructions after install.
 
-The chrome is the radial kit (ui/radial.py): the page emblem is a
-ProgressBubble at the center of a small orbit of step bubbles, and the
-orbit rotates so the current step is always at the top. Moving forward
-turns it clockwise, going back unwinds it, and the text block slides in
-from the side it came from.
+It is the same kind of object as the menu and the voice chat, not a
+dialog with a ring drawn on it: a transparent layer-shell overlay whose
+input region is clipped to what is visible, so the desktop underneath
+stays clickable. The step's actions ARE the satellites; the hub is the
+step emblem and wears the progress arc while something long runs, and
+walking between steps is the kit's own twirl (Ring.swap). The hub goes
+back a step, and closes the wizard on the first, exactly as the menu's
+hub does.
 
 Nothing blocks the GTK loop: every probe, download and portal dance runs
 on a worker thread and reports back through GLib.idle_add.
+
+DICTATR_SETUP_STEP=N opens straight on one step, for capture and for
+eyeballing a step without walking the whole wizard.
 """
 
-import math
 import os
 import shutil
 import subprocess
@@ -25,11 +30,12 @@ import threading
 import time
 from pathlib import Path
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
@@ -44,13 +50,14 @@ from dictatr.settings import settings, write_config  # noqa: E402
 sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
 import radial  # noqa: E402
-from radial import BLUE, CHECK_ICON, GREEN, INK, ProgressBubble  # noqa: E402
+from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble, Ring  # noqa: E402
 
 APP_ID = "io.github.rebreda.dictatr"
 PORTAL_BUS = "org.freedesktop.portal.Desktop"
 PORTAL_PATH = "/org/freedesktop/portal/desktop"
 GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
 TRAY_BUS = "io.github.rebreda.dictatr.tray"
+CARD_W = 460
 
 # Same four actions the tray binds; see PORTAL_SHORTCUTS in ui/tray.py.
 SHORTCUTS = [
@@ -60,66 +67,41 @@ SHORTCUTS = [
     ("listen", "Toggle always-on capture", "CTRL+ALT+a"),
 ]
 
-# The orbit is the menu's ring, same box and same radius, so the two
-# read as one shape doing two jobs. Only the satellites differ: step
-# markers are indicators, not targets, so they are smaller.
-RING_SIZE = radial.SIZE
-EMBLEM = radial.CENTER_BUBBLE
-ORBIT = radial.RADIUS
-STEP_BUBBLE = 30
-ROTATE_S = 0.42     # step-to-step orbit rotation
-SLIDE_S = 0.26      # text block crossfade
-SHIFT = 22          # how far the page slides, and its resting margin
-
 SETUP_CSS = f"""
-window.setup {{ background: #1b1c21; }}
-.setup-page {{ padding: 4px 16px 26px 16px; }}
-.step {{
-  border-radius: 9999px;
+.card {{
+  background: alpha(#1c1d22, 0.94);
   border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
-  transition: background 160ms ease, border-color 160ms ease;
+  border-radius: 18px;
+  padding: 18px 22px;
 }}
-.step image {{ color: alpha({INK}, 0.55); }}
-.step.active {{
-  background: alpha({BLUE}, 0.28); border-color: alpha({BLUE}, 0.65);
-}}
-.step.active image {{ color: {BLUE}; }}
-.step.done {{
-  background: alpha({GREEN}, 0.22); border-color: alpha({GREEN}, 0.55);
-}}
-.step.done image {{ color: {GREEN}; }}
-/* the emblem sits on a flat dark page, not a wallpaper: lift it off */
-.emblem {{
-  background: alpha(#ffffff, 0.055);
-  border-color: alpha(#ffffff, 0.16);
-}}
-.emblem image {{ color: {BLUE}; }}
-.title {{ font-size: 19px; font-weight: 700; color: {INK}; }}
+.title {{ font-size: 17px; font-weight: 700; color: {INK}; }}
 .body {{ color: alpha({INK}, 0.72); }}
-.status {{ font-size: 13px; color: alpha({INK}, 0.60); }}
-.status.good {{ color: {GREEN}; }}
-.status.bad {{ color: #f28b82; }}
+.pill {{
+  background: alpha(#1c1d22, 0.94);
+  border: 1px solid alpha(#ffffff, 0.10);
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: alpha({INK}, 0.72);
+}}
+.pill.good {{ color: {GREEN}; border-color: alpha({GREEN}, 0.45); }}
+.pill.bad {{ color: #f28b82; border-color: alpha(#f28b82, 0.45); }}
 .setup entry {{
   background: alpha(#ffffff, 0.06); color: {INK};
   border: 1px solid alpha(#ffffff, 0.12); border-radius: 8px;
-  padding: 8px 10px;
+  padding: 7px 10px;
 }}
 .setup entry:focus-within {{ border-color: alpha({BLUE}, 0.7); }}
-.setup button {{
-  border-radius: 8px; padding: 7px 15px; color: {INK};
-  background: alpha(#ffffff, 0.07);
-  border: 1px solid alpha(#ffffff, 0.10);
-}}
-.setup button:hover {{ background: alpha(#ffffff, 0.13); }}
-.setup button.primary {{
-  background: alpha({BLUE}, 0.26); border-color: alpha({BLUE}, 0.55);
-}}
-.setup button.primary:hover {{ background: alpha({BLUE}, 0.38); }}
-.setup button:disabled {{ color: alpha({INK}, 0.35); }}
-.setup button.flat {{ background: transparent; border-color: transparent; }}
-.setup button.flat:hover {{ background: alpha(#ffffff, 0.08); }}
 """.encode()
+
+
+def layer_shell():
+    try:
+        gi.require_version("Gtk4LayerShell", "1.0")
+        from gi.repository import Gtk4LayerShell as LS
+        return LS if LS.is_supported() else None
+    except (ValueError, ImportError):
+        return None
 
 
 def _run(cmd, timeout=20, **kw):
@@ -158,85 +140,9 @@ def _portal_version(iface: str):
         return None
 
 
-# --- the orbit ---------------------------------------------------------
-
-class StepRing(Gtk.Fixed):
-    """The wizard's progress indicator, built from the menu's vocabulary:
-    a big emblem bubble with the step's icon, orbited by one small bubble
-    per step. The orbit rotates to bring the current step to the top, so
-    forward and back read as the same motion in opposite directions."""
-
-    def __init__(self, icons):
-        super().__init__()
-        self.set_size_request(RING_SIZE, RING_SIZE)
-        self._c = RING_SIZE / 2
-        self._n = len(icons)
-        self._rot = 0.0
-
-        self.emblem = ProgressBubble(icons[0], diameter=EMBLEM)
-        self.emblem.set_icon_size(24)          # the page's focal point
-        self.emblem.inner.add_css_class("emblem")
-        side = EMBLEM + 2 * ProgressBubble.ARC_PAD
-        self.put(self.emblem, self._c - side / 2, self._c - side / 2)
-
-        self.steps = []
-        for icon in icons:
-            b = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-            b.add_css_class("step")
-            b.set_size_request(STEP_BUBBLE, STEP_BUBBLE)
-            img = Gtk.Image.new_from_icon_name(icon)
-            img.set_pixel_size(15)
-            img.set_hexpand(True)
-            b.append(img)
-            self.put(b, 0, 0)
-            self.steps.append((b, img, icon))
-        self._layout()
-
-    def _layout(self):
-        span = 2 * math.pi / self._n
-        for i, (b, _img, _icon) in enumerate(self.steps):
-            a = -math.pi / 2 + (i - self._rot) * span
-            self.move(b, self._c + ORBIT * math.cos(a) - STEP_BUBBLE / 2,
-                      self._c + ORBIT * math.sin(a) - STEP_BUBBLE / 2)
-
-    def show_step(self, index, done_upto, icon, animate=True):
-        for i, (b, img, own) in enumerate(self.steps):
-            b.remove_css_class("active")
-            b.remove_css_class("done")
-            if i < done_upto:
-                b.add_css_class("done")
-                img.set_from_icon_name(CHECK_ICON)
-            else:
-                img.set_from_icon_name(own)
-                if i == index:
-                    b.add_css_class("active")
-        self.emblem.set_icon(icon)
-        self.emblem.set_fraction(0.0)
-        start, target = self._rot, float(index)
-        if not animate or abs(target - start) < 1e-6:
-            self._rot = target
-            self._layout()
-            return
-
-        t0 = [None]
-
-        def tick(_w, clock):
-            now = clock.get_frame_time() / 1e6
-            if t0[0] is None:
-                t0[0] = now
-            p = min((now - t0[0]) / ROTATE_S, 1.0)
-            self._rot = start + (target - start) * (1 - (1 - p) ** 3)
-            self._layout()
-            return p < 1.0
-
-        self.add_tick_callback(tick)
-
-
-# --- pages -------------------------------------------------------------
-
 class Step:
-    """One wizard page. enter() probes on a worker thread and calls the
-    wizard's ui.* setters; the wizard owns every widget."""
+    """One step. enter() probes on a worker thread and calls the
+    surface's setters; the surface owns every widget."""
 
     key = ""
     icon = ""
@@ -274,7 +180,7 @@ class EngineStep(Step):
                 b = client.resolve(allow_start=False)
                 if b.kind == "custom":
                     found = ("custom", b.api_base)
-        except Exception as e:            # never let a probe kill the page
+        except Exception as e:            # never let a probe kill the step
             GLib.idle_add(self._probe_failed, str(e))
             return
         GLib.idle_add(self._probed, found, lemond.status())
@@ -283,7 +189,8 @@ class EngineStep(Step):
         w = self.wiz
         w.busy(False)
         w.set_status(f"Could not probe: {msg}", "bad")
-        w.set_actions(primary=("Set up the built-in engine", self._install))
+        w.set_items([Bubble("folder-download-symbolic",
+                            "Set up the built-in engine", self._install)])
 
     def _probed(self, found, managed):
         w = self.wiz
@@ -294,15 +201,22 @@ class EngineStep(Step):
                      "system": "Found a Lemonade server",
                      "custom": "Using your configured endpoint"}
             w.set_status(f"{names[kind]} at {base}", "good")
-            w.set_actions(
-                primary=("Continue", lambda: self._keep(kind, base)),
-                secondary=("Use something else", self._show_custom))
+            w.set_items([
+                Bubble("go-next-symbolic", "Continue",
+                       lambda: self._keep(kind, base)),
+                Bubble("network-server-symbolic", "Use something else",
+                       self._show_custom),
+            ])
             return
         have = "installed" if managed["binary"] else "a 7 MB download"
         w.set_status(f"No server running. The built-in engine is {have}; "
                      "the speech model is about 1 GB, downloaded once.")
-        w.set_actions(primary=("Set up the built-in engine", self._install),
-                      secondary=("Use a custom endpoint", self._show_custom))
+        w.set_items([
+            Bubble("folder-download-symbolic", "Set up the built-in engine",
+                   self._install),
+            Bubble("network-server-symbolic", "Use a custom endpoint",
+                   self._show_custom),
+        ])
 
     def _keep(self, kind, base):
         cfg = {"backend": kind}
@@ -315,7 +229,7 @@ class EngineStep(Step):
     def _install(self):
         w = self.wiz
         w.busy(True)
-        w.set_actions()
+        w.set_items([])
         w.set_status("Preparing the built-in engine…")
         _in_background(self._install_worker)
 
@@ -351,15 +265,18 @@ class EngineStep(Step):
         w.busy(False)
         w.set_progress(None)
         w.set_status(f"Setup failed: {msg}", "bad")
-        w.set_actions(primary=("Try again", self._install),
-                      secondary=("Use a custom endpoint", self._show_custom))
+        w.set_items([
+            Bubble("view-refresh-symbolic", "Try again", self._install),
+            Bubble("network-server-symbolic", "Use a custom endpoint",
+                   self._show_custom),
+        ])
 
     def _installed(self):
         w = self.wiz
         w.busy(False)
         w.set_progress(1.0)
         w.set_status("The built-in engine is ready", "good")
-        w.set_actions(primary=("Continue", w.advance))
+        w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
     # --- custom endpoint form -------------------------------------------
     def _show_custom(self):
@@ -378,9 +295,12 @@ class EngineStep(Step):
         w.set_status("Any OpenAI-compatible server. Streaming dictation "
                      "needs Lemonade's /realtime; others transcribe when "
                      "you stop.")
-        w.set_actions(primary=("Test and save",
-                               lambda: self._test_custom(url, key)),
-                      secondary=("Back to the built-in engine", self.enter))
+        w.set_items([
+            Bubble("go-next-symbolic", "Test and save",
+                   lambda: self._test_custom(url, key)),
+            Bubble("go-previous-symbolic", "Back to the built-in engine",
+                   self.enter),
+        ])
 
     def _test_custom(self, url_entry, key_entry):
         base = url_entry.get_text().strip().rstrip("/")
@@ -413,155 +333,9 @@ class EngineStep(Step):
     def _tested(self, n):
         w = self.wiz
         w.busy(False)
+        w.set_extra(None)
         w.set_status(f"Connected: {n} model(s) available", "good")
-        w.set_actions(primary=("Continue", w.advance))
-
-
-class SpeakStep(Step):
-    """Permission and proof on one page.
-
-    This used to be two: a typing page that auto-typed a canned phrase
-    into a box, and a separate page that ran a real dictation. Watching a
-    fixed string appear proves the portal grant and nothing else, and it
-    reads as a demo rather than the tool working. So the permission is
-    still asked for here, but the thing that verifies it is the user's
-    own voice, which exercises the whole chain at once.
-    """
-
-    key, icon = "speak", "dictatr-mic-symbolic"
-    title = "Try it"
-
-    def enter(self):
-        w = self.wiz
-        w.set_body("Dictation types wherever your cursor is, which needs "
-                   "one permission from your desktop. Then say a sentence "
-                   "and watch it land.")
-        w.set_status("Checking…")
-        w.busy(True)
-        self.entry = Gtk.Entry(placeholder_text="your words land here",
-                               hexpand=True)
-        w.set_extra(self.entry)
-        _in_background(self._probe)
-
-    def _probe(self):
-        # --check exits 0 only when the portal can inject keyboard events.
-        portal = _run([PYTHON, PORTAL_HELPER, "--check"]).returncode == 0
-        granted = bool(portal_typed.load_token())
-        ydotool = bool(shutil.which("ydotool"))
-        service = _run(["systemctl", "--user", "is-active",
-                        "dictatr-ydotoold.service"], timeout=8)
-        GLib.idle_add(self._probed, portal, granted, ydotool,
-                      (service.stdout or "").strip() == "active")
-
-    def _probed(self, portal, granted, ydotool, service_up):
-        w = self.wiz
-        w.busy(False)
-        if granted or (ydotool and service_up):
-            self._ready("Typing is allowed on this desktop", "good")
-        elif portal:
-            w.set_status("Your desktop can grant this. The dialog appears "
-                         "once and the permission is remembered.")
-            w.set_actions(primary=("Allow typing", self._grant),
-                          secondary=("Skip, use the clipboard", self._ready))
-        elif ydotool:
-            w.set_status("No typing portal on this desktop. dictatr can "
-                         "use ydotool instead, as your own user.")
-            w.set_actions(primary=("Enable the typing service",
-                                   self._enable_ydotoold),
-                          secondary=("Skip, use the clipboard", self._ready))
-        else:
-            self._ready("Nothing here can type at the cursor, so transcripts "
-                        "go to the clipboard. Dictation still works.", "bad")
-
-    # --- permission -----------------------------------------------------
-    def _grant(self):
-        w = self.wiz
-        w.busy(True)
-        w.set_status("Waiting for your desktop's permission dialog…")
-        w.set_actions()
-        _in_background(self._grant_worker)
-
-    def _grant_worker(self):
-        r = _run([PYTHON, PORTAL_HELPER, "--grant"], timeout=150)
-        GLib.idle_add(self._granted, r.returncode == 0,
-                      (r.stderr or r.stdout or "").strip())
-
-    def _granted(self, ok, msg):
-        w = self.wiz
-        w.busy(False)
-        if ok:
-            self._ready("Permission granted", "good")
-        else:
-            w.set_status(msg or "The request was refused", "bad")
-            w.set_actions(primary=("Try again", self._grant),
-                          secondary=("Skip, use the clipboard", self._ready))
-
-    def _enable_ydotoold(self):
-        w = self.wiz
-        w.busy(True)
-        w.set_status("Starting the typing service…")
-        w.set_actions()
-        _in_background(self._enable_worker)
-
-    def _enable_worker(self):
-        r = _run(["systemctl", "--user", "enable", "--now",
-                  "dictatr-ydotoold.service"], timeout=30)
-        if r.returncode == 0:
-            time.sleep(0.6)   # let the daemon create its socket
-        GLib.idle_add(self._enabled, r.returncode == 0,
-                      (r.stderr or "").strip())
-
-    def _enabled(self, ok, msg):
-        self.wiz.busy(False)
-        if ok:
-            self._ready("Typing service running", "good")
-        else:
-            self._ready(msg or "Could not start the service", "bad")
-
-    # --- the dictation ---------------------------------------------------
-    def _ready(self, status="Ready when you are", tone=""):
-        w = self.wiz
-        w.set_status(status, tone)
-        w.set_actions(primary=("Start dictation", self._go),
-                      secondary=("Finish", self._finish))
-
-    def _go(self):
-        w = self.wiz
-        self.entry.set_text("")
-        self.entry.grab_focus()
-        w.busy(True)
-        w.set_status("Listening. Say something, then pause.")
-        w.set_actions()
-        _in_background(self._worker)
-
-    def _worker(self):
-        r = _run([DICTATE, "type"], timeout=120)
-        tail = (r.stderr or "").strip().splitlines()
-        GLib.idle_add(self._done, r.returncode == 0, tail[-1] if tail else "")
-
-    def _done(self, ok, tail):
-        w = self.wiz
-        w.busy(False)
-        text = self.entry.get_text().strip()
-        if text:
-            w.set_status(f"Heard: {text}", "good")
-            w.set_actions(primary=("Finish", self._finish),
-                          secondary=("Again", self._go))
-        elif ok:
-            w.set_status("Transcribed, but the text did not land here. It is "
-                         "on the clipboard: press Ctrl+V in the box.", "bad")
-            w.set_actions(primary=("Finish", self._finish),
-                          secondary=("Again", self._go))
-        else:
-            w.set_status(tail or "Dictation failed. Check the engine step.",
-                         "bad")
-            w.set_actions(primary=("Try again", self._go),
-                          secondary=("Finish", self._finish))
-
-    def _finish(self):
-        write_config({"setup_done": True})
-        self.wiz.mark_complete()
-        self.wiz.close()
+        w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
 
 class HotkeysStep(Step):
@@ -586,21 +360,22 @@ class HotkeysStep(Step):
         w = self.wiz
         w.busy(False)
         w.set_extra(self._table())
+        skip = Bubble("go-next-symbolic", "Skip", w.advance)
         if version is not None:
             w.set_status("Your desktop can bind these. One dialog, then "
                          "they stay bound.")
-            w.set_actions(primary=("Bind the shortcuts", self._bind),
-                          secondary=("Skip", w.advance))
+            w.set_items([Bubble("dictatr-hotkey-symbolic",
+                                "Bind the shortcuts", self._bind), skip])
         elif kde:
             w.set_status("No shortcuts portal here. dictatr can write them "
                          "into the KDE config instead (active after you log "
                          "back in).")
-            w.set_actions(primary=("Write KDE shortcuts", self._legacy),
-                          secondary=("Skip", w.advance))
+            w.set_items([Bubble("document-edit-symbolic",
+                                "Write KDE shortcuts", self._legacy), skip])
         else:
             w.set_status("This desktop has no shortcuts portal. Bind the "
                          "commands below by hand in its settings.", "bad")
-            w.set_actions(primary=("Continue", w.advance))
+            w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
     def _table(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -608,11 +383,11 @@ class HotkeysStep(Step):
         for sid, desc, trigger in SHORTCUTS:
             row = Gtk.Box(spacing=10)
             left = Gtk.Label(label=desc, xalign=0, hexpand=True)
-            left.add_css_class("status")
+            left.add_css_class("body")
             right = Gtk.Label(label=trigger.replace("CTRL", "Ctrl")
                               .replace("ALT", "Alt").replace("+", " + "),
                               xalign=1)
-            right.add_css_class("status")
+            right.add_css_class("body")
             row.append(left)
             row.append(right)
             box.append(row)
@@ -623,7 +398,7 @@ class HotkeysStep(Step):
         w = self.wiz
         w.busy(True)
         w.set_status("Waiting for your desktop's shortcut dialog…")
-        w.set_actions()
+        w.set_items([])
         Binder(self._bound).run()
 
     def _bound(self, ok, results, msg):
@@ -631,8 +406,10 @@ class HotkeysStep(Step):
         w.busy(False)
         if not ok:
             w.set_status(msg or "The request was refused", "bad")
-            w.set_actions(primary=("Try again", self._bind),
-                          secondary=("Skip", w.advance))
+            w.set_items([
+                Bubble("view-refresh-symbolic", "Try again", self._bind),
+                Bubble("go-next-symbolic", "Skip", w.advance),
+            ])
             return
         for sid, meta in results:
             if sid in self.rows:
@@ -640,7 +417,7 @@ class HotkeysStep(Step):
                     meta.get("trigger_description") or "bound")
         self._ensure_tray()
         w.set_status("Shortcuts bound", "good")
-        w.set_actions(primary=("Continue", w.advance))
+        w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
     def _ensure_tray(self):
         """The tray owns the live shortcut session; if it is not up, the
@@ -655,8 +432,7 @@ class HotkeysStep(Step):
                 pass
 
     def _legacy(self):
-        w = self.wiz
-        w.busy(True)
+        self.wiz.busy(True)
         _in_background(self._legacy_worker)
 
     def _legacy_worker(self):
@@ -672,8 +448,124 @@ class HotkeysStep(Step):
                          "back in.", "good")
         else:
             w.set_status("Could not write the KDE config", "bad")
-        w.set_actions(primary=("Continue", w.advance))
+        w.set_items([Bubble("go-next-symbolic", "Continue", w.advance)])
 
+
+class SpeakStep(Step):
+    """Permission and proof in one step: the thing that verifies typing
+    is the user's own voice, not a canned string typed into a box."""
+
+    key, icon = "speak", "dictatr-mic-symbolic"
+    title = "Try it"
+
+    def enter(self):
+        w = self.wiz
+        w.set_body("Dictation types wherever your cursor is, which needs "
+                   "one permission from your desktop. Then say a sentence "
+                   "and watch it land.")
+        w.set_status("Checking…")
+        w.busy(True)
+        self.entry = Gtk.Entry(placeholder_text="your words land here",
+                               hexpand=True)
+        w.set_extra(self.entry)
+        _in_background(self._probe)
+
+    def _probe(self):
+        # --check exits 0 only when the portal can inject keyboard events.
+        portal = _run([PYTHON, PORTAL_HELPER, "--check"]).returncode == 0
+        granted = bool(portal_typed.load_token())
+        GLib.idle_add(self._probed, portal, granted)
+
+    def _probed(self, portal, granted):
+        w = self.wiz
+        w.busy(False)
+        if granted and settings.typing.portal:
+            self._ready("Typing is allowed on this desktop", "good")
+        elif not settings.typing.portal:
+            self._ready("Typing at the cursor is switched off, so "
+                        "transcripts go to the clipboard.", "bad")
+        elif portal:
+            w.set_status("Your desktop can grant this. The dialog appears "
+                         "once and the permission is remembered.")
+            w.set_items([
+                Bubble("dictatr-typing-symbolic", "Allow typing", self._grant),
+                Bubble("edit-copy-symbolic", "Skip, use the clipboard",
+                       self._ready),
+            ])
+        else:
+            self._ready("Nothing here can type at the cursor, so transcripts "
+                        "go to the clipboard. Dictation still works.", "bad")
+
+    def _grant(self):
+        w = self.wiz
+        w.busy(True)
+        w.set_status("Waiting for your desktop's permission dialog…")
+        w.set_items([])
+        _in_background(self._grant_worker)
+
+    def _grant_worker(self):
+        r = _run([PYTHON, PORTAL_HELPER, "--grant"], timeout=150)
+        GLib.idle_add(self._granted, r.returncode == 0,
+                      (r.stderr or r.stdout or "").strip())
+
+    def _granted(self, ok, msg):
+        w = self.wiz
+        w.busy(False)
+        if ok:
+            self._ready("Permission granted", "good")
+        else:
+            w.set_status(msg or "The request was refused", "bad")
+            w.set_items([
+                Bubble("view-refresh-symbolic", "Try again", self._grant),
+                Bubble("edit-copy-symbolic", "Skip, use the clipboard",
+                       self._ready),
+            ])
+
+    # --- the dictation ---------------------------------------------------
+    def _ready(self, status="Ready when you are", tone=""):
+        w = self.wiz
+        w.set_status(status, tone)
+        w.set_items([
+            Bubble("dictatr-mic-symbolic", "Start dictation", self._go),
+            Bubble(CHECK_ICON, "Finish", self._finish),
+        ])
+
+    def _go(self):
+        w = self.wiz
+        self.entry.set_text("")
+        self.entry.grab_focus()
+        w.busy(True)
+        w.set_status("Listening. Say something, then pause.")
+        w.set_items([])
+        _in_background(self._worker)
+
+    def _worker(self):
+        r = _run([DICTATE, "type"], timeout=120)
+        tail = (r.stderr or "").strip().splitlines()
+        GLib.idle_add(self._done, r.returncode == 0, tail[-1] if tail else "")
+
+    def _done(self, ok, tail):
+        w = self.wiz
+        w.busy(False)
+        text = self.entry.get_text().strip()
+        again = Bubble("view-refresh-symbolic", "Again", self._go)
+        finish = Bubble(CHECK_ICON, "Finish", self._finish)
+        if text:
+            w.set_status(f"Heard: {text}", "good")
+            w.set_items([finish, again])
+        elif ok:
+            w.set_status("Transcribed, but the text did not land here. It is "
+                         "on the clipboard: press Ctrl+V in the box.", "bad")
+            w.set_items([finish, again])
+        else:
+            w.set_status(tail or "Dictation failed. Check the engine step.",
+                         "bad")
+            w.set_items([again, finish])
+
+    def _finish(self):
+        write_config({"setup_done": True})
+        self.wiz.mark_complete()
+        self.wiz.close()
 
 class Binder:
     """One GlobalShortcuts bind dance: CreateSession, BindShortcuts, read
@@ -769,107 +661,133 @@ class Binder:
 
 # --- the window --------------------------------------------------------
 
+
 class Wizard(Gtk.ApplicationWindow):
+    """The surface: a card of prose above a ring of choices, floating on
+    a transparent overlay whose input region is clipped to both, so the
+    desktop underneath keeps working while setup is open."""
+
     def __init__(self, app):
-        super().__init__(application=app, title="Set up dictatr")
+        super().__init__(application=app, decorated=False,
+                         title="Set up dictatr")
         radial.apply_css(SETUP_CSS)
         self.add_css_class("setup")
-        self.set_default_size(560, 620)
 
-        # Engine first because everything needs it, hotkeys next
-        # because they are pure configuration, and the dictation last
-        # so the wizard ends on the user's own words appearing.
-        self.steps = [EngineStep(self), HotkeysStep(self),
-                      SpeakStep(self)]
+        self.steps = [EngineStep(self), HotkeysStep(self), SpeakStep(self)]
         self.index = 0
-        self.reached = 0
         self.completed = False
         self._fraction = 0.0
+        self._closing = False
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        outer.add_css_class("setup-page")
-        self.set_child(outer)
-
-        self.ring = StepRing([s.icon for s in self.steps])
-        self.ring.set_halign(Gtk.Align.CENTER)
-        self.ring.set_margin_top(22)
-        self.ring.set_margin_bottom(14)
-        outer.append(self.ring)
-
-        # vexpand claims the leftover height so the buttons stay pinned
-        # to the bottom; valign START keeps the text under the ring
-        # instead of drifting into the middle of the gap.
-        self.page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                            vexpand=True, valign=Gtk.Align.START)
-        self.page.set_margin_top(10)
-        self.page.set_margin_start(SHIFT)
-        self.page.set_margin_end(SHIFT)
-        outer.append(self.page)
-
-        self.title = Gtk.Label(xalign=0.5)
-        self.title.add_css_class("title")
-        self.body = Gtk.Label(xalign=0.5, wrap=True, justify=Gtk.Justification.CENTER)
+        self.title_label = Gtk.Label(xalign=0.5, wrap=True,
+                                     justify=Gtk.Justification.CENTER)
+        self.title_label.add_css_class("title")
+        self.body = Gtk.Label(xalign=0.5, wrap=True,
+                              justify=Gtk.Justification.CENTER)
         self.body.add_css_class("body")
-        self.status = Gtk.Label(xalign=0.5, wrap=True,
-                                justify=Gtk.Justification.CENTER)
-        self.status.add_css_class("status")
+        self.body.set_max_width_chars(46)
         self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.extra.set_margin_top(4)
-        for w in (self.title, self.body, self.extra, self.status):
-            self.page.append(w)
 
-        self.buttons = Gtk.Box(spacing=10, halign=Gtk.Align.FILL)
-        self.buttons.set_margin_top(16)
-        self.back_btn = Gtk.Button(label="Back")
-        self.back_btn.add_css_class("flat")
-        self.back_btn.connect("clicked", lambda _b: self.back())
-        self.secondary_btn = Gtk.Button()
-        self.primary_btn = Gtk.Button()
-        self.primary_btn.add_css_class("primary")
-        gap = Gtk.Box(hexpand=True)
-        for w in (self.back_btn, gap, self.secondary_btn, self.primary_btn):
-            self.buttons.append(w)
-        outer.append(self.buttons)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card.add_css_class("card")
+        card.set_size_request(CARD_W, -1)
+        for w in (self.title_label, self.body, self.extra):
+            card.append(w)
+
+        self.status = Gtk.Label(label="")
+        self.status.set_ellipsize(Pango.EllipsizeMode.END)
+        self.status.set_max_width_chars(56)
+        self.status.add_css_class("pill")
+        status_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        status_row.append(self.status)
+
+        # The ring starts empty: a step fills it once its probe answers.
+        self.ring = Ring([], hub_icon=self.steps[0].icon,
+                         hub_tooltip="Close", on_root_hub=self.on_hub)
+
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                         halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        column.append(card)
+        column.append(status_row)
+        column.append(self.ring)
+        self.column = column
+        self._hit = (card, status_row, self.ring)
+
+        ls = layer_shell()
+        self.overlay = ls is not None
+        if self.overlay:
+            ls.init_for_window(self)
+            ls.set_layer(self, ls.Layer.OVERLAY)
+            ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
+            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
+                         ls.Edge.RIGHT):
+                ls.set_anchor(self, edge, True)
+            GLib.timeout_add(250, self._update_input_region)
+        self.set_child(column)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
         self.add_controller(keys)
         self.connect("close-request", self._on_close)
 
-        # DICTATR_SETUP_STEP opens straight on one page: for capture and
-        # for eyeballing a page without walking the whole wizard.
         try:
             start = max(0, min(int(os.environ.get("DICTATR_SETUP_STEP", 0)),
                                len(self.steps) - 1))
         except ValueError:
             start = 0
-        self._show(start, animate=False)
+        self.index = start
+        step = self.steps[start]
+        self.ring.hub.set_icon_name(step.icon)
+        self.title_label.set_label(step.title)
+        self.connect("map", lambda *_: GLib.idle_add(self._opened))
 
-    # --- ui setters used by the steps ------------------------------------
+    def _opened(self):
+        self.ring.open()
+        self.steps[self.index].enter()
+        return False
+
+    def _update_input_region(self):
+        """Clip input to the card, the status pill and the ring: clicks
+        anywhere else fall through, so the overlay never blocks the
+        desktop the way a modal dialog would."""
+        if self._closing:
+            return False
+        surface = self.get_surface()
+        if surface is None:
+            return True
+        region = cairo.Region()
+        for widget in self._hit:
+            ok, b = widget.compute_bounds(self)
+            if ok and b.size.width > 0:
+                region.union(cairo.RectangleInt(
+                    int(b.origin.x) - 4, int(b.origin.y) - 4,
+                    int(b.size.width) + 8, int(b.size.height) + 8))
+        surface.set_input_region(region)
+        return True
+
+    # --- what the steps call ---------------------------------------------
     def set_body(self, text):
         self.body.set_label(text)
 
     def set_status(self, text, tone=""):
-        self.status.remove_css_class("good")
-        self.status.remove_css_class("bad")
+        for t in ("good", "bad"):
+            self.status.remove_css_class(t)
         if tone:
             self.status.add_css_class(tone)
         self.status.set_label(text)
+        self.status.set_visible(bool(text))
 
     def set_progress(self, fraction):
-        """A determinate arc (0..1), or None to clear it. Wins over the
-        busy spinner: a download knows more than "working"."""
+        """A determinate arc on the hub, or None to clear it."""
         self._fraction = 0.0 if fraction is None else fraction
-        self.ring.emblem.set_fraction(self._fraction)
+        self.ring.set_fraction(self._fraction)
 
     def busy(self, on):
-        """Spin the emblem's arc while a worker runs. Stopping restores
+        """Spin the hub arc while a worker runs; stopping restores
         whatever determinate progress the step had set."""
-        if on:
-            self.ring.emblem.set_indeterminate(True)
-        else:
-            self.ring.emblem.set_indeterminate(False)
-            self.ring.emblem.set_fraction(self._fraction)
+        self.ring.set_indeterminate(bool(on))
+        if not on:
+            self.ring.set_fraction(self._fraction)
 
     def set_extra(self, widget=None):
         while child := self.extra.get_first_child():
@@ -877,22 +795,14 @@ class Wizard(Gtk.ApplicationWindow):
         if widget is not None:
             self.extra.append(widget)
 
-    def set_actions(self, primary=None, secondary=None):
-        for btn, spec in ((self.primary_btn, primary),
-                          (self.secondary_btn, secondary)):
-            if getattr(btn, "_handler", None):
-                btn.disconnect(btn._handler)
-                btn._handler = None
-            if spec is None:
-                btn.set_visible(False)
-                continue
-            label, cb = spec
-            btn.set_label(label)
-            btn.set_visible(True)
-            btn._handler = btn.connect("clicked", lambda _b, f=cb: f())
-        self.back_btn.set_visible(self.index > 0)
+    def set_items(self, bubbles):
+        """Replace the ring's satellites with this step's choices."""
+        self.ring.swap(list(bubbles))
 
-    # --- navigation -------------------------------------------------------
+    def mark_complete(self):
+        self.completed = True
+
+    # --- navigation --------------------------------------------------------
     def advance(self):
         if self.index + 1 < len(self.steps):
             self._show(self.index + 1)
@@ -901,71 +811,36 @@ class Wizard(Gtk.ApplicationWindow):
         if self.index > 0:
             self._show(self.index - 1, forward=False)
 
-    def mark_complete(self):
-        self.completed = True
+    def on_hub(self):
+        """The hub is Back, and Close on the first step: the same
+        contract the menu's hub has."""
+        if self.index > 0:
+            self.back()
+        else:
+            self.close()
 
-    def _slide(self, margin):
-        """Shift the page sideways without changing its width: the two
-        margins always add up to 2 * SHIFT, so nothing reflows mid-slide."""
-        m = round(min(max(margin, 0), 2 * SHIFT))
-        self.page.set_margin_start(m)
-        self.page.set_margin_end(2 * SHIFT - m)
-
-    def _show(self, index, forward=True, animate=True):
-        step = self.steps[index]
+    def _show(self, index, forward=True):
         self.index = index
-        self.reached = max(self.reached, index)
-        self.ring.show_step(index, index, step.icon, animate=animate)
-        self.set_actions()
+        step = self.steps[index]
         self.set_extra(None)
         self.set_status("")
         self.set_progress(None)
-
-        def swap():
-            self.title.set_label(step.title)
-            step.enter()
-
-        if not animate:
-            swap()
-            return
-        # The page leaves the way we are travelling and the next one
-        # arrives from behind it, so forward and back feel opposite.
-        # Margins cannot go negative, so SHIFT is the resting position.
-        d = SHIFT if forward else -SHIFT
-        t0 = [None]
-        phase = ["out"]
-
-        def tick(_w, clock):
-            now = clock.get_frame_time() / 1e6
-            if t0[0] is None:
-                t0[0] = now
-            p = min((now - t0[0]) / (SLIDE_S / 2), 1.0)
-            if phase[0] == "out":
-                self.page.set_opacity(1 - p)
-                self._slide(SHIFT - d * p)
-                if p >= 1.0:
-                    swap()
-                    phase[0] = "in"
-                    t0[0] = now
-                return True
-            self.page.set_opacity(p)
-            self._slide(SHIFT + d * (1 - p))
-            return p < 1.0
-
-        self.page.add_tick_callback(tick)
+        self.title_label.set_label(step.title)
+        self.ring.hub.set_icon_name(step.icon)
+        self.ring.hub.set_tooltip_text(
+            "Back" if index else "Close")
+        self.ring.swap([], forward=forward, done=step.enter)
 
     def _on_key(self, _c, keyval, _code, _state):
         if keyval == Gdk.KEY_Escape:
-            if self.index > 0:
-                self.back()
-            else:
-                self.close()
+            self.on_hub()
             return True
-        return False
+        return self.ring.handle_key(keyval)
 
     def _on_close(self, *_):
         # Record that the wizard was seen either way, so the tray stops
         # offering first-run setup; `dictate setup` re-runs it.
+        self._closing = True
         from dictatr.settings import setup_seen
         if not self.completed and not setup_seen():
             write_config({"setup_done": False})

@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Launch the setup wizard (engine, typing, hotkeys, a test dictation).
+# Setup wizard. Preload gtk4-layer-shell so the wizard floats as an
+# overlay like the menu and the chat (must load before GTK's wayland
+# connection); without it, it falls back to a plain centered window.
 repo=$(dirname "$(dirname "$(readlink -f "$0")")")
-# PyGObject lives in the system python; a dev checkout's venv is on PATH
-# first and does not have it.
+for lib in /usr/lib64/libgtk4-layer-shell.so.0 /usr/lib/libgtk4-layer-shell.so.0; do
+    [[ -e $lib ]] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+done
+# PyGObject lives in the system python; a dev checkout's venv is on
+# PATH first and does not have it.
 py=python3
 "$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
 exec "$py" "$repo/ui/setup.py" "$@"
