@@ -1,16 +1,25 @@
 """Runtime settings: defaults < ~/.config/dictatr/config.toml < environment.
 
-Structured to mirror listenr's settings groups (whisper / vad / storage) so a
-future `listenr dictate` merge maps field-for-field onto listenr's pydantic
-settings. Kept stdlib-only here: dictatr has no reason to pull in pydantic.
+Every setting is declared once, as a Setting: its environment variable,
+its config key, its type and its default, all in one place. Nothing else
+in the codebase should know a config key as a bare string.
 
-The config file is written by the settings UI (ui/menu.py --settings) and is
-a flat table of the keys named below; environment variables always win.
+Settings are read when they are used, not when this module is imported.
+Several processes are long-lived (the tray, the voice chat, the always-on
+listener) while the settings window and the wizard write the config file
+underneath them, and a value that froze at import means the same setting
+is one thing in one surface and another thing next door until everything
+is restarted.
+
+Structured to mirror listenr's settings groups (whisper / vad / storage)
+so a future `listenr dictate` merge maps field-for-field onto listenr's
+pydantic settings. Kept stdlib-only here: dictatr has no reason to pull
+in pydantic.
 """
 
 import os
+import sys
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG_PATH = (
@@ -23,11 +32,62 @@ try:
 except (OSError, tomllib.TOMLDecodeError):
     _cfg = {}
 
+# config key -> Setting, filled in as the groups below are defined. The
+# writers validate against it, so a typo cannot quietly land a key that
+# nothing ever reads.
+REGISTRY: dict[str, "Setting"] = {}
+
+# Keys owned elsewhere but living in the same flat table: the backend
+# provider block (see backend/config.py) and the wizard's own marker.
+_EXTRA_KEYS = frozenset(
+    {"setup_done", "backend", "backend_url"}
+    | {f"{cap}_{part}" for cap in ("asr", "chat", "tts", "embed")
+       for part in ("url", "key", "model")}
+)
+
+_TRUE = ("1", "true", "yes", "on")
+
+
+class Setting:
+    """One setting, resolved on every read: environment first (it is the
+    override of last resort and must win everywhere), then the config
+    file, then the default.
+
+    A non-data descriptor on purpose: assigning to the attribute puts a
+    plain value in the instance dict and shadows this, which is what
+    tests and one-off overrides want.
+    """
+
+    def __init__(self, env: str, key: str, default, kind=str):
+        self.env, self.key, self.default, self.kind = env, key, default, kind
+        REGISTRY[key] = self
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        raw = os.environ.get(self.env) or _cfg.get(self.key)
+        if raw is None or raw == "":
+            raw = self.default
+        return self.coerce(raw)
+
+    def coerce(self, raw):
+        if raw is None:
+            return None
+        if self.kind is bool:
+            return raw if isinstance(raw, bool) else str(raw).lower() in _TRUE
+        if self.kind is int:
+            return int(raw)
+        if self.kind is float:
+            return float(raw)
+        return str(raw)
+
 
 def raw_config() -> dict:
-    """The parsed config-file table. backend/config.py reads its flat
-    backend keys from here at call time (testable, unlike the dataclass
-    defaults below which bind at import)."""
+    """The parsed config-file table, for the flat backend keys that are
+    read as a block rather than one setting at a time."""
     return _cfg
 
 
@@ -45,8 +105,13 @@ def write_config(updates: dict) -> None:
     Two writers exist (the settings window and the setup wizard) and each
     only knows its own keys, so a whole-file rewrite would silently drop
     the other's. A None value removes the key. The in-process table is
-    updated too, so backend/config.py sees the change without a restart.
+    updated too, so every setting read after this returns the new value.
     """
+    unknown = set(updates) - set(REGISTRY) - _EXTRA_KEYS
+    if unknown:
+        # Not fatal: a newer surface may know keys this build does not.
+        print(f"dictatr: writing unknown config keys: {sorted(unknown)}",
+              file=sys.stderr)
     merged = dict(_cfg)
     for k, v in updates.items():
         if v is None:
@@ -66,134 +131,109 @@ def setup_seen() -> bool:
     return "setup_done" in _cfg
 
 
-def _s(env: str, key: str, default: str) -> str:
-    return os.environ.get(env) or str(_cfg.get(key, default))
-
-
-def _f(env: str, key: str, default: float) -> float:
-    return float(os.environ.get(env) or _cfg.get(key, default))
-
-
-def _i(env: str, key: str, default: int) -> int:
-    return int(os.environ.get(env) or _cfg.get(key, default))
-
-
-@dataclass
 class WhisperSettings:
-    model: str = _s("DICTATE_MODEL", "model", "Moonshine-Medium-Streaming")
-    api_base: str = _s("LEMONADE_URL", "api_base", "http://localhost:8080/api/v1")
+    model = Setting("DICTATE_MODEL", "model", "Moonshine-Medium-Streaming")
+    api_base = Setting("LEMONADE_URL", "api_base",
+                       "http://localhost:8080/api/v1")
 
 
-@dataclass
 class VADSettings:
     # Server-side VAD settings passed to Lemonade via session.update,
     # same names and defaults as listenr's VADSettings.
-    threshold: float = _f("DICTATE_VAD_THRESHOLD", "vad_threshold", 0.02)
-    silence_duration_ms: int = _i("DICTATE_VAD_SILENCE_MS", "silence_ms", 1200)
-    prefix_padding_ms: int = _i("DICTATE_VAD_PREFIX_MS", "prefix_ms", 250)
-    max_segment_s: float = _f("DICTATE_MAX_SEC", "max_sec", 90.0)
+    threshold = Setting("DICTATE_VAD_THRESHOLD", "vad_threshold", 0.02, float)
+    silence_duration_ms = Setting("DICTATE_VAD_SILENCE_MS", "silence_ms",
+                                  1200, int)
+    prefix_padding_ms = Setting("DICTATE_VAD_PREFIX_MS", "prefix_ms", 250, int)
+    max_segment_s = Setting("DICTATE_MAX_SEC", "max_sec", 90.0, float)
     # Client-side: give up if the server reports no speech for this long.
-    max_wait_s: float = _f("DICTATE_MAX_WAIT", "max_wait", 20.0)
-    # Realtime mode: how long after the last transcript, with no new speech,
-    # the dictation is considered finished. Pauses shorter than this just
-    # become segment boundaries and the transcripts are joined.
-    idle_s: float = _f("DICTATE_IDLE_S", "idle_s", 3.0)
+    max_wait_s = Setting("DICTATE_MAX_WAIT", "max_wait", 20.0, float)
+    # Realtime: how long after the last transcript, with no new speech,
+    # the dictation is finished. Shorter pauses are segment boundaries
+    # and their transcripts are joined.
+    idle_s = Setting("DICTATE_IDLE_S", "idle_s", 3.0, float)
 
 
-@dataclass
 class StorageSettings:
     # listenr-format archive: audio/YYYY-MM-DD/clip_*.wav + manifest.jsonl.
     # "off" disables archiving.
-    base: str = _s(
-        "DICTATE_ARCHIVE", "archive", str(Path.home() / ".listenr" / "dictation")
-    )
+    base = Setting("DICTATE_ARCHIVE", "archive",
+                   str(Path.home() / ".listenr" / "dictation"))
 
     @property
     def enabled(self) -> bool:
         return self.base not in ("", "off")
 
 
-@dataclass
 class LLMSettings:
-    # Ask mode: chat model and spoken answers (Kokoro TTS), all via Lemonade.
-    model: str = _s("DICTATE_LLM_MODEL", "llm_model", "Qwen3.5-4B-GGUF")
-    speak: bool = _s("DICTATE_SPEAK", "speak_answers", "true").lower() in (
-        "1", "true", "yes", "on")
-    tts_model: str = _s("DICTATE_TTS_MODEL", "tts_model", "kokoro-v1")
-    tts_voice: str = _s("DICTATE_TTS_VOICE", "tts_voice", "af_heart")
+    # Ask mode: chat model and spoken answers (Kokoro TTS).
+    model = Setting("DICTATE_LLM_MODEL", "llm_model", "Qwen3.5-4B-GGUF")
+    speak = Setting("DICTATE_SPEAK", "speak_answers", True, bool)
+    tts_model = Setting("DICTATE_TTS_MODEL", "tts_model", "kokoro-v1")
+    tts_voice = Setting("DICTATE_TTS_VOICE", "tts_voice", "af_heart")
     # Ask-mode recall: semantic search over the dictation archive.
-    recall: bool = _s("DICTATE_RECALL", "recall", "true").lower() in (
-        "1", "true", "yes", "on")
-    embed_model: str = _s("DICTATE_EMBED_MODEL", "embed_model",
+    recall = Setting("DICTATE_RECALL", "recall", True, bool)
+    embed_model = Setting("DICTATE_EMBED_MODEL", "embed_model",
                           "nomic-embed-text-v1-GGUF")
-    # Context ask mode may read from the desktop: comma-separated
-    # source names (selection, clipboard), empty for none. Selection is
-    # on because highlighting text is a deliberate "I mean this".
-    context: str = _s("DICTATE_ASK_CONTEXT", "ask_context", "selection")
+    # Context ask mode may read from the desktop: comma-separated source
+    # names (selection, clipboard), empty for none. Selection is on
+    # because highlighting text is a deliberate "I mean this".
+    context = Setting("DICTATE_ASK_CONTEXT", "ask_context", "selection")
     # Tag archived dictations with LLM-extracted concepts.
-    concepts: bool = _s("DICTATE_CONCEPTS", "concepts", "true").lower() in (
-        "1", "true", "yes", "on")
+    concepts = Setting("DICTATE_CONCEPTS", "concepts", True, bool)
 
 
-def _b(env: str, key: str, default: str) -> bool:
-    return _s(env, key, default).lower() in ("1", "true", "yes", "on")
-
-
-@dataclass
 class NotifySettings:
     # Which notification categories show. State chatter (listening /
     # transcribing) shares one replaceable bubble; the rest pop fresh.
-    state: bool = _b("DICTATE_NOTIFY_STATE", "notify_state", "true")
-    delivery: bool = _b("DICTATE_NOTIFY_DELIVERY", "notify_delivery", "true")
-    answers: bool = _b("DICTATE_NOTIFY_ANSWERS", "notify_answers", "true")
-    toggles: bool = _b("DICTATE_NOTIFY_TOGGLES", "notify_toggles", "true")
-    errors: bool = _b("DICTATE_NOTIFY_ERRORS", "notify_errors", "true")
+    state = Setting("DICTATE_NOTIFY_STATE", "notify_state", True, bool)
+    delivery = Setting("DICTATE_NOTIFY_DELIVERY", "notify_delivery", True, bool)
+    answers = Setting("DICTATE_NOTIFY_ANSWERS", "notify_answers", True, bool)
+    toggles = Setting("DICTATE_NOTIFY_TOGGLES", "notify_toggles", True, bool)
+    errors = Setting("DICTATE_NOTIFY_ERRORS", "notify_errors", True, bool)
 
 
-@dataclass
 class ListenSettings:
-    # Always-on mode (dictatr listen). Tagging every ambient utterance keeps
-    # the LLM warm around the clock, so it's opt-in unlike interactive rows.
-    tag: bool = _s("DICTATE_LISTEN_TAG", "listen_tag", "false").lower() in (
-        "1", "true", "yes", "on")
+    # Always-on mode. Tagging every ambient utterance keeps the LLM warm
+    # around the clock, so it is opt-in unlike interactive rows.
+    tag = Setting("DICTATE_LISTEN_TAG", "listen_tag", False, bool)
 
 
-@dataclass
 class GCSettings:
-    # dictatr gc: listen-mode rows shorter than min_duration_s AND fewer
-    # words than min_words are quarantined; trash older than purge_days is
-    # deleted for good.
-    min_duration_s: float = _f("DICTATE_GC_MIN_SEC", "gc_min_sec", 1.0)
-    min_words: int = _i("DICTATE_GC_MIN_WORDS", "gc_min_words", 2)
-    purge_days: float = _f("DICTATE_GC_PURGE_DAYS", "gc_purge_days", 30.0)
+    # dictatr gc: listen-mode rows shorter than min_duration_s AND with
+    # fewer words than min_words are quarantined; trash older than
+    # purge_days is deleted for good.
+    min_duration_s = Setting("DICTATE_GC_MIN_SEC", "gc_min_sec", 1.0, float)
+    min_words = Setting("DICTATE_GC_MIN_WORDS", "gc_min_words", 2, int)
+    purge_days = Setting("DICTATE_GC_PURGE_DAYS", "gc_purge_days", 30.0, float)
 
 
-@dataclass
 class TypingSettings:
     # Portal keysym injection can leave the compositor's modifier state
     # desynced on some desktops, which makes the whole session act as
-    # though Ctrl is held. Escape hatch while that is being chased:
-    # portal_typing = false falls back to the clipboard instead.
-    portal: bool = _b("DICTATE_PORTAL_TYPING", "portal_typing", "true")
+    # though Ctrl is held. Escape hatch: portal_typing = false falls back
+    # to the clipboard instead.
+    portal = Setting("DICTATE_PORTAL_TYPING", "portal_typing", True, bool)
     # Type the transcript as it is dictated instead of all at once when
     # the utterance ends. The engine revises words it has already sent,
     # so the cursor visibly backspaces over a correction; turn this off
     # for a single clean insert at the end.
-    live: bool = _b("DICTATE_LIVE_TYPING", "live_typing", "true")
+    live = Setting("DICTATE_LIVE_TYPING", "live_typing", True, bool)
 
 
-@dataclass
 class Settings:
-    whisper: WhisperSettings = field(default_factory=WhisperSettings)
-    typing: TypingSettings = field(default_factory=TypingSettings)
-    llm: LLMSettings = field(default_factory=LLMSettings)
-    vad: VADSettings = field(default_factory=VADSettings)
-    storage: StorageSettings = field(default_factory=StorageSettings)
-    listen: ListenSettings = field(default_factory=ListenSettings)
-    gc: GCSettings = field(default_factory=GCSettings)
-    notify: NotifySettings = field(default_factory=NotifySettings)
-    # Audio source override for tests: a wav file streamed instead of the mic.
-    input_file: str | None = os.environ.get("DICTATE_INPUT") or None
+    # Audio source override for tests: a wav file streamed instead of
+    # the mic. No config key: it is a test seam, not a preference.
+    input_file = Setting("DICTATE_INPUT", "input_file", None)
+
+    def __init__(self):
+        self.whisper = WhisperSettings()
+        self.typing = TypingSettings()
+        self.llm = LLMSettings()
+        self.vad = VADSettings()
+        self.storage = StorageSettings()
+        self.listen = ListenSettings()
+        self.gc = GCSettings()
+        self.notify = NotifySettings()
 
 
 settings = Settings()
