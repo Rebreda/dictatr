@@ -20,6 +20,7 @@ cycling through determinate and indeterminate modes, for stage capture.
 
 import math
 import os
+from pathlib import Path
 
 import cairo
 import gi
@@ -70,14 +71,24 @@ window {{ background: transparent; }}
 .hub.back:hover {{ background: alpha({BLUE}, 0.28); }}
 """.encode()
 
+# Our own symbolic icons, laid out as an icon theme. Desktop themes are
+# a lottery at large sizes (Breeze's 32px input-keyboard-symbolic is a
+# full-color icon, which GTK masks into a solid blob), and these names
+# are shared by the menu and the wizard.
+ICON_PATH = Path(__file__).resolve().parent / "icons" / "theme"
+CHECK_ICON = "dictatr-check-symbolic"
+
 _css_applied = False
 
 
 def apply_css(extra: bytes = b""):
-    """Install the kit stylesheet (once) plus optional caller CSS."""
+    """Install the kit stylesheet (once), register the bundled icon
+    theme, and add optional caller CSS."""
     global _css_applied
     display = Gdk.Display.get_default()
     if not _css_applied:
+        Gtk.IconTheme.get_for_display(display).add_search_path(
+            str(ICON_PATH))
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(

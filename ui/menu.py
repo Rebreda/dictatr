@@ -135,6 +135,8 @@ class Radial(Gtk.ApplicationWindow):
                        self.gc),
                 Bubble("emblem-system-symbolic", "Settings",
                        self.open_settings),
+                Bubble("dictatr-engine-symbolic", "Set up dictatr",
+                       self.open_setup),
             ]),
             Bubble("process-stop-symbolic", "Cancel recording",
                    self.run(["cancel"])),
@@ -256,6 +258,14 @@ class Radial(Gtk.ApplicationWindow):
 
     def open_settings(self):
         SettingsWindow(self.get_application()).present()
+        self.close()
+
+    def open_setup(self):
+        # Its own process: the wizard is a plain window and this one is a
+        # layer-shell overlay with the gtk4-layer-shell preload loaded,
+        # which would turn the wizard into a fullscreen surface too.
+        subprocess.Popen([str(REPO / "bin" / "dictate-setup")],
+                         start_new_session=True)
         self.close()
 
     def pick_file(self):

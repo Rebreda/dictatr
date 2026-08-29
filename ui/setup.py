@@ -44,7 +44,7 @@ from dictatr.settings import settings, write_config  # noqa: E402
 sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
 import radial  # noqa: E402
-from radial import BLUE, GREEN, INK, ProgressBubble  # noqa: E402
+from radial import BLUE, CHECK_ICON, GREEN, INK, ProgressBubble  # noqa: E402
 
 APP_ID = "io.github.rebreda.dictatr"
 PORTAL_BUS = "org.freedesktop.portal.Desktop"
@@ -61,10 +61,13 @@ SHORTCUTS = [
     ("listen", "Toggle always-on capture", "CTRL+ALT+a"),
 ]
 
-EMBLEM = 76         # center bubble diameter
-STEP_BUBBLE = 30    # orbiting step markers
-ORBIT = 74          # their radius
-RING_SIZE = 2 * (ORBIT + STEP_BUBBLE)
+# The orbit is the menu's ring, same box and same radius, so the two
+# read as one shape doing two jobs. Only the satellites differ: step
+# markers are indicators, not targets, so they are smaller.
+RING_SIZE = radial.SIZE
+EMBLEM = radial.CENTER_BUBBLE
+ORBIT = radial.RADIUS
+STEP_BUBBLE = 30
 ROTATE_S = 0.42     # step-to-step orbit rotation
 SLIDE_S = 0.26      # text block crossfade
 SHIFT = 22          # how far the page slides, and its resting margin
@@ -120,22 +123,6 @@ window.setup {{ background: #1b1c21; }}
 """.encode()
 
 
-ICON_PATH = REPO / "ui" / "icons" / "theme"
-CHECK_ICON = "dictatr-check-symbolic"
-
-
-def register_icons():
-    """Use our own symbolic set instead of the desktop theme's.
-
-    Theme icons are a lottery at emblem size: Breeze's 32px
-    "input-keyboard-symbolic", for one, is a full-color icon, and GTK
-    masks it into a solid blob. Five small files remove the guesswork and
-    keep every page drawn in the same hand.
-    """
-    theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-    theme.add_search_path(str(ICON_PATH))
-
-
 def _run(cmd, timeout=20, **kw):
     """Subprocess helper: never raises, always returns a CompletedProcess."""
     try:
@@ -188,7 +175,7 @@ class StepRing(Gtk.Fixed):
         self._rot = 0.0
 
         self.emblem = ProgressBubble(icons[0], diameter=EMBLEM)
-        self.emblem.set_icon_size(30)          # the page's focal point
+        self.emblem.set_icon_size(24)          # the page's focal point
         self.emblem.inner.add_css_class("emblem")
         side = EMBLEM + 2 * ProgressBubble.ARC_PAD
         self.put(self.emblem, self._c - side / 2, self._c - side / 2)
@@ -833,7 +820,6 @@ class Wizard(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Set up dictatr")
         radial.apply_css(SETUP_CSS)
-        register_icons()
         self.add_css_class("setup")
         self.set_default_size(560, 620)
 
