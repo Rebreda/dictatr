@@ -4,7 +4,7 @@
 %global _binaries_in_noarch_packages_terminate_build 0
 
 Name:           dictatr
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Hotkey voice dictation for Linux desktops, backed by a local Lemonade Whisper server
 License:        MIT
@@ -71,5 +71,13 @@ udevadm trigger --name-match=uinput 2>/dev/null || :
 /usr/share/icons/hicolor/scalable/apps/dictatr.svg
 
 %changelog
+* Sat Aug 29 2026 Rebreda - 0.2.0-1
+- Setup wizard: engine, typing permission, hotkeys, test dictation
+- Backend providers: bundled lemond, detected system server, or custom
+  OpenAI-compatible endpoints
+- Ship a desktop file named for the app id, without which the desktop
+  portal refused global shortcuts and typing grants
+- No post-install shell instructions; the wizard does that work
+
 * Wed Aug 26 2026 Rebreda - 0.1.0-1
 - Initial package
