@@ -35,7 +35,7 @@ REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
 sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
-from dictatr.settings import CONFIG_PATH, settings  # noqa: E402
+from dictatr.settings import CONFIG_PATH, settings, write_config  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
 import radial  # noqa: E402
@@ -392,16 +392,9 @@ class SettingsWindow(Gtk.Window):
         }
         for key, cb in self.notify_checks.items():
             cfg[f"notify_{key}"] = cb.get_active()
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        lines = []
-        for k, v in cfg.items():
-            if isinstance(v, bool):
-                lines.append(f"{k} = {str(v).lower()}")
-            elif isinstance(v, (int, float)):
-                lines.append(f"{k} = {v}")
-            else:
-                lines.append(f'{k} = "{v}"')
-        CONFIG_PATH.write_text("\n".join(lines) + "\n")
+        # Merging write: the setup wizard owns the backend keys in the
+        # same file and this window never shows them.
+        write_config(cfg)
         subprocess.run(["notify-send", "-a", "Dictate", "-t", "2500",
                         "Dictate", f"Settings saved ({model})"], check=False)
         self.close()

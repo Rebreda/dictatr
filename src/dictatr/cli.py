@@ -4,6 +4,7 @@ Commands (hotkey-oriented, single instance coordinated via a pidfile):
   toggle [--clip]   start listening; if already listening, stop now (commit)
   cancel            abort the current listening session, no transcription
   file PATH         transcribe an audio file via the batch HTTP API
+  setup             first-run wizard (engine, typing, hotkeys, test)
   backend ...       inference backend: status|start|stop|pull MODEL|models
 """
 
@@ -196,6 +197,16 @@ def cmd_backend(args) -> int:
     return 2
 
 
+def cmd_setup() -> int:
+    """Run the first-run wizard. It needs PyGObject, so it goes through
+    bin/dictate-setup, which picks a python that has it."""
+    shim = Path(__file__).resolve().parents[2] / "bin" / "dictate-setup"
+    if not shim.exists():
+        print(f"setup wizard not found at {shim}", file=sys.stderr)
+        return 1
+    return subprocess.call([str(shim)])
+
+
 def cmd_file(path: str) -> int:
     text = transcribe_file(path)
     if not text:
@@ -216,6 +227,8 @@ def main() -> None:
                    help="no TTS or notification chatter; deliver the answer "
                         "like a dictation (typed at cursor, else clipboard)")
     sub.add_parser("cancel", help="abort without transcribing")
+    sub.add_parser("setup", help="run the setup wizard (engine, typing, "
+                                 "hotkeys, a test dictation)")
     sub.add_parser("tag", help="backfill concept tags for untagged archive rows")
     f = sub.add_parser("file", help="transcribe an audio file to the clipboard")
     f.add_argument("path")
@@ -250,6 +263,8 @@ def main() -> None:
         sys.exit(cmd_toggle(prefer_typing=quiet, ask=True, quiet=quiet))
     if args.cmd == "cancel":
         sys.exit(cmd_cancel())
+    if args.cmd == "setup":
+        sys.exit(cmd_setup())
     if args.cmd == "tag":
         n = concepts.sweep(limit=200)
         print(f"tagged {n} recordings")

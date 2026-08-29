@@ -15,6 +15,7 @@ Typing is a ladder, most portable and least privileged first:
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from . import runstate
@@ -74,6 +75,16 @@ def _portal_token() -> Path:
     return state / "dictatr" / "portal-typing-token"
 
 
+def _gi_python() -> str:
+    """A python that can import PyGObject. Plain "python3" is right for a
+    packaged install; inside a dev venv it resolves to the venv, which has
+    no gi (uv sync builds it without system site-packages), and the portal
+    tier would silently drop out. Fall back to the system interpreter."""
+    if sys.prefix != sys.base_prefix and Path("/usr/bin/python3").exists():
+        return "/usr/bin/python3"
+    return "python3"
+
+
 def _type_portal(text: str) -> bool:
     """RemoteDesktop portal typing. Only attempted with a stored grant
     token: without one the portal would raise a permission dialog in the
@@ -83,8 +94,7 @@ def _type_portal(text: str) -> bool:
     if not _portal_token().exists() or not _PORTAL_HELPER.exists():
         return False
     try:
-        # System python3: PyGObject lives in system site-packages.
-        r = subprocess.run(["python3", str(_PORTAL_HELPER)],
+        r = subprocess.run([_gi_python(), str(_PORTAL_HELPER)],
                            input=text.encode(), check=False,
                            capture_output=True, timeout=150)
     except (OSError, subprocess.TimeoutExpired):
@@ -100,10 +110,21 @@ def _type_ydotool(text: str) -> bool:
     return r.returncode == 0
 
 
+def type_text(text: str) -> str | None:
+    """Type *text* at the cursor through the best available tier; returns
+    the tier that worked ("portal" / "ydotool"), or None when none could.
+    The setup wizard uses this to test typing without delivering."""
+    if _type_portal(text):
+        return "portal"
+    if _type_ydotool(text):
+        return "ydotool"
+    return None
+
+
 def deliver(text: str, prefer_typing: bool = True) -> str:
     """Deliver *text*; returns "typed" or "clipboard"."""
     runstate.mark_done()   # tray flashes a checkmark
-    if prefer_typing and (_type_portal(text) or _type_ydotool(text)):
+    if prefer_typing and type_text(text):
         notify(f"Typed: {text[:120]}", category="delivery")
         return "typed"
     subprocess.run(["wl-copy"], input=text.encode(), check=False)

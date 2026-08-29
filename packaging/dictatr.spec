@@ -30,9 +30,11 @@ the machine. Includes a floating radial menu, a tray icon with live
 recording state, always-on capture into a listenr-compatible archive,
 and ask mode (local LLM answers with recall over past dictations).
 
-After installing: run dictate-hotkeys once (KDE) to bind the default
-shortcuts, and enable rootless typing with
-`systemctl --user enable --now dictatr-ydotoold`.
+Setup runs itself: the tray offers a short wizard the first time it
+starts, which picks an inference engine (its own bundled one, an
+existing Lemonade, or any OpenAI-compatible endpoint), asks the desktop
+for typing permission and hotkeys, and ends with a test dictation. Run
+it again any time with `dictate-setup`.
 
 %prep
 %setup -q
@@ -52,11 +54,13 @@ udevadm trigger --name-match=uinput 2>/dev/null || :
 /usr/bin/dictate-menu
 /usr/bin/dictate-tray
 /usr/bin/dictate-chat
+/usr/bin/dictate-setup
 /usr/bin/dictate-hotkeys
 /usr/share/applications/dictate.desktop
 /usr/share/applications/dictate-menu.desktop
 /usr/share/applications/dictate-cancel.desktop
 /usr/share/applications/dictate-listen.desktop
+/usr/share/applications/dictatr-setup.desktop
 %config(noreplace) /etc/xdg/autostart/dictatr-tray.desktop
 /usr/lib/systemd/user/dictatr-listen.service
 /usr/lib/systemd/user/dictatr-gc.service

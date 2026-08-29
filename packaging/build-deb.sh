@@ -33,6 +33,11 @@ Description: Hotkey voice dictation backed by a local Lemonade Whisper server
  talking; nothing leaves the machine. Includes a floating radial menu,
  a tray icon with live recording state, always-on capture into a
  listenr-compatible archive, and ask mode.
+ .
+ The tray offers a short setup wizard the first time it starts: it picks
+ an inference engine (its own bundled one, an existing Lemonade, or any
+ OpenAI-compatible endpoint), asks the desktop for typing permission and
+ hotkeys, and ends with a test dictation. Rerun it with dictate-setup.
 EOF
 
 cat >"$stage/DEBIAN/postinst" <<'EOF'

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
 # Tray icon (StatusNotifierItem); single-instance via its DBus name.
 here=$(dirname "$(readlink -f "$0")")
-exec python3 "$here/../ui/tray.py"
+# PyGObject lives in the system python; a dev checkout's venv is on
+# PATH first and does not have it.
+py=python3
+"$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
+exec "$py" "$here/../ui/tray.py"

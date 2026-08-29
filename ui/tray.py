@@ -150,6 +150,7 @@ MENU_ITEMS = [
     (6, "Clean up archive now", "gc"),
     (7, "", None),
     (8, "Settings", "settings"),
+    (13, "Set up dictatr", "setup"),
     (9, "Quit tray", "quit"),
 ]
 RECORDING_IDS = {10, 11, 12}
@@ -299,6 +300,8 @@ class Tray:
         elif action == "settings":
             subprocess.Popen([str(REPO / "bin" / "dictate-menu"),
                               "--settings"])
+        elif action == "setup":
+            subprocess.Popen([str(REPO / "bin" / "dictate-setup")])
         elif action == "gc":
             def run():
                 r = subprocess.run([DICTATE, "gc"], capture_output=True,
@@ -308,6 +311,25 @@ class Tray:
             GLib.Thread.new("gc", run)
         elif isinstance(action, list):
             subprocess.Popen([DICTATE, *action])
+
+
+def first_run() -> None:
+    """Offer the wizard the first time the tray ever starts. It writes a
+    setup_done key whether it finishes or is dismissed, so this fires
+    exactly once; "Set up dictatr" in the menu runs it again on demand."""
+    if os.environ.get("DICTATE_NO_SETUP") == "1":
+        return
+    try:
+        from dictatr.settings import setup_seen
+        if setup_seen():
+            return
+        # A moment behind the tray so the icon is already in the bar when
+        # the window appears, and the session is done starting up.
+        GLib.timeout_add_seconds(
+            3, lambda: (subprocess.Popen(
+                [str(REPO / "bin" / "dictate-setup")]), False)[1])
+    except Exception as e:
+        print(f"dictatr tray: could not offer setup: {e}", file=sys.stderr)
 
 
 class Shortcuts:
@@ -431,6 +453,7 @@ def main():
     Gio.bus_own_name_on_connection(bus, BUS_NAME,
                                    Gio.BusNameOwnerFlags.NONE, None, lost)
     Tray(bus, loop)
+    first_run()
     shortcuts = None
     if os.environ.get("DICTATE_NO_PORTAL") != "1":
         try:

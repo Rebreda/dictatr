@@ -21,8 +21,14 @@ done
 for f in "$repo"/ui/*.py; do
     install -Dpm644 "$f" "$lib/ui/$(basename "$f")"
 done
-for f in "$repo"/ui/icons/*; do
+for f in "$repo"/ui/icons/*.png; do
     install -Dpm644 "$f" "$lib/ui/icons/$(basename "$f")"
+done
+# the wizard's own symbolic set, laid out as an icon theme it can add to
+# the search path (desktop themes render these names unreliably)
+for f in "$repo"/ui/icons/theme/hicolor/scalable/apps/*.svg; do
+    install -Dpm644 "$f" \
+        "$lib/ui/icons/theme/hicolor/scalable/apps/$(basename "$f")"
 done
 for f in "$repo"/bin/*; do
     install -Dpm755 "$f" "$lib/bin/$(basename "$f")"
@@ -53,7 +59,8 @@ fi
 
 # --- /usr/bin -------------------------------------------------------
 install -dm755 "$DESTDIR/usr/bin"
-for cmd in dictate dictate-menu dictate-tray dictate-chat dictate-hotkeys; do
+for cmd in dictate dictate-menu dictate-tray dictate-chat dictate-setup \
+           dictate-hotkeys; do
     ln -sf ../lib/dictatr/bin/$cmd "$DESTDIR/usr/bin/$cmd"
 done
 
@@ -75,6 +82,19 @@ desktop dictate        "Dictate (toggle)"           "/usr/bin/dictate type"
 desktop dictate-menu   "Dictate menu"               "/usr/bin/dictate-menu"
 desktop dictate-cancel "Dictate cancel"             "/usr/bin/dictate cancel"
 desktop dictate-listen "Dictate always-on (toggle)" "/usr/bin/dictate listen --toggle"
+
+# The wizard is the one entry a person should be able to find in the
+# launcher, so it is the only one that is not NoDisplay.
+cat >"$apps/dictatr-setup.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Set up dictatr
+Comment=Choose an inference engine, allow typing, bind hotkeys
+Exec=/usr/bin/dictate-setup
+Icon=dictatr
+Categories=Utility;Settings;
+StartupNotify=true
+EOF
 
 # tray autostart for every desktop session
 install -dm755 "$DESTDIR/etc/xdg/autostart"

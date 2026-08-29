@@ -366,13 +366,15 @@ class ProgressBubble(Gtk.Overlay):
         side = diameter + 2 * self.ARC_PAD
         self.set_size_request(side, side)
 
-        inner = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        inner.add_css_class("bubble")
-        inner.set_size_request(diameter, diameter)
+        # inner is public: callers restyle it (the setup wizard brightens
+        # its emblem, which sits on a dark page instead of a wallpaper).
+        self.inner = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        self.inner.add_css_class("bubble")
+        self.inner.set_size_request(diameter, diameter)
         self._icon = Gtk.Image.new_from_icon_name(icon)
         self._icon.set_hexpand(True)
-        inner.append(self._icon)
-        self.set_child(inner)
+        self.inner.append(self._icon)
+        self.set_child(self.inner)
 
         self._arc = Gtk.DrawingArea()
         self._arc.set_can_target(False)
@@ -381,6 +383,9 @@ class ProgressBubble(Gtk.Overlay):
 
     def set_icon(self, icon):
         self._icon.set_from_icon_name(icon)
+
+    def set_icon_size(self, px):
+        self._icon.set_pixel_size(px)
 
     def set_fraction(self, fraction):
         self._fraction = _clamp(fraction)
@@ -393,6 +398,7 @@ class ProgressBubble(Gtk.Overlay):
             self._arc.add_tick_callback(self._spin_tick)
         elif not spinning:
             self._spinning = False
+            self._arc.queue_draw()   # the spin tick is gone; repaint once
 
     def _spin_tick(self, _w, _clock):
         self._arc.queue_draw()

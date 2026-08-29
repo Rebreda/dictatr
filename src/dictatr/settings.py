@@ -31,6 +31,41 @@ def raw_config() -> dict:
     return _cfg
 
 
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return str(v).lower()
+    if isinstance(v, (int, float)):
+        return str(v)
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def write_config(updates: dict) -> None:
+    """Merge *updates* into the config file, keeping every other key.
+
+    Two writers exist (the settings window and the setup wizard) and each
+    only knows its own keys, so a whole-file rewrite would silently drop
+    the other's. A None value removes the key. The in-process table is
+    updated too, so backend/config.py sees the change without a restart.
+    """
+    merged = dict(_cfg)
+    for k, v in updates.items():
+        if v is None:
+            merged.pop(k, None)
+        else:
+            merged[k] = v
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(
+        "\n".join(f"{k} = {_toml_value(v)}" for k, v in merged.items()) + "\n")
+    _cfg.clear()
+    _cfg.update(merged)
+
+
+def setup_seen() -> bool:
+    """True once the wizard has run to an end (finished or dismissed).
+    The tray only offers first-run setup while this is False."""
+    return "setup_done" in _cfg
+
+
 def _s(env: str, key: str, default: str) -> str:
     return os.environ.get(env) or str(_cfg.get(key, default))
 
