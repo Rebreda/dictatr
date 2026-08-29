@@ -171,6 +171,11 @@ class TypingSettings:
     # though Ctrl is held. Escape hatch while that is being chased:
     # portal_typing = false falls back to the clipboard instead.
     portal: bool = _b("DICTATE_PORTAL_TYPING", "portal_typing", "true")
+    # Type the transcript as it is dictated instead of all at once when
+    # the utterance ends. The engine revises words it has already sent,
+    # so the cursor visibly backspaces over a correction; turn this off
+    # for a single clean insert at the end.
+    live: bool = _b("DICTATE_LIVE_TYPING", "live_typing", "true")
 
 
 @dataclass

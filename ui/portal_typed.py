@@ -28,6 +28,7 @@ gi imports are lazy so the pure helpers below (token file, keysym map)
 stay importable from the test suite's venv, which has no PyGObject.
 """
 
+import json
 import argparse
 import os
 import sys
@@ -86,6 +87,7 @@ def drop_token() -> None:
 
 
 SHIFT_L = 0xffe1
+BACKSPACE = 0xff08
 # Characters typed with Shift held. Letters answer for themselves on any
 # Latin layout; the symbols follow the US arrangement, which is the only
 # part a different layout could get wrong.
@@ -243,6 +245,12 @@ class RemoteDesktop:
         finally:
             self.release_all(session, last)
 
+    def erase(self, session, count):
+        for _ in range(count):
+            self._key(session, BACKSPACE, True)
+            self._key(session, BACKSPACE, False)
+            time.sleep(KEY_DELAY_MS / 1000)
+
     def release_all(self, session, pending=None):
         """Leave no key down. The compositor holds the state, so a key
         pressed but never released outlives this process: deliver.py kills
@@ -303,6 +311,33 @@ def check() -> int:
     return 0 if keyboard else 1
 
 
+def stream(rd, session) -> int:
+    """Type a transcript as it is still being revised.
+
+    One session for the whole utterance, because a session costs a
+    portal round trip and a partial arrives every few words. Each stdin
+    line is {"back": n, "text": "..."}: erase n characters, then type
+    the rest. Callers send the edit, not the sentence, so the caller
+    owns what is on screen (see dictatr.livetype).
+    """
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            edit = json.loads(line)
+        except ValueError:
+            continue
+        back = int(edit.get("back") or 0)
+        if back:
+            rd.erase(session, back)
+        text = edit.get("text") or ""
+        if text:
+            rd.type_text(session, text)
+        print("ok", flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Type text at the cursor via the RemoteDesktop portal")
@@ -313,6 +348,9 @@ def main(argv=None) -> int:
     ap.add_argument("--release", action="store_true",
                     help="release every modifier key (fixes a stuck Shift "
                          "or Ctrl left by an interrupted dictation)")
+    ap.add_argument("--stream", action="store_true",
+                    help="hold the session open and type revisions read "
+                         "from stdin, one JSON edit per line (see stream())")
     ap.add_argument("text", nargs="*", help="text to type (stdin if empty)")
     args = ap.parse_args(argv)
     if args.check:
@@ -351,6 +389,11 @@ def main(argv=None) -> int:
         print(f"released {len(MODIFIER_KEYSYMS)} modifier keys")
         rd.close(session)
         return 0
+
+    if args.stream:
+        rc = stream(rd, session)
+        rd.close(session)
+        return rc
 
     text = " ".join(args.text) if args.text else sys.stdin.read()
     if text:

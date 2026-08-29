@@ -21,6 +21,7 @@ checkbox mirrors the listener, and left-click opens the radial menu.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -422,6 +423,24 @@ class Shortcuts:
                       {"session_handle_token": GLib.Variant("s", "dictatr")},
                       self._on_session)
 
+    def close(self):
+        """Close the portal session before exiting.
+
+        Killed without this, the session is torn down asynchronously and
+        the teardown can land after the replacement tray has bound,
+        taking the new registration with it: hotkeys then work or not
+        depending on which side of the race won, which is what a restart
+        loop looks like from the outside."""
+        old, self.session = self.session, None
+        if not old:
+            return
+        try:
+            self.bus.call_sync(PORTAL_BUS, old,
+                               "org.freedesktop.portal.Session", "Close",
+                               None, None, Gio.DBusCallFlags.NONE, 2000, None)
+        except GLib.Error:
+            pass
+
     def rebind(self):
         """Take the live key match back.
 
@@ -430,15 +449,7 @@ class Shortcuts:
         left pointing at a session nobody owns, so kglobalaccel still
         knows the shortcut but pressing it reaches no one. Reopening our
         session makes this process the owner again."""
-        old, self.session = self.session, None
-        if old:
-            try:
-                self.bus.call_sync(PORTAL_BUS, old,
-                                   "org.freedesktop.portal.Session", "Close",
-                                   None, None, Gio.DBusCallFlags.NONE,
-                                   3000, None)
-            except GLib.Error:
-                pass
+        self.close()
         self._open()
 
     def _fail(self, msg: str) -> None:
@@ -608,6 +619,15 @@ def main():
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]
     bus.register_object("/Shortcuts", iface, on_call, None, None)
+
+    def shutdown(*_):
+        if shortcuts is not None:
+            shortcuts.close()
+        loop.quit()
+        return GLib.SOURCE_REMOVE
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_HIGH, sig, shutdown)
     loop.run()
     return 0
 

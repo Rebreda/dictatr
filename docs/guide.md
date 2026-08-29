@@ -104,6 +104,15 @@ truthful ("Typed:" only when text was really typed, "Copied" otherwise):
 2. **Clipboard**: `wl-copy` plus a "Copied" notification. Where
    transcripts land when the portal is unavailable or switched off.
 
+**Words appear as you speak them.** The realtime engine revises what it
+has already sent (a word can change once its neighbours arrive), so
+live typing reconciles rather than appends: dictatr erases back to the
+part that still matches and retypes the rest, which reads as the cursor
+correcting itself mid-sentence. One portal session covers the whole
+utterance, cancelling erases what was typed, and the clipboard still
+catches the transcript if typing fails partway. Set
+`live_typing = false` for a single clean insert when the utterance ends.
+
 **Typing waits for your hotkey to come up first.** The portal hands the
 compositor bare keysyms and lets it work out which physical key and
 modifiers make them, so the compositor tracks modifier state for a
@@ -259,6 +268,7 @@ environment.
 | `DICTATE_SPEAK` | `true` | speak ask answers via Kokoro TTS |
 | `DICTATE_INPUT` | unset | stream a wav file instead of the mic (testing) |
 | `DICTATE_NO_PORTAL` | unset | `1` disables the portal typing tier and the tray's portal hotkeys |
+| `DICTATE_LIVE_TYPING` | `true` | type words as they are transcribed; `false` inserts once at the end |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

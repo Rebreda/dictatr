@@ -201,3 +201,13 @@ def test_needs_shift_covers_case_and_symbols():
         assert portal_typed.needs_shift(ch), ch
     for ch in "nx1,.;'-= ":
         assert not portal_typed.needs_shift(ch), ch
+
+
+def test_edit_to_appends_and_rewrites_revisions():
+    from dictatr.livetype import edit_to
+    # the common case: the transcript only grew
+    assert edit_to("Meet me", "Meet me there") == (0, " there")
+    # a revised word costs the tail after the change, not the whole line
+    assert edit_to("Meet me their", "Meet me there") == (2, "re")
+    assert edit_to("abc", "abc") == (0, "")
+    assert edit_to("abc", "") == (3, "")

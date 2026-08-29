@@ -23,6 +23,7 @@ from . import recall
 from . import mic
 from . import runstate
 from .batch import transcribe_file
+from . import livetype
 from .engine import dictate_once, ensure_asr_loaded
 from .runstate import DICTATE_PID as PIDFILE, live_pid, write_pid
 from .settings import settings
@@ -71,19 +72,39 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         if settings.input_file
         else mic.mic_chunks(stop_now)
     )
+    # Live typing: put words at the cursor as they are transcribed
+    # instead of all at once at the end. Only for plain dictation --
+    # ask mode's answer is what gets delivered, not the question.
+    typer = None
+    if (prefer_typing and not ask and settings.typing.live
+            and livetype.available()):
+        typer = livetype.LiveTyper(dlv._gi_python())
+
+    def on_partial(running):
+        if typer is not None:
+            typer.update(running)
+
     try:
         # Server-side VAD (Moonshine + TEN-VAD) via /realtime, always.
         # The batch endpoint is only for `dictate file`.
         await asyncio.to_thread(ensure_asr_loaded)
-        text, pcm = await dictate_once(source, stop_now, on_state)
+        text, pcm = await dictate_once(
+            source, stop_now, on_state,
+            on_partial=(on_partial if typer is not None else None))
     except (ConnectionError, OSError, RuntimeError) as e:
+        if typer is not None:
+            typer.discard()
         dlv.notify(f"Lemonade error: {e}", 6000, category="errors")
         return 1
 
     if cancelled:
+        if typer is not None:
+            typer.discard()
         dlv.notify("Cancelled", 1500)
         return 0
     if not text:
+        if typer is not None:
+            typer.discard()
         dlv.notify("No speech detected")
         return 0
 
@@ -111,7 +132,11 @@ async def _listen(prefer_typing: bool, ask: bool = False,
                 await asyncio.to_thread(llm.speak, answer)
     else:
         PIDFILE.unlink(missing_ok=True)  # session over; free the hotkey
-        dlv.deliver(text, prefer_typing)
+        if typer is not None and typer.finish(text):
+            runstate.mark_done()
+            dlv.notify(f"Typed: {text[:120]}", category="delivery")
+        else:
+            dlv.deliver(text, prefer_typing)
     if settings.storage.enabled and pcm:
         record = save_recording(
             pcm, text,
