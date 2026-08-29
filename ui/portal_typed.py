@@ -85,6 +85,17 @@ def drop_token() -> None:
     token_path().unlink(missing_ok=True)
 
 
+SHIFT_L = 0xffe1
+# Characters typed with Shift held. Letters answer for themselves on any
+# Latin layout; the symbols follow the US arrangement, which is the only
+# part a different layout could get wrong.
+_SHIFTED_ASCII = frozenset('~!@#$%^&*()_+{}|:"<>?')
+
+
+def needs_shift(ch: str) -> bool:
+    return ch.isupper() or ch in _SHIFTED_ASCII
+
+
 _KEYSYM_SPECIALS = {"\n": 0xff0d, "\r": 0xff0d, "\t": 0xff09}
 
 
@@ -197,18 +208,36 @@ class RemoteDesktop:
             raise PortalError("Start: keyboard not granted")
         return session, res.get("restore_token")
 
+    def _key(self, session, keysym, pressed):
+        self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
+                   (session, {}, keysym, 1 if pressed else 0))
+
     def type_text(self, session, text):
+        """Type *text*, holding Shift ourselves for the characters that
+        need it.
+
+        Letting the compositor work the modifier out from the keysym
+        alone does not survive contact with KWin: it presses Shift a
+        keystroke late and never lifts it, so "Next up," arrives as
+        "nEXT UP<" and every later character in the session is shifted
+        too. With Shift already down when the keysym lands there is
+        nothing for it to synthesise, and the release is ours to make.
+        """
         last = None
+        shifted = False
         try:
             for ch in text:
                 ks = keysym_for(ch)
                 if ks is None:
                     continue
-                self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
-                           (session, {}, ks, 1))
+                want = needs_shift(ch)
+                if want != shifted:
+                    self._key(session, SHIFT_L, want)
+                    shifted = want
+                    time.sleep(KEY_DELAY_MS / 1000)
+                self._key(session, ks, True)
                 last = ks
-                self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
-                           (session, {}, ks, 0))
+                self._key(session, ks, False)
                 last = None
                 time.sleep(KEY_DELAY_MS / 1000)
         finally:

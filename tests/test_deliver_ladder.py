@@ -192,3 +192,12 @@ def test_prefer_typing_false_goes_straight_to_clipboard(ladder):
     with_token()
     assert deliver.deliver("hi", prefer_typing=False) == "clipboard"
     assert calls == ["wl-copy"]
+
+
+def test_needs_shift_covers_case_and_symbols():
+    # The compositor presses Shift a keystroke late and never lifts it,
+    # so the helper decides for itself which characters need it.
+    for ch in "NX!?():\"":
+        assert portal_typed.needs_shift(ch), ch
+    for ch in "nx1,.;'-= ":
+        assert not portal_typed.needs_shift(ch), ch

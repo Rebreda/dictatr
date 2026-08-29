@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Type text at the cursor and report exactly what arrived.
+
+A focused GTK window is the target, so a run needs no editor, no
+screenshot and no guessing about which window had focus:
+
+    tools/typeprobe                       # default probe string
+    tools/typeprobe "Hello, World."       # anything you like
+    tools/typeprobe --repeat 3            # catch state that leaks between runs
+
+Exit status is 0 only when every round arrives verbatim, so this doubles
+as the regression test for keysym injection (ui/portal_typed.py), where
+the failure mode is a modifier the compositor never lets go of: a stuck
+Shift turns "Next up," into "nEXT UP<" and outlives the process that
+caused it.
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import GLib, Gtk  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+TYPER = REPO / "ui" / "portal_typed.py"
+# Mixed case, shifted and unshifted punctuation: the combination that
+# exposes modifier leakage.
+DEFAULT = "Next up, cut a release candidate. (Done!)"
+
+
+class Probe(Gtk.ApplicationWindow):
+    def __init__(self, app, text, rounds, settle):
+        super().__init__(application=app, title="typeprobe",
+                         default_width=560, default_height=180)
+        self.view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        self.set_child(self.view)
+        self.text, self.rounds, self.settle = text, rounds, settle
+        self.results = []
+        self.connect("map", lambda *_: GLib.timeout_add(600, self._run))
+
+    def _buffer(self):
+        b = self.view.get_buffer()
+        return b.get_text(b.get_start_iter(), b.get_end_iter(), False)
+
+    def _clear(self):
+        self.view.get_buffer().set_text("")
+
+    def _run(self):
+        self.view.grab_focus()
+        self._clear()
+        r = subprocess.run([sys.executable, str(TYPER)],
+                           input=self.text.encode(), capture_output=True)
+        if r.returncode != 0:
+            print(f"typing failed: {r.stderr.decode().strip()}",
+                  file=sys.stderr)
+            self.results.append(None)
+            self.get_application().quit()
+            return False
+        GLib.timeout_add(self.settle, self._collect)
+        return False
+
+    def _collect(self):
+        self.results.append(self._buffer())
+        if len(self.results) < self.rounds:
+            GLib.timeout_add(200, self._run)
+        else:
+            self.get_application().quit()
+        return False
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("text", nargs="?", default=DEFAULT)
+    ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--settle", type=int, default=700,
+                    help="ms to wait for the last keystroke to land")
+    args = ap.parse_args()
+
+    app = Gtk.Application(application_id="io.github.rebreda.dictatr.typeprobe")
+    probe = {}
+
+    def activate(a):
+        probe["w"] = Probe(a, args.text, args.repeat, args.settle)
+        probe["w"].present()
+
+    app.connect("activate", activate)
+    app.run([])
+
+    ok = True
+    for i, got in enumerate(probe["w"].results, 1):
+        if got == args.text:
+            print(f"round {i}: ok")
+        else:
+            ok = False
+            print(f"round {i}: MISMATCH\n  want: {args.text!r}\n"
+                  f"  got:  {got!r}")
+    return 0 if ok and probe["w"].results else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
