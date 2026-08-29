@@ -62,7 +62,6 @@ def mark_done() -> None:
 
 def done_age() -> float | None:
     """Seconds since the last successful delivery, None if never."""
-    import time
     try:
         return time.time() - DONE.stat().st_mtime
     except OSError:

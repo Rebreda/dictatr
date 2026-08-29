@@ -24,7 +24,7 @@ while real modifiers are down and the two views drift apart: it keeps
 believing Ctrl is held after the user let go, and the desktop behaves as
 though Ctrl is stuck. Dictation is a toggle, so the press that ENDS a
 recording is still down when the transcript is ready; hence
-_wait_for_chord, which holds off until the tray sees the chord released.
+wait_for_chord, which holds off until the tray sees the chord released.
 """
 
 import importlib.util
@@ -85,14 +85,14 @@ def notify(text: str, ms: int = 2500, category: str = "state") -> None:
         _ID_FILE.write_text(new_id)
 
 
-def _portal_token() -> Path:
+def portal_token() -> Path:
     # Keep in sync with token_path() in ui/portal_typed.py.
     state = Path(os.environ.get("XDG_STATE_HOME")
                  or Path.home() / ".local" / "state")
     return state / "dictatr" / "portal-typing-token"
 
 
-def _gi_python() -> str:
+def gi_python() -> str:
     """A python that can import PyGObject, for running ui/portal_typed.py.
 
     Asking "am I in a venv?" is the wrong question: what matters is the
@@ -109,14 +109,14 @@ def _gi_python() -> str:
     return str(system) if system.exists() else "python3"
 
 
-def _portal_enabled() -> bool:
+def portal_enabled() -> bool:
     if os.environ.get("DICTATE_NO_PORTAL") == "1":
         return False
     from .settings import settings
     return settings.typing.portal
 
 
-def _wait_for_chord(timeout: float = 3.0) -> None:
+def wait_for_chord(timeout: float = 3.0) -> None:
     """Block until the hotkey chord that triggered this dictation is
     released, so keysym injection never overlaps real modifiers held
     down. Bounded: a chord nobody releases must not hang delivery."""
@@ -130,13 +130,13 @@ def _type_portal(text: str) -> bool:
     """RemoteDesktop portal typing. Needs a stored grant token: without
     one the portal would pop a permission dialog in the middle of a
     dictation."""
-    if not _portal_enabled():
+    if not portal_enabled():
         return False
-    if not _portal_token().exists() or not _PORTAL_HELPER.exists():
+    if not portal_token().exists() or not _PORTAL_HELPER.exists():
         return False
-    _wait_for_chord()
+    wait_for_chord()
     try:
-        r = subprocess.run([_gi_python(), str(_PORTAL_HELPER)],
+        r = subprocess.run([gi_python(), str(_PORTAL_HELPER)],
                            input=text.encode(), check=False,
                            capture_output=True, timeout=150)
     except (OSError, subprocess.TimeoutExpired):

@@ -78,7 +78,7 @@ async def _listen(prefer_typing: bool, ask: bool = False,
     typer = None
     if (prefer_typing and not ask and settings.typing.live
             and livetype.available()):
-        typer = livetype.LiveTyper(dlv._gi_python())
+        typer = livetype.LiveTyper(dlv.gi_python())
 
     def on_partial(running):
         if typer is not None:

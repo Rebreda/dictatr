@@ -46,15 +46,6 @@ MENU_CSS = b"""
 """
 
 
-def layer_shell():
-    try:
-        gi.require_version("Gtk4LayerShell", "1.0")
-        from gi.repository import Gtk4LayerShell as LS
-        return LS
-    except (ValueError, ImportError):
-        return None
-
-
 class Radial(Gtk.ApplicationWindow):
     def __init__(self, app):
         # NB: resizable must stay True — a non-resizable window rejects the
@@ -67,7 +58,7 @@ class Radial(Gtk.ApplicationWindow):
         self.placed = False
         self._dismissing = False
 
-        ls = layer_shell()
+        ls = radial.layer_shell()
         if ls is not None:
             ls.init_for_window(self)
             ls.set_layer(self, ls.Layer.OVERLAY)

@@ -59,7 +59,7 @@ def test_token_roundtrip_creates_dirs_and_mode(tmp_path, monkeypatch):
 
 def test_token_paths_agree_between_helper_and_deliver(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    assert deliver._portal_token() == portal_typed.token_path()
+    assert deliver.portal_token() == portal_typed.token_path()
 
 
 # --- ladder ordering ---------------------------------------------------
@@ -94,8 +94,8 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.setattr(deliver.subprocess, "run", fake_run)
 
     def with_token():
-        deliver._portal_token().parent.mkdir(parents=True, exist_ok=True)
-        deliver._portal_token().write_text("tok")
+        deliver.portal_token().parent.mkdir(parents=True, exist_ok=True)
+        deliver.portal_token().write_text("tok")
 
     return calls, rc, with_token
 

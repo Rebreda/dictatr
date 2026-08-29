@@ -29,6 +29,19 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+
+def layer_shell():
+    """The layer-shell binding, or None when the surface has to be an
+    ordinary window. Needs the library preloaded (the bin/ shims do it;
+    it has to load before GTK opens its wayland connection) and a
+    compositor that speaks the protocol, which GNOME does not."""
+    try:
+        gi.require_version("Gtk4LayerShell", "1.0")
+        from gi.repository import Gtk4LayerShell as LS
+        return LS if LS.is_supported() else None
+    except (ValueError, ImportError):
+        return None
+
 # --- palette (the whole family paints with these) ----------------------
 CHARCOAL = "#1c1d22"   # bubble fill
 INK = "#e8eaf1"        # icons, text

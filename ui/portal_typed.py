@@ -61,7 +61,7 @@ MODIFIER_KEYSYMS = (
 # --- pure helpers (unit-tested, no gi) ---------------------------------
 
 def token_path() -> Path:
-    # Keep in sync with _portal_token() in src/dictatr/deliver.py.
+    # Keep in sync with portal_token() in src/dictatr/deliver.py.
     state = Path(os.environ.get("XDG_STATE_HOME")
                  or Path.home() / ".local" / "state")
     return state / "dictatr" / "portal-typing-token"

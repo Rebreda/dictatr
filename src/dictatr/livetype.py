@@ -16,8 +16,6 @@ import json
 import subprocess
 from pathlib import Path
 
-from . import runstate
-
 HELPER = Path(__file__).resolve().parents[2] / "ui" / "portal_typed.py"
 
 
@@ -78,9 +76,9 @@ class LiveTyper:
         if not self.failed:
             # The hotkey that ended the recording may still be held, and
             # injecting keysyms under live modifiers desyncs the
-            # compositor (see deliver._wait_for_chord).
-            from .deliver import _wait_for_chord
-            _wait_for_chord()
+            # compositor (see deliver.wait_for_chord).
+            from .deliver import wait_for_chord
+            wait_for_chord()
             self.update(text)
         ok = not self.failed and self.typed == text
         self.close()
@@ -108,6 +106,6 @@ class LiveTyper:
 def available() -> bool:
     """Whether live typing can run at all: same gates as the portal tier
     in deliver, since it is the same session and the same grant."""
-    from .deliver import _portal_enabled, _portal_token
-    return (_portal_enabled() and _portal_token().exists()
-            and HELPER.exists() and runstate.RUN is not None)
+    from .deliver import portal_enabled, portal_token
+    return (portal_enabled() and portal_token().exists()
+            and HELPER.exists())

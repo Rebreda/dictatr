@@ -95,15 +95,6 @@ SETUP_CSS = f"""
 """.encode()
 
 
-def layer_shell():
-    try:
-        gi.require_version("Gtk4LayerShell", "1.0")
-        from gi.repository import Gtk4LayerShell as LS
-        return LS if LS.is_supported() else None
-    except (ValueError, ImportError):
-        return None
-
-
 def _run(cmd, timeout=20, **kw):
     """Subprocess helper: never raises, always returns a CompletedProcess."""
     try:
@@ -746,7 +737,7 @@ class Wizard(Gtk.ApplicationWindow):
         self.column = column
         self._hit = (card, status_row, self.ring)
 
-        ls = layer_shell()
+        ls = radial.layer_shell()
         self.overlay = ls is not None
         if self.overlay:
             ls.init_for_window(self)

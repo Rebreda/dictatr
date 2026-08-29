@@ -38,6 +38,7 @@ from dictatr.settings import settings  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
+import radial  # noqa: E402
 from radial import BLUE, CHARCOAL, GREEN, INK, RED  # noqa: E402
 
 WIDTH = 360
@@ -89,18 +90,6 @@ window {{ background: transparent; }}
 """.encode()
 
 
-def layer_shell():
-    try:
-        gi.require_version("Gtk4LayerShell", "1.0")
-        from gi.repository import Gtk4LayerShell as LS
-        # is_supported is false when the library isn't preloaded (see
-        # bin/dictate-chat) or the compositor lacks the protocol (GNOME);
-        # fall back to a normal floating window.
-        return LS if LS.is_supported() else None
-    except (ValueError, ImportError):
-        return None
-
-
 class Chat(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, decorated=False,
@@ -116,7 +105,7 @@ class Chat(Gtk.ApplicationWindow):
         # clipped to the card, so the rest of the desktop stays clickable
         # while the conversation floats.
         self.overlay = False
-        ls = layer_shell()
+        ls = radial.layer_shell()
         if ls is not None:
             self.overlay = True
             ls.init_for_window(self)
