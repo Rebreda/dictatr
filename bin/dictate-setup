@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Launch the setup wizard (engine, typing, hotkeys, a test dictation).
-here=$(dirname "$(readlink -f "$0")")
+repo=$(dirname "$(dirname "$(readlink -f "$0")")")
 # PyGObject lives in the system python; a dev checkout's venv is on PATH
 # first and does not have it.
 py=python3
 "$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
-exec "$py" "$here/../ui/setup.py" "$@"
+exec "$py" "$repo/ui/setup.py" "$@"

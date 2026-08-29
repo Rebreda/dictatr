@@ -313,6 +313,17 @@ class Tray:
             subprocess.Popen([DICTATE, *action])
 
 
+def _name_taken(bus) -> bool:
+    try:
+        return bus.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus",
+            "org.freedesktop.DBus", "NameHasOwner",
+            GLib.Variant("(s)", (BUS_NAME,)), None,
+            Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+    except GLib.Error:
+        return False
+
+
 def first_run() -> None:
     """Offer the wizard the first time the tray ever starts. It writes a
     setup_done key whether it finishes or is dismissed, so this fires
@@ -446,9 +457,18 @@ def main():
     loop = GLib.MainLoop()
     bus = Gio.bus_get_sync(Gio.BusType.SESSION)
 
+    if _name_taken(bus):
+        # Ask before claiming, so a duplicate exits now and says why.
+        # The callback below is the race that check cannot cover, and
+        # there loop.quit() is not enough: the name can be lost before
+        # loop.run() begins, and quitting a loop that never ran leaves
+        # a second tray alive next to the first.
+        print("dictatr tray already running", file=sys.stderr)
+        return 1
+
     def lost(*_):
         print("dictatr tray already running", file=sys.stderr)
-        loop.quit()
+        os._exit(0)
 
     Gio.bus_own_name_on_connection(bus, BUS_NAME,
                                    Gio.BusNameOwnerFlags.NONE, None, lost)
@@ -462,7 +482,8 @@ def main():
             print(f"dictatr tray: portal hotkeys unavailable: {e}",
                   file=sys.stderr)
     loop.run()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

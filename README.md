@@ -96,9 +96,17 @@ and all configuration variables live in [docs/guide.md](docs/guide.md).
 
 ## Working on it
 
-`uv sync`, then `.venv/bin/python -m pytest -q`. The rest, including how
-to run a dictation against a scripted server with no microphone, is in
-[docs/development.md](docs/development.md).
+`uv sync`, `./install.sh` once, then `./dev` for the loop:
+
+```bash
+./dev restart    # start the tray from this checkout
+./dev status     # what is running, and what backend it found
+./dev test       # pytest
+./dev doctor     # find a second dictatr competing with this one
+```
+
+The rest, including how to run a dictation against a scripted server with
+no microphone, is in [docs/development.md](docs/development.md).
 
 ## License
 

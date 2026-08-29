@@ -10,6 +10,8 @@ stdlib-only and shells out to this file.
     portal_typed.py --check        read-only probe: portal versions only
     portal_typed.py --grant        run the permission dance deliberately
                                    (onboarding); reports persistence
+    portal_typed.py --release      release every modifier, for when an
+                                   interrupted run left one held down
 
 The portal session is restored silently from a stored token when one
 exists (persist_mode 2: Plasma >= 6.1.1, GNOME >= 46); without a valid
@@ -41,6 +43,18 @@ KEYBOARD = 1              # AvailableDeviceTypes bit
 CALL_TIMEOUT_S = 10
 START_TIMEOUT_S = 120     # Start may be showing a dialog
 KEY_DELAY_MS = 12
+# Every modifier we might leave latched. The compositor owns key state,
+# so anything still down when this process exits stays down for the rest
+# of the session: a stuck Shift turns every mouse wheel into a sideways
+# scroll, which reads as "scrolling broke" rather than "dictation broke".
+MODIFIER_KEYSYMS = (
+    0xffe1, 0xffe2,   # Shift_L, Shift_R
+    0xffe3, 0xffe4,   # Control_L, Control_R
+    0xffe9, 0xffea,   # Alt_L, Alt_R
+    0xffeb, 0xffec,   # Super_L, Super_R
+    0xffe7, 0xffe8,   # Meta_L, Meta_R
+    0xfe03,           # ISO_Level3_Shift (AltGr)
+)
 
 
 # --- pure helpers (unit-tested, no gi) ---------------------------------
@@ -184,14 +198,34 @@ class RemoteDesktop:
         return session, res.get("restore_token")
 
     def type_text(self, session, text):
-        for ch in text:
-            ks = keysym_for(ch)
-            if ks is None:
-                continue
-            for state in (1, 0):
+        last = None
+        try:
+            for ch in text:
+                ks = keysym_for(ch)
+                if ks is None:
+                    continue
                 self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
-                           (session, {}, ks, state))
-            time.sleep(KEY_DELAY_MS / 1000)
+                           (session, {}, ks, 1))
+                last = ks
+                self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
+                           (session, {}, ks, 0))
+                last = None
+                time.sleep(KEY_DELAY_MS / 1000)
+        finally:
+            self.release_all(session, last)
+
+    def release_all(self, session, pending=None):
+        """Leave no key down. The compositor holds the state, so a key
+        pressed but never released outlives this process: deliver.py kills
+        the helper on its timeout, and a stuck Shift silently turns every
+        later mouse wheel into a horizontal scroll. Releases are harmless
+        when nothing is held, so this runs unconditionally."""
+        for ks in ([pending] if pending else []) + list(MODIFIER_KEYSYMS):
+            try:
+                self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
+                           (session, {}, ks, 0))
+            except Exception:
+                pass
 
     def close(self, session):
         try:
@@ -247,6 +281,9 @@ def main(argv=None) -> int:
                     help="probe portal availability (read-only, no dialog)")
     ap.add_argument("--grant", action="store_true",
                     help="run the permission dance only; may show a dialog")
+    ap.add_argument("--release", action="store_true",
+                    help="release every modifier key (fixes a stuck Shift "
+                         "or Ctrl left by an interrupted dictation)")
     ap.add_argument("text", nargs="*", help="text to type (stdin if empty)")
     args = ap.parse_args(argv)
     if args.check:
@@ -277,6 +314,12 @@ def main(argv=None) -> int:
     if args.grant:
         print("persistence granted, token stored" if fresh
               else "granted for this session only (no persistence)")
+        rd.close(session)
+        return 0
+
+    if args.release:
+        rd.release_all(session)
+        print(f"released {len(MODIFIER_KEYSYMS)} modifier keys")
         rd.close(session)
         return 0
 

@@ -10,19 +10,9 @@ sudo dnf install gtk4 python3-gobject gtk4-layer-shell   # for ui/
 ```
 
 `./install.sh` goes further: it symlinks the launchers into `~/.local/bin`,
-writes the desktop entries, and autostarts the tray. You do not need it to
-work on the code, only to use the checkout as your daily dictation setup.
-
-Run things straight out of the tree:
-
-```bash
-bin/dictate type          # a dictation, same as the hotkey
-bin/dictate backend status
-bin/dictate-menu          # radial menu
-bin/dictate-tray          # tray icon
-bin/dictate-setup         # setup wizard
-bin/dictate-chat          # voice chat
-```
+writes the desktop entries (including the one the desktop portal needs to
+recognize the app at all), and starts the tray. Run it once; after that
+`./dev` is the day-to-day tool.
 
 **Two pythons, on purpose.** `src/dictatr/` is stdlib plus `websockets`
 and runs under the venv. Everything in `ui/` needs PyGObject, which lives
@@ -30,6 +20,76 @@ in the system python, so the `bin/` shims pick an interpreter that can
 import `gi` and the package shells out to `ui/` rather than importing it.
 Calling `python3 ui/menu.py` from an activated venv fails with
 `No module named 'gi'`; use the shim, or `/usr/bin/python3`.
+
+## The everyday loop
+
+```bash
+./dev restart    # stop what is running, start the tray from this checkout
+./dev status     # what is running, from where, what backend it found
+./dev logs       # follow the tray log
+./dev test       # pytest
+./dev doctor     # find a second dictatr competing with this one
+./dev unstick    # release modifier keys a killed dictation left held
+```
+
+**Restart after almost any change.** The tray is the resident process: it
+owns the global hotkeys, the setup offer, and the recording state icon,
+and it launches the menu, the wizard and the chat as children. An edit to
+`ui/tray.py` needs `./dev restart` before it means anything, and so does
+anything the tray decides at startup. The menu, wizard and chat are
+launched fresh each time, so edits to those show up on their next launch
+without a restart.
+
+Nothing else is long-lived. `bin/dictate type` runs and exits, so CLI and
+engine changes take effect on the next invocation.
+
+Run a single surface straight out of the tree:
+
+```bash
+bin/dictate type          # a dictation, same as the hotkey
+bin/dictate backend status
+bin/dictate-menu          # radial menu
+bin/dictate-setup         # setup wizard
+bin/dictate-chat          # voice chat
+```
+
+## Only one dictatr at a time
+
+Two trays on one session means two of everything: both bind the same
+hotkeys, both draw a tray icon, and a keypress fires twice. It cannot
+happen by accident, but it is worth knowing how it is prevented.
+
+The tray holds the DBus name `io.github.rebreda.dictatr.tray`. A second
+one asks whether that name is taken before claiming it, prints
+`dictatr tray already running`, and exits 1. So `./dev restart` stops the
+old one first, and re-running `install.sh` is harmless.
+
+The one real way to end up with two is **installing the rpm or deb while
+developing**: the package puts a tray in `/etc/xdg/autostart`, which
+starts at login before your checkout does, and `/usr/bin/dictate` may win
+on PATH. Develop from the checkout or from the package, not both.
+`./dev doctor` checks for exactly this, along with the portal
+registration and the launcher symlinks:
+
+```
+$ ./dev doctor
+== a second dictatr ==
+  ok: no tray outside this checkout
+  ok: dictate -> /home/g/.local/bin/dictate
+== launchers ==
+  ok: all launchers linked
+== desktop portal ==
+  ok: app id registers (hotkeys and portal typing can work)
+```
+
+## When typing leaves a key stuck
+
+Dictation presses and releases each key through the portal. Kill it
+between the two (`deliver.py` does exactly that on its 150 s timeout) and
+the compositor still thinks that key is down. A stuck Shift turns every
+mouse wheel into a sideways scroll, which reads as "scrolling broke"
+rather than "dictation broke". `./dev unstick` releases every modifier;
+releasing a key that is not held does nothing, so it is always safe.
 
 ## Tests
 
@@ -127,6 +187,7 @@ and no environment, which is why it is the one the demo stage captures.
 | `ui/chat.py` | floating voice chat |
 | `ui/portal_typed.py` | RemoteDesktop portal typing helper |
 | `bin/` | the launcher shims |
+| `dev` | the workflow script above |
 | `packaging/` | `stage.sh` plus the rpm and deb builders |
 | `docs/demo/` | the capture harness (see its own README) |
 

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Everyday commands for working on dictatr from a checkout.
+#
+#   ./dev restart   stop whatever is running, start the tray from here
+#   ./dev stop      stop every dictatr process this checkout started
+#   ./dev status    what is running, from where, and what it is talking to
+#   ./dev logs      follow the tray log
+#   ./dev test      the test suite
+#   ./dev doctor    find a second dictatr competing with this one
+#   ./dev unstick   release modifier keys a killed dictation left held
+#
+# The tray is the resident process: it owns the hotkeys and the setup
+# offer, so code changes to it (or to anything it launches) need a
+# restart to take effect.
+set -uo pipefail
+here=$(dirname "$(readlink -f "$0")")
+log=${XDG_RUNTIME_DIR:-/tmp}/dictatr-tray.log
+# PyGObject lives in the system python; a checkout's venv shadows
+# python3 on PATH and does not have it.
+py=python3
+"$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
+
+# Match this checkout's UI processes without matching this script.
+pids() { pgrep -f "$here/ui/$1" 2>/dev/null | grep -v "^$$\$"; }
+
+stop() {
+    local found=0
+    for name in tray.py menu.py chat.py setup.py; do
+        for pid in $(pids "$name"); do
+            kill "$pid" 2>/dev/null && found=1
+        done
+    done
+    # Anything started from a different checkout or an installed package
+    # holds the same DBus name and would block ours.
+    pkill -f "ui/tray.py" 2>/dev/null && found=1
+    sleep 1
+    [ "$found" = 1 ] && echo "stopped" || echo "nothing was running"
+}
+
+case ${1:-status} in
+restart)
+    stop
+    nohup "$here/bin/dictate-tray" >"$log" 2>&1 &
+    sleep 3
+    if pgrep -f "$here/ui/tray.py" >/dev/null; then
+        echo "tray running from $here"
+        grep -v -e DeprecationWarning -e register_object "$log" | sed 's/^/  /'
+    else
+        echo "tray failed to start:"; sed 's/^/  /' "$log"; exit 1
+    fi
+    ;;
+stop) stop ;;
+logs) tail -f "$log" ;;
+test) exec "$here/.venv/bin/python" -m pytest -q "${@:2}" ;;
+unstick)
+    # A dictation killed between a key press and its release leaves that
+    # key down in the compositor; a stuck Shift turns the mouse wheel
+    # sideways, which reads as "scrolling broke".
+    exec "$py" "$here/ui/portal_typed.py" --release
+    ;;
+status)
+    echo "checkout:  $here ($(git -C "$here" rev-parse --short HEAD 2>/dev/null))"
+    for name in tray menu chat setup; do
+        pid=$(pgrep -f "$here/ui/$name.py" | head -1)
+        [ -n "$pid" ] && echo "$(printf '%-10s' "$name:")running (pid $pid)"
+    done
+    pgrep -f "$here/ui/tray.py" >/dev/null || echo "tray:      NOT running (./dev restart)"
+    echo "config:    ${XDG_CONFIG_HOME:-$HOME/.config}/dictatr/config.toml"
+    "$here/bin/dictate" backend status 2>&1 | sed 's/^/  /'
+    ;;
+doctor)
+    fail=0
+    echo "== a second dictatr =="
+    other=$(pgrep -af "ui/tray.py" | grep -v "$here" || true)
+    if [ -n "$other" ]; then
+        echo "  another tray is running, not from this checkout:"
+        echo "$other" | sed 's/^/    /'; fail=1
+    else
+        echo "  ok: no tray outside this checkout"
+    fi
+    for pkg in /usr/bin/dictate /usr/lib/dictatr; do
+        [ -e "$pkg" ] && { echo "  installed package present at $pkg"; fail=1; }
+    done
+    [ -e /etc/xdg/autostart/dictatr-tray.desktop ] && {
+        echo "  package autostart will start a SECOND tray at login:"
+        echo "    /etc/xdg/autostart/dictatr-tray.desktop"
+        echo "    (uninstall the package, or delete the file, to develop)"
+        fail=1; }
+    resolved=$(command -v dictate 2>/dev/null)
+    case $resolved in
+    "$here/bin/dictate"|"$HOME/.local/bin/dictate") echo "  ok: dictate -> $resolved" ;;
+    "") echo "  dictate is not on PATH (run ./install.sh)"; fail=1 ;;
+    *)  echo "  dictate resolves to $resolved, not this checkout"; fail=1 ;;
+    esac
+
+    echo "== launchers =="
+    missing=0
+    for cmd in dictate dictate-menu dictate-tray dictate-chat dictate-setup; do
+        [ -L "$HOME/.local/bin/$cmd" ] || { echo "  missing ~/.local/bin/$cmd (run ./install.sh)"; missing=1; fail=1; }
+    done
+    [ "$missing" = 0 ] && echo "  ok: all launchers linked"
+
+    echo "== desktop portal =="
+    "$py" - <<'PY'
+from gi.repository import Gio, GLib
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+try:
+    bus.call_sync("org.freedesktop.portal.Desktop",
+                  "/org/freedesktop/portal/desktop",
+                  "org.freedesktop.host.portal.Registry", "Register",
+                  GLib.Variant("(sa{sv})", ("io.github.rebreda.dictatr", {})),
+                  None, Gio.DBusCallFlags.NONE, 3000, None)
+    print("  ok: app id registers (hotkeys and portal typing can work)")
+except GLib.Error as e:
+    print(f"  app id will not register: {e.message}")
+    print("    no desktop file is named io.github.rebreda.dictatr.desktop;")
+    print("    run ./install.sh, which writes one")
+PY
+    exit "$fail"
+    ;;
+*) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
