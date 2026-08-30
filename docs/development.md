@@ -202,6 +202,46 @@ Anything that draws should paint with `ui/radial.py`: import the palette
 and geometry rather than restating hex codes or pixel sizes, and call
 `radial.apply_css()` so the bundled symbolic icons resolve.
 
+## Commits
+
+Subjects follow [Conventional Commits](https://www.conventionalcommits.org):
+
+```
+type(scope): summary
+```
+
+`feat fix perf docs refactor test build ci chore revert`, an optional
+lowercase scope (`chat menu tray wizard kit engine backend packaging
+demo`), and a trailing `!` for a break. Under 72 characters.
+
+```
+feat(shake): open the chat by shaking the pointer
+fix(packaging): stop vendoring the engine binary
+fix(engine)!: drop the ydotool typing tier
+```
+
+Only the subject is constrained. The body is where this project says
+*why*, at whatever length the change deserves — that has always been the
+best part of the history and nothing here touches it.
+
+The subject is constrained because it is read by machines: it becomes
+the rpm `%changelog`, the Debian changelog and the release page. A
+summary that is already one line about one change assembles into a
+changelog; prose recalled days later turns into paragraphs nobody reads.
+
+```bash
+./dev hooks                              # check messages before they land
+packaging/release-entry.py 0.5.0         # the next %changelog entry
+```
+
+`release-entry.py` reads the commits since the last tag and prints a
+block to paste into `packaging/dictatr.spec`. It lists `feat`, `fix`,
+`perf` and anything breaking; refactors, tests and CI work are real work
+but not what a user reads a changelog for. The same rule file
+(`.githooks/commit-msg`) is what CI applies, so the hook and the gate
+cannot drift, and CI only checks the commits a push or PR adds — the
+history predates the convention.
+
 ## Packages
 
 ```bash

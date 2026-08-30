@@ -10,6 +10,28 @@ permissions:
   contents: write
 
 jobs:
+  # Only the commits this push or PR adds -- history predates the
+  # convention. The rule lives in .githooks/commit-msg so the hook a
+  # developer installs and the gate CI applies cannot drift.
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Subjects follow Conventional Commits
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$base" || "$base" == 0000000000000000000000000000000000000000 ]]; then
+            echo "no base to compare against; checking HEAD only"
+            base="HEAD~1"
+          fi
+          git rev-list "$base..HEAD" | while read -r sha; do
+            git log -1 --format=%B "$sha" >/tmp/msg
+            echo "-- $(git log -1 --format='%h %s' "$sha")"
+            bash .githooks/commit-msg /tmp/msg
+          done
+
   test:
     runs-on: ubuntu-latest
     steps:

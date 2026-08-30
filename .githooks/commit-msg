@@ -1,0 +1,44 @@
+#!/bin/bash
+# Check the subject line against Conventional Commits.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+#
+# Only the subject is constrained. The body is where this project says
+# why, at whatever length the change deserves, and nothing here touches
+# it. The subject is parsed by machines -- it becomes the rpm
+# %changelog, the Debian changelog and the release page -- so it has to
+# say what kind of change this is and in one line.
+set -eu
+msg_file=$1
+subject=$(head -1 "$msg_file")
+
+# Merges, reverts, fixups and squashes are git's own wording.
+case $subject in
+    Merge\ *|Revert\ *|fixup!\ *|squash!\ *|amend!\ *) exit 0 ;;
+esac
+
+types='feat|fix|perf|docs|refactor|test|build|ci|chore|revert'
+if [[ ! $subject =~ ^($types)(\([a-z0-9._-]+\))?!?:\ .+ ]]; then
+    cat >&2 <<MSG
+commit rejected: the subject is not a Conventional Commit.
+
+  got:      $subject
+  wanted:   type(scope): summary
+  types:    ${types//|/, }
+  scopes:   chat, menu, tray, wizard, kit, engine, backend, packaging,
+            demo, docs (optional, lowercase)
+
+  feat(shake): open the chat by shaking the pointer
+  fix(packaging): stop vendoring the engine binary
+  fix(engine)!: drop the ydotool typing tier
+
+A trailing "!" (or a "BREAKING CHANGE:" line in the body) marks a break.
+The body is unconstrained -- say why there, at length.
+MSG
+    exit 1
+fi
+
+if [ ${#subject} -gt 72 ]; then
+    echo "commit rejected: subject is ${#subject} chars, keep it under 72" >&2
+    exit 1
+fi
