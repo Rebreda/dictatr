@@ -38,12 +38,12 @@ sys.path.insert(0, str(REPO / "src"))
 from dictatr import runstate  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
+import portal  # noqa: E402
 from shortcuts import SHORTCUTS as PORTAL_SHORTCUTS  # noqa: E402
 
 BUS_NAME = "io.github.rebreda.dictatr.tray"
-APP_ID = "io.github.rebreda.dictatr"
-PORTAL_BUS = "org.freedesktop.portal.Desktop"
-PORTAL_PATH = "/org/freedesktop/portal/desktop"
+APP_ID = portal.APP_ID
+PORTAL_BUS = portal.BUS
 # Theme-icon fallbacks, used only if the bundled pixmaps fail to load.
 ICON_IDLE = "audio-input-microphone"
 ICON_LIVE = "media-record"
@@ -392,24 +392,6 @@ def unwatch_apps(bus) -> None:
     runstate.APP.unlink(missing_ok=True)
 
 
-def portal_bus() -> Gio.DBusConnection:
-    """A private session-bus connection for portal work.
-
-    The portal ties an app id to the connection that first speaks to it,
-    and a connection can only be registered once. Anything that reaches
-    the portal on the shared session bus first (GTK does, for the colour
-    scheme) leaves it associated with an empty id, and GlobalShortcuts
-    then refuses the session with "An app id is required". On a
-    connection of our own, Register always goes first.
-    """
-    addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
-    return Gio.DBusConnection.new_for_address_sync(
-        addr,
-        Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
-        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
-        None, None)
-
-
 QT_MODIFIERS = {"SHIFT": 0x02000000, "CTRL": 0x04000000,
                 "ALT": 0x08000000, "META": 0x10000000,
                 "SUPER": 0x10000000, "LOGO": 0x10000000}
@@ -441,23 +423,13 @@ class Shortcuts:
     tray loop. Any failure logs one stderr line and gives up; the legacy
     kglobalshortcutsrc path (bin/dictate-hotkeys) still works."""
 
-    IFACE = "org.freedesktop.portal.GlobalShortcuts"
+    IFACE = portal.GLOBAL_SHORTCUTS
 
     def __init__(self):
-        self.bus = portal_bus()
+        self.bus = portal.session_bus()
+        portal.register(self.bus)
+        self.req = portal.Requests(self.bus, self.IFACE)
         self.session = None
-        self._sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
-        self._n = 0
-        # Portal >= 1.20 wants non-sandboxed apps to self-identify
-        # before their first session; older portals lack the interface.
-        try:
-            self.bus.call_sync(
-                PORTAL_BUS, PORTAL_PATH,
-                "org.freedesktop.host.portal.Registry", "Register",
-                GLib.Variant("(sa{sv})", (APP_ID, {})), None,
-                Gio.DBusCallFlags.NONE, 3000, None)
-        except GLib.Error:
-            pass
         self._open()
 
     def _open(self):
@@ -500,27 +472,9 @@ class Shortcuts:
               "on KDE)", file=sys.stderr)
 
     def _request(self, method, sig, args, options, cb):
-        self._n += 1
-        token = f"dictatr{self._n}"
-        req = (f"/org/freedesktop/portal/desktop/request/"
-               f"{self._sender}/{token}")
-
-        def on_response(_bus, _sender, _path, _iface, _sig, params):
-            self.bus.signal_unsubscribe(sub)
-            code, results = params.unpack()
-            cb(code, results)
-
-        sub = self.bus.signal_subscribe(
-            PORTAL_BUS, "org.freedesktop.portal.Request", "Response", req,
-            None, Gio.DBusSignalFlags.NONE, on_response)
-        opts = dict(options, handle_token=GLib.Variant("s", token))
-        try:
-            self.bus.call_sync(PORTAL_BUS, PORTAL_PATH, self.IFACE, method,
-                               GLib.Variant(sig, tuple(args) + (opts,)),
-                               None, Gio.DBusCallFlags.NONE, 3000, None)
-        except GLib.Error as e:
-            self.bus.signal_unsubscribe(sub)
-            self._fail(e.message)
+        err = self.req.call(method, sig, args, options, cb)
+        if err is not None:
+            self._fail(err)
 
     def _on_session(self, code, results):
         session = results.get("session_handle")
@@ -529,12 +483,12 @@ class Shortcuts:
             return
         self.session = session
         self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Activated",
-                                  PORTAL_PATH, None,
+                                  portal.PATH, None,
                                   Gio.DBusSignalFlags.NONE, self._activated)
         # Deactivated is the chord coming back up. Typing waits on this:
         # see CHORD in runstate.py.
         self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Deactivated",
-                                  PORTAL_PATH, None,
+                                  portal.PATH, None,
                                   Gio.DBusSignalFlags.NONE, self._deactivated)
         shorts = [(sid, {"description": GLib.Variant("s", desc),
                          "preferred_trigger": GLib.Variant("s", trig)})

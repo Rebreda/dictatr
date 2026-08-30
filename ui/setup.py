@@ -49,14 +49,15 @@ from dictatr.settings import settings, write_config  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
+import portal  # noqa: E402
 import radial  # noqa: E402
 from shortcuts import SHORTCUTS, pretty  # noqa: E402
 from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble  # noqa: E402
 
-APP_ID = "io.github.rebreda.dictatr"
-PORTAL_BUS = "org.freedesktop.portal.Desktop"
-PORTAL_PATH = "/org/freedesktop/portal/desktop"
-GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
+APP_ID = portal.APP_ID
+PORTAL_BUS = portal.BUS
+PORTAL_PATH = portal.PATH
+GS_IFACE = portal.GLOBAL_SHORTCUTS
 TRAY_BUS = "io.github.rebreda.dictatr.tray"
 WIDTH = 420
 STACK_H = 640   # pills + choices + status + hub; the hub sits at the bottom
@@ -126,9 +127,17 @@ window {{ background: transparent; }}
 .satbtn image {{ color: {INK}; }}
 .satbtn:hover {{ background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }}
 .satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
-progress, trough {{ min-height: 5px; border-radius: 9999px; }}
-trough {{ background: alpha(#ffffff, 0.10); }}
-progress {{ background: {BLUE}; }}
+/* Scoped to the progress bar: bare `trough`/`progress` selectors also
+   match the scrollbar inside the transcript, which then reports a
+   negative slider size to GTK. */
+.setup progressbar trough {{
+  min-height: 5px; border-radius: 9999px;
+  background: alpha(#ffffff, 0.10);
+}}
+.setup progressbar progress {{
+  min-height: 5px; border-radius: 9999px;
+  background: {BLUE};
+}}
 .setup entry {{
   background: alpha(#ffffff, 0.06); color: {INK};
   border: 1px solid alpha(#ffffff, 0.12); border-radius: 8px;
@@ -644,25 +653,6 @@ class SpeakStep(Step):
         self.wiz.mark_complete()
         self.wiz.close()
 
-def portal_bus() -> Gio.DBusConnection:
-    """A private session-bus connection for portal work.
-
-    The portal ties an app id to the connection that first speaks to it,
-    and a connection can only be registered once. GTK has already used
-    the shared session bus by the time the wizard runs (the Settings
-    portal, for the colour scheme), so the shared connection arrives
-    associated with an empty id, Register then fails with "already
-    associated", and GlobalShortcuts refuses the session with "An app id
-    is required". On a connection of our own, Register goes first.
-    """
-    addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
-    return Gio.DBusConnection.new_for_address_sync(
-        addr,
-        Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
-        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
-        None, None)
-
-
 class Binder:
     """One GlobalShortcuts bind dance: CreateSession, BindShortcuts, read
     back the triggers the desktop actually assigned, then close the
@@ -671,60 +661,20 @@ class Binder:
 
     def __init__(self, done):
         self.done = done
-        self.bus = portal_bus()
-        self._sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
-        self._n = 0
+        self.bus = portal.session_bus()
+        self.req = portal.Requests(self.bus, GS_IFACE)
         self.session = None
 
     def run(self):
-        try:
-            self.bus.call_sync(
-                PORTAL_BUS, PORTAL_PATH,
-                "org.freedesktop.host.portal.Registry", "Register",
-                GLib.Variant("(sa{sv})", (APP_ID, {})), None,
-                Gio.DBusCallFlags.NONE, 3000, None)
-        except GLib.Error:
-            pass
+        portal.register(self.bus)
         self._request("CreateSession", "(a{sv})", (),
                       {"session_handle_token": GLib.Variant("s", "dictatrsetup")},
                       self._on_session)
 
     def _request(self, method, sig, args, options, cb, timeout_s=180):
-        self._n += 1
-        token = f"dictatrsetup{os.getpid()}_{self._n}"
-        req = (f"/org/freedesktop/portal/desktop/request/"
-               f"{self._sender}/{token}")
-        state = {"fired": False}
-
-        def on_response(_bus, _s, _p, _i, _sg, params):
-            if state["fired"]:
-                return
-            state["fired"] = True
-            self.bus.signal_unsubscribe(sub)
-            code, results = params.unpack()
-            cb(code, results)
-
-        sub = self.bus.signal_subscribe(
-            PORTAL_BUS, "org.freedesktop.portal.Request", "Response", req,
-            None, Gio.DBusSignalFlags.NONE, on_response)
-        opts = dict(options, handle_token=GLib.Variant("s", token))
-        try:
-            self.bus.call_sync(PORTAL_BUS, PORTAL_PATH, GS_IFACE, method,
-                               GLib.Variant(sig, tuple(args) + (opts,)),
-                               None, Gio.DBusCallFlags.NONE, 5000, None)
-        except GLib.Error as e:
-            self.bus.signal_unsubscribe(sub)
-            self.done(False, [], e.message)
-            return
-
-        def expire():
-            if not state["fired"]:
-                state["fired"] = True
-                self.bus.signal_unsubscribe(sub)
-                self.done(False, [], f"no answer within {timeout_s}s")
-            return False
-
-        GLib.timeout_add_seconds(timeout_s, expire)
+        err = self.req.call(method, sig, args, options, cb, timeout_s)
+        if err is not None:
+            self.done(False, [], err)
 
     def _on_session(self, code, results):
         self.session = results.get("session_handle")
@@ -795,6 +745,20 @@ class Wizard(Gtk.ApplicationWindow):
         self.scroll.set_child(self.msgs)
         stack.append(self.scroll)
 
+        # Order matters here: what is true now, then what you can do
+        # about it. The status carries the reason the choices exist —
+        # how big the download is, what was refused — so it reads
+        # before them, not after.
+        # Wrapping, not ellipsized: the line that says how big the
+        # download is has to survive being read.
+        self.status = Gtk.Label(label="", wrap=True,
+                                justify=Gtk.Justification.CENTER)
+        self.status.set_max_width_chars(44)
+        self.status.add_css_class("status-pill")
+        status_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        status_row.append(self.status)
+        stack.append(status_row)
+
         self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                              halign=Gtk.Align.CENTER)
         stack.append(self.extra)
@@ -802,15 +766,6 @@ class Wizard(Gtk.ApplicationWindow):
         self.choices = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                spacing=7, halign=Gtk.Align.CENTER)
         stack.append(self.choices)
-
-        # Wrapping, not ellipsized: the line that says how big the
-        # download is has to survive being read.
-        self.status = Gtk.Label(label="", wrap=True, justify=Gtk.Justification.CENTER)
-        self.status.set_max_width_chars(44)
-        self.status.add_css_class("status-pill")
-        status_row = Gtk.Box(halign=Gtk.Align.CENTER)
-        status_row.append(self.status)
-        stack.append(status_row)
 
         self.bar = Gtk.ProgressBar(halign=Gtk.Align.CENTER, visible=False)
         self.bar.set_size_request(WIDTH - 140, -1)
@@ -904,7 +859,10 @@ class Wizard(Gtk.ApplicationWindow):
             head = Gtk.Label(label=title, xalign=0.0)
             head.add_css_class("title")
             inner.append(head)
-        lab = Gtk.Label(label=text, wrap=True, xalign=0.0, selectable=True)
+        # Not selectable: with no entry on most steps, a selectable
+        # label takes the initial focus and opens with its own text
+        # highlighted, which reads as a mistake.
+        lab = Gtk.Label(label=text, wrap=True, xalign=0.0)
         lab.set_max_width_chars(40)
         lab.add_css_class("body")
         inner.append(lab)

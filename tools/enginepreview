@@ -60,9 +60,12 @@ ap.add_argument("--cached", action="store_true",
 ap.add_argument("--fail", action="store_true",
                 help="fail partway through the pull")
 ap.add_argument("--auto", action="store_true",
-                help="start the install without a click (for capture)")
+                help="pick the first choice without a click (for capture)")
+ap.add_argument("--step", type=int, default=0,
+                help="open on step 0 engine, 1 hotkeys, 2 try it")
 args = ap.parse_args()
 sys.argv = sys.argv[:1]                      # SetupApp.run() sees no flags
+os.environ["DICTATR_SETUP_STEP"] = str(args.step)
 
 sys.path.insert(0, str(REPO / "src"))
 from dictatr.backend import detect, lemond    # noqa: E402
@@ -100,13 +103,17 @@ def fake_start(wait_s=30.0):
     return FAKE_BASE
 
 
+TOTAL = 1_140_000_000   # a Moonshine-sized model, for the byte counter
+
+
 def fake_pull(model, on_progress=None, base=None, key=None):
     def tick(pct):
         if args.fail and pct > 40:
             raise RuntimeError("connection reset while downloading "
                                f"{model} (this is --fail)")
         if on_progress:
-            on_progress({"file": model, "percent": pct})
+            on_progress({"file": model, "percent": pct,
+                         "bytes_downloaded": int(TOTAL * pct / 100)})
     _ramp(args.speed, tick)
     return {"file": model, "percent": 100}
 
@@ -128,7 +135,17 @@ if args.auto:
 
     def probed(self, found, managed):
         _probed(self, found, managed)
-        GLib.timeout_add(700, lambda: (self._install(), False)[1])
+
+        def click():
+            # Go through the choice pill the way a person does, so the
+            # capture exercises the same path (including the answer
+            # landing in the transcript) and not a private method.
+            btn = self.wiz.choices.get_first_child()
+            if btn is not None:
+                btn.emit("clicked")
+            return False
+
+        GLib.timeout_add(700, click)
 
     setup.EngineStep._probed = probed
 

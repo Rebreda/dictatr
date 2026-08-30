@@ -35,11 +35,14 @@ import sys
 import time
 from pathlib import Path
 
-APP_ID = "io.github.rebreda.dictatr"
-BUS = "org.freedesktop.portal.Desktop"
-PATH = "/org/freedesktop/portal/desktop"
-RD_IFACE = "org.freedesktop.portal.RemoteDesktop"
-GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import portal  # noqa: E402  (gi-free at import, like this module)
+
+APP_ID = portal.APP_ID
+BUS = portal.BUS
+PATH = portal.PATH
+RD_IFACE = portal.REMOTE_DESKTOP
+GS_IFACE = portal.GLOBAL_SHORTCUTS
 KEYBOARD = 1              # AvailableDeviceTypes bit
 CALL_TIMEOUT_S = 10
 START_TIMEOUT_S = 120     # Start may be showing a dialog
@@ -125,9 +128,12 @@ class RemoteDesktop:
     def __init__(self):
         from gi.repository import Gio, GLib
         self.Gio, self.GLib = Gio, GLib
-        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        self.sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
-        self._n = 0
+        # A connection of our own, so Register is its first word: see
+        # portal.session_bus. This helper used to take the shared bus,
+        # which works only because nothing else in this process speaks
+        # to the portal first -- true today, a trap tomorrow.
+        self.bus = portal.session_bus()
+        self.req = portal.Requests(self.bus, RD_IFACE)
 
     def _call(self, iface, method, sig, args, timeout_s=CALL_TIMEOUT_S):
         return self.bus.call_sync(
@@ -135,57 +141,10 @@ class RemoteDesktop:
             self.Gio.DBusCallFlags.NONE, int(timeout_s * 1000), None)
 
     def _request(self, method, sig, args, options, timeout_s):
-        """Portal request pattern: the method returns a Request object
-        path and the real reply is a Response signal on it; subscribe
-        before calling. A GLib timeout bounds the wait."""
-        GLib, Gio = self.GLib, self.Gio
-        self._n += 1
-        token = f"dictatr{os.getpid()}_{self._n}"
-        req = f"/org/freedesktop/portal/desktop/request/{self.sender}/{token}"
-        loop = GLib.MainLoop()
-        out = {}
-
-        def on_response(_bus, _sender, _path, _iface, _sig, params):
-            out["code"], out["results"] = params.unpack()
-            loop.quit()
-
-        def resubscribe(path):
-            return self.bus.signal_subscribe(
-                BUS, "org.freedesktop.portal.Request", "Response", path,
-                None, Gio.DBusSignalFlags.NONE, on_response)
-
-        sub = resubscribe(req)
-        opts = dict(options, handle_token=GLib.Variant("s", token))
-        try:
-            handle = self._call(RD_IFACE, method, sig,
-                                tuple(args) + (opts,)).unpack()[0]
-        except GLib.Error as e:
-            self.bus.signal_unsubscribe(sub)
-            raise PortalError(f"{method}: {e.message}") from e
-        if handle != req:   # pre-1.0 portals mint their own request path
-            self.bus.signal_unsubscribe(sub)
-            sub = resubscribe(handle)
-        src = GLib.timeout_add(int(timeout_s * 1000),
-                               lambda: (loop.quit(), False)[1])
-        loop.run()
-        self.bus.signal_unsubscribe(sub)
-        if "code" not in out:
-            raise PortalError(f"{method}: no response within {timeout_s}s")
-        GLib.source_remove(src)
-        if out["code"]:
-            what = "cancelled" if out["code"] == 1 else "refused"
-            raise PortalError(f"{method}: {what} (response {out['code']})")
-        return out["results"]
+        return self.req.call_sync(method, sig, args, options, timeout_s)
 
     def register(self):
-        """xdg-desktop-portal >= 1.20 wants non-sandboxed apps to
-        self-identify before their first session; older portals lack the
-        interface, so every error is ignored."""
-        try:
-            self._call("org.freedesktop.host.portal.Registry", "Register",
-                       "(sa{sv})", (APP_ID, {}), 3)
-        except Exception:
-            pass
+        portal.register(self.bus)
 
     def open_session(self, restore_token):
         """CreateSession -> SelectDevices -> Start. Returns (session
