@@ -32,7 +32,8 @@ from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-from dictatr import actions, concepts, llm, mic, recall, runstate  # noqa: E402
+from dictatr import (actions, chatlog, concepts, llm,  # noqa: E402
+                     mic, recall, runstate)
 from dictatr.engine import dictate_once, ensure_asr_loaded  # noqa: E402
 from dictatr.settings import settings  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
@@ -130,11 +131,11 @@ class Chat(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, decorated=False,
                          default_width=WIDTH)
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        # Through the kit, not around it: this loads the ring stylesheet
+        # and the bundled icons as well, which the rings opened over this
+        # card need. Loading only our own sheet left them as plain GTK
+        # buttons on a surface that is otherwise all bubbles.
+        radial.apply_css(CSS)
 
         # Like the menu: a fullscreen transparent overlay so the card can
         # appear at the pointer. Unlike the menu, the input region is
@@ -263,6 +264,7 @@ class Chat(Gtk.ApplicationWindow):
         self.shot = os.environ.get("DICTATE_SHOT") or None
         self._ring = None        # the radial currently over the card
         self._picks = {}         # text -> the model's shortlist for it
+        self.log = chatlog.ChatLog()   # the conversation, kept
         self._turn_no = 0
 
         self.aio = asyncio.new_event_loop()
@@ -388,6 +390,7 @@ class Chat(Gtk.ApplicationWindow):
         self._refade()
         self._scroll_down()
         self.set_status("screenshot attached: ask about it")
+        self.log.turn("user", "(screenshot)", image=self.log.asset(self.shot))
         return False
 
     def bubble(self, role):
@@ -504,6 +507,7 @@ class Chat(Gtk.ApplicationWindow):
         self.live_label = self.bubble("user")
         self.live_label.set_label(text)
         self.live_label = None
+        self.log.turn("user", text)
         self.phase = "thinking"
         self.set_status("thinking…")
         self.think_label = self.bubble("ai")
@@ -610,6 +614,8 @@ class Chat(Gtk.ApplicationWindow):
         asked = self.bubble("user")
         asked.set_label(pick["label"] + (f" ({pick['arg']})"
                                          if pick.get("arg") else ""))
+        self.log.turn("action", pick["label"], action=pick["id"],
+                      arg=pick.get("arg") or None, on=text[:400])
         self.phase = "thinking"
         self.set_status(f"{pick['label'].lower()}…")
         self.think_label = self.bubble("ai")
@@ -741,6 +747,7 @@ class Chat(Gtk.ApplicationWindow):
             self.live_label = self.bubble("user")
         self.live_label._inner.remove_css_class("live")
         self.live_label.set_label(text)
+        self.log.turn("user", text, spoken=True)
         self.live_label = None
         self.phase = "thinking"
         self.set_status("thinking…")
@@ -785,6 +792,7 @@ class Chat(Gtk.ApplicationWindow):
         self.set_status(f"LLM unreachable — {msg}", error=True)
 
     def _show_answer(self, answer):
+        self.log.turn("assistant", answer)
         subprocess.run(["wl-copy"], input=answer.encode(), check=False)
         if self.think_label is not None:
             self.think_label.set_label(answer)
@@ -811,178 +819,6 @@ class Chat(Gtk.ApplicationWindow):
             self.suggest_btn.set_visible(True)
         return False
 
-    def on_back(self, _btn):
-        subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
-        self.close()
-
-    def on_mic(self, _btn):
-        if self.phase == "listening":
-            self._commit_now()
-        elif self.phase == "idle":
-            self.start_turn()
-
-    def on_key(self, _c, keyval, _code, _state):
-        if keyval == Gdk.KEY_Escape:
-            self.close()
-            return True
-        return False
-
-    def _commit_now(self):
-        if self._stop is not None:
-            self.aio.call_soon_threadsafe(self._stop.set)
-        return True  # keep the signal handler installed
-
-    def _discard_now(self):
-        self._discard = True
-        self._commit_now()
-        return True
-
-    def on_close(self, *_):
-        self._closing = True
-        self._discard = True
-        self._commit_now()
-        runstate.DICTATE_PID.unlink(missing_ok=True)
-        runstate.MODE.unlink(missing_ok=True)
-        return False
-
-    # --- the actual work ----------------------------------------------
-    def _audio_source(self, stop):
-        """The mic, or — like the CLI and the tests — canned audio via
-        DICTATE_INPUT: a colon-separated wav list consumed one per turn
-        (silence once exhausted)."""
-        if not settings.input_file:
-            return mic.mic_chunks(stop)
-        paths = [p for p in settings.input_file.split(":") if p]
-        turn, self._turn_no = self._turn_no, self._turn_no + 1
-        if turn >= len(paths):
-            async def silence():
-                return
-                yield
-            return silence()
-        return mic.file_chunks(
-            paths[turn], stop,
-            realtime=os.environ.get("DICTATE_INPUT_PACED") == "1")
-
-    async def _turn(self):
-        stop = asyncio.Event()
-        self._stop = stop
-        runstate.write_pid(runstate.DICTATE_PID)
-        runstate.write_mode("ask")
-        text, pcm = None, b""
-        try:
-            if not settings.input_file and \
-                    await asyncio.to_thread(mic.source_muted):
-                GLib.idle_add(self._turn_failed,
-                              "microphone is muted — unmute, then tap")
-                return
-            if not self._warmed:
-                await asyncio.to_thread(ensure_asr_loaded)
-                self._warmed = True
-                GLib.idle_add(self.set_status, "listening — just talk")
-            text, pcm = await dictate_once(
-                self._audio_source(stop), stop,
-                on_partial=lambda t: GLib.idle_add(self._on_partial, t))
-        except (ConnectionError, OSError, RuntimeError) as e:
-            GLib.idle_add(self._turn_failed, f"Lemonade offline — {e}")
-            return
-        finally:
-            self._stop = None
-            runstate.DICTATE_PID.unlink(missing_ok=True)
-            runstate.MODE.unlink(missing_ok=True)
-        GLib.idle_add(self._got_text, text or "", pcm)
-
-    def _on_partial(self, text):
-        """Show the words in the input as they are recognised.
-
-        The same place typed words would go, so speaking and typing feed
-        one field instead of two competing displays, and a wrong word is
-        visible before it is sent."""
-        self.entry.set_text(text)
-        self.entry.set_position(-1)
-
-    def _turn_failed(self, msg):
-        self.phase = "idle"
-        self.mic_btn.remove_css_class("rec")
-        self.drop_bubble(self.live_label)
-        self.live_label = None
-        self.set_status(msg + " — tap the mic to retry", error=True)
-
-    def _got_text(self, text, pcm):
-        self.mic_btn.remove_css_class("rec")
-        self.entry.set_text("")
-        if self._closing or self._discard or not text.strip():
-            self.drop_bubble(self.live_label)
-            self.live_label = None
-            self.phase = "idle"
-            if self._closing:
-                return
-            if self._discard:
-                self.set_status("cancelled — tap the mic to talk")
-            else:
-                self.start_turn()  # quiet spell: just keep listening
-            return
-        if self.live_label is None:
-            self.live_label = self.bubble("user")
-        self.live_label._inner.remove_css_class("live")
-        self.live_label.set_label(text)
-        self.live_label = None
-        self.phase = "thinking"
-        self.set_status("thinking…")
-        self.think_label = self.bubble("ai")
-        asyncio.run_coroutine_threadsafe(self._answer(text, pcm), self.aio)
-
-    async def _answer(self, text, pcm):
-        context = []
-        if settings.llm.recall and settings.storage.enabled:
-            with contextlib.suppress(OSError):
-                context = await asyncio.to_thread(recall.search, text)
-        try:
-            shot, self.shot = self.shot, None   # asked about once
-            answer = await asyncio.to_thread(
-                llm.chat, text, context, list(self.history), shot)
-        except OSError as e:
-            GLib.idle_add(self._answer_failed, str(e))
-            return
-        self.history += [{"role": "user", "content": text},
-                         {"role": "assistant", "content": answer}]
-        GLib.idle_add(self._show_answer, answer)
-
-        if settings.storage.enabled and pcm:
-            with contextlib.suppress(OSError, ValueError):
-                record = save_recording(
-                    pcm, text,
-                    storage_base=Path(settings.storage.base).expanduser(),
-                    whisper_model=settings.whisper.model,
-                    meta={"mode": "ask"})
-                if settings.llm.concepts:
-                    with contextlib.suppress(Exception):
-                        await asyncio.to_thread(concepts.annotate, record)
-        if settings.llm.speak and not self._closing:
-            GLib.idle_add(self.set_status, "speaking…")
-            await asyncio.to_thread(llm.speak, answer)
-        GLib.idle_add(self._turn_done)
-
-    def _answer_failed(self, msg):
-        self.phase = "idle"
-        self.drop_bubble(self.think_label)
-        self.think_label = None
-        self.set_status(f"LLM unreachable — {msg}", error=True)
-
-    def _show_answer(self, answer):
-        subprocess.run(["wl-copy"], input=answer.encode(), check=False)
-        if self.think_label is not None:
-            self.think_label.set_label(answer)
-            self.think_label = None
-        self._scroll_down()
-        threading.Thread(target=self._fetch_follow_ups, args=(answer,),
-                         daemon=True).start()
-
-    def _fetch_follow_ups(self, answer):
-        try:
-            picks = actions.suggest(answer)
-        except Exception:
-            picks = []
-        GLib.idle_add(self._show_follow_ups, picks)
 
     def _turn_done(self):
         self.phase = "idle"

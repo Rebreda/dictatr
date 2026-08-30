@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""First-run setup wizard for dictatr, as a radial surface.
+"""First-run setup wizard for dictatr, shaped like the voice chat.
 
-Three steps, each a probe plus a small ring of choices: the inference
-engine, the hotkeys, and a real dictation that also asks for the typing
-permission it needs. Short, skippable, re-runnable (`dictate setup`), so
-the packages never have to print shell instructions after install.
+Three steps, each a probe plus a few choices: the inference engine, the
+hotkeys, and a real dictation that also asks for the typing permission
+it needs. Short, skippable, re-runnable (`dictate setup`), so the
+packages never have to print shell instructions after install.
 
-It is the same kind of object as the menu and the voice chat, not a
-dialog with a ring drawn on it: a transparent layer-shell overlay whose
-input region is clipped to what is visible, so the desktop underneath
-stays clickable. The step's actions ARE the satellites; the hub is the
-step emblem and wears the progress arc while something long runs, and
-walking between steps is the kit's own twirl (Ring.swap). The hub goes
-back a step, and closes the wizard on the first, exactly as the menu's
-hub does.
+It is a conversation, in the same visual family as the chat: pills grow
+upward from a hub row on a transparent layer-shell overlay, the wizard's
+lines on the left, the choice you made on the right. Choices are
+labelled pills, because the ring this replaced put every action behind
+an unlabelled icon and a hover, spent its single line of prose on an
+ellipsis, and had nowhere to print a number on a download that runs for
+minutes. The input region is clipped to the column, so the desktop
+underneath stays clickable.
 
 Nothing blocks the GTK loop: every probe, download and portal dance runs
 on a worker thread and reports back through GLib.idle_add.
@@ -35,7 +35,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
@@ -51,35 +51,84 @@ sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
 import radial  # noqa: E402
 from shortcuts import SHORTCUTS, pretty  # noqa: E402
-from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble, Ring  # noqa: E402
+from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble  # noqa: E402
 
 APP_ID = "io.github.rebreda.dictatr"
 PORTAL_BUS = "org.freedesktop.portal.Desktop"
 PORTAL_PATH = "/org/freedesktop/portal/desktop"
 GS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
 TRAY_BUS = "io.github.rebreda.dictatr.tray"
-CARD_W = 460
+WIDTH = 420
+STACK_H = 640   # pills + choices + status + hub; the hub sits at the bottom
 
-
+# The same visual vocabulary as the voice chat, because this is the same
+# kind of conversation: the wizard says something, you answer by picking
+# one of a few readable pills, and what you picked stays in the
+# transcript above. No card, no ring of unlabelled icons — a choice
+# whose meaning only appears on hover is a choice nobody reads.
 SETUP_CSS = f"""
-.card {{
-  background: alpha(#1c1d22, 0.94);
+window {{ background: transparent; }}
+.msg {{
+  border-radius: 20px; padding: 9px 14px;
+  background: alpha(#1c1d22, 0.93);
   border: 1px solid alpha(#ffffff, 0.10);
-  border-radius: 18px;
-  padding: 18px 22px;
+  color: {INK};
 }}
-.title {{ font-size: 17px; font-weight: 700; color: {INK}; }}
-.body {{ color: alpha({INK}, 0.72); }}
-.pill {{
-  background: alpha(#1c1d22, 0.94);
-  border: 1px solid alpha(#ffffff, 0.10);
+.msg-ai {{ border-color: alpha({BLUE}, 0.35); }}
+.msg-user {{ border-color: alpha({GREEN}, 0.45); }}
+.msg .title {{ font-size: 15px; font-weight: 700; color: {INK}; }}
+.msg .body {{ color: alpha({INK}, 0.80); }}
+.step-pill {{
+  background: alpha(#1c1d22, 0.85);
+  border: 1px solid alpha(#ffffff, 0.08);
+  border-radius: 9999px; padding: 2px 11px;
+  color: alpha({INK}, 0.5); font-size: 11px;
+}}
+/* A choice is a labelled pill, not an icon on an orbit. The icon is
+   decoration; the words are the affordance. */
+.choice {{
   border-radius: 9999px;
-  padding: 6px 14px;
-  font-size: 13px;
-  color: alpha({INK}, 0.72);
+  padding: 8px 16px;
+  background: alpha(#1c1d22, 0.93);
+  border: 1px solid alpha(#ffffff, 0.12);
+  color: {INK};
+  transition: border-color 120ms ease, background 120ms ease;
 }}
-.pill.good {{ color: {GREEN}; border-color: alpha({GREEN}, 0.45); }}
-.pill.bad {{ color: #f28b82; border-color: alpha(#f28b82, 0.45); }}
+.choice:hover {{
+  border-color: alpha({BLUE}, 0.65);
+  background: alpha({BLUE}, 0.14);
+}}
+.choice image {{ color: alpha({INK}, 0.7); }}
+.choice.primary {{ border-color: alpha({BLUE}, 0.5); }}
+.choice.primary image {{ color: {BLUE}; }}
+.status-pill {{
+  background: alpha(#1c1d22, 0.85);
+  border: 1px solid alpha(#ffffff, 0.08);
+  border-radius: 16px; padding: 5px 14px;
+  color: alpha({INK}, 0.62); font-size: 12px;
+}}
+.status-pill.good {{ color: {GREEN}; border-color: alpha({GREEN}, 0.45); }}
+.status-pill.bad {{ color: #f28b82; border-color: alpha(#f28b82, 0.45); }}
+.hubbtn {{
+  border-radius: 9999px;
+  border: 1px solid alpha(#ffffff, 0.10);
+  background: alpha(#1c1d22, 0.93);
+  min-width: 58px; min-height: 58px;
+}}
+.hubbtn image {{ color: {BLUE}; }}
+.hubbtn:hover {{ border-color: alpha(#ffffff, 0.35); }}
+.satbtn {{
+  border-radius: 9999px;
+  border: 1px solid alpha(#ffffff, 0.10);
+  background: alpha(#1c1d22, 0.93);
+  min-width: 36px; min-height: 36px;
+}}
+.satbtn image {{ color: {INK}; }}
+.satbtn:hover {{ background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }}
+.satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
+progress, trough {{ min-height: 5px; border-radius: 9999px; }}
+trough {{ background: alpha(#ffffff, 0.10); }}
+progress {{ background: {BLUE}; }}
 .setup entry {{
   background: alpha(#ffffff, 0.06); color: {INK};
   border: 1px solid alpha(#ffffff, 0.12); border-radius: 8px;
@@ -100,6 +149,16 @@ def _run(cmd, timeout=20, **kw):
 
 def _in_background(fn, *a):
     threading.Thread(target=fn, args=a, daemon=True).start()
+
+
+def _human(n):
+    """Bytes as a size a person can judge a download by."""
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
 
 
 def _name_has_owner(name: str) -> bool:
@@ -224,8 +283,9 @@ class EngineStep(Step):
             if not (lemond.VENDORED.is_file() or lemond.DOWNLOADED.is_file()):
                 GLib.idle_add(self.wiz.set_status, "Downloading the engine…")
                 lemond.download_lemond(
-                    lambda pct: GLib.idle_add(self.wiz.set_progress,
-                                              pct / 100))
+                    lambda pct: GLib.idle_add(
+                        self.wiz.set_progress, pct / 100,
+                        f"Downloading the engine — {pct:.0f}%"))
             GLib.idle_add(self.wiz.set_progress, None)
             GLib.idle_add(self.wiz.set_status, "Starting the engine…")
             lemond.start()
@@ -234,9 +294,21 @@ class EngineStep(Step):
             GLib.idle_add(self.wiz.set_status, f"Downloading {model}…")
 
             def on_event(ev):
+                # Say which file, how far, and how much: the bare arc
+                # this replaced made a stalled gigabyte and a slow one
+                # look exactly the same.
                 pct = ev.get("percent")
+                got = ev.get("bytes_downloaded")
+                parts = [ev.get("file") or model]
+                if got:
+                    total = got * 100 / pct if pct else 0
+                    parts.append(f"{_human(got)} of {_human(total)}"
+                                 if total else _human(got))
                 if pct is not None:
-                    GLib.idle_add(self.wiz.set_progress, float(pct) / 100)
+                    parts.append(f"{float(pct):.0f}%")
+                GLib.idle_add(self.wiz.set_progress,
+                              float(pct) / 100 if pct is not None else 0.0,
+                              " — ".join(parts))
 
             lemond.pull(model, on_progress=on_event)
             lemond.pin(model)
@@ -532,11 +604,19 @@ class SpeakStep(Step):
         self.entry.set_text("")
         self.entry.grab_focus()
         w.busy(True)
-        w.set_status("Listening. Say something, then pause.")
+        w.set_status("Getting ready…")
         w.set_items([])
         _in_background(self._worker)
 
     def _worker(self):
+        # On a fresh install the model is always cold, and loading it
+        # happens before anything can listen. Announcing "listening"
+        # first is how the first sentence of a new setup gets lost.
+        from dictatr.engine import ensure_asr_loaded
+        ensure_asr_loaded(lambda m: GLib.idle_add(
+            self.wiz.set_status, f"Loading {m}. First time only…"))
+        GLib.idle_add(self.wiz.set_status,
+                      "Listening. Say something, then pause.")
         r = _run([DICTATE, "type"], timeout=120)
         tail = (r.stderr or "").strip().splitlines()
         GLib.idle_add(self._done, r.returncode == 0, tail[-1] if tail else "")
@@ -679,55 +759,90 @@ class Binder:
 
 
 class Wizard(Gtk.ApplicationWindow):
-    """The surface: a card of prose above a ring of choices, floating on
-    a transparent overlay whose input region is clipped to both, so the
-    desktop underneath keeps working while setup is open."""
+    """The surface: a conversation, in the same shape as the voice chat.
+
+    Pills grow upward from a hub row — what the wizard said, what you
+    picked — above the step's choices, a status line and a progress bar.
+    It replaced a card with a ring of unlabelled satellites: the ring
+    made every choice a hover away from being readable, spent its one
+    text line on an ellipsis, and had no room for a number on a download
+    that takes minutes. The overlay's input region is still clipped to
+    what is visible, so the desktop underneath stays clickable.
+    """
 
     def __init__(self, app):
         super().__init__(application=app, decorated=False,
-                         title="Set up dictatr")
+                         title="Set up dictatr", default_width=WIDTH)
         radial.apply_css(SETUP_CSS)
         self.add_css_class("setup")
 
         self.steps = [EngineStep(self), HotkeysStep(self), SpeakStep(self)]
         self.index = 0
         self.completed = False
-        self._fraction = 0.0
         self._closing = False
+        self._pills = []
+        self._body = None      # this step's opening pill, so it can be edited
 
-        self.title_label = Gtk.Label(xalign=0.5, wrap=True,
-                                     justify=Gtk.Justification.CENTER)
-        self.title_label.add_css_class("title")
-        self.body = Gtk.Label(xalign=0.5, wrap=True,
-                              justify=Gtk.Justification.CENTER)
-        self.body.add_css_class("body")
-        self.body.set_max_width_chars(46)
-        self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        stack.set_size_request(WIDTH, STACK_H)
+        stack.append(Gtk.Box(vexpand=True))   # pushes the column down
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        card.add_css_class("card")
-        card.set_size_request(CARD_W, -1)
-        for w in (self.title_label, self.body, self.extra):
-            card.append(w)
+        self.msgs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            propagate_natural_height=True, max_content_height=380,
+            valign=Gtk.Align.END)
+        self.scroll.set_child(self.msgs)
+        stack.append(self.scroll)
 
-        self.status = Gtk.Label(label="")
-        self.status.set_ellipsize(Pango.EllipsizeMode.END)
-        self.status.set_max_width_chars(56)
-        self.status.add_css_class("pill")
+        self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                             halign=Gtk.Align.CENTER)
+        stack.append(self.extra)
+
+        self.choices = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                               spacing=7, halign=Gtk.Align.CENTER)
+        stack.append(self.choices)
+
+        # Wrapping, not ellipsized: the line that says how big the
+        # download is has to survive being read.
+        self.status = Gtk.Label(label="", wrap=True, justify=Gtk.Justification.CENTER)
+        self.status.set_max_width_chars(44)
+        self.status.add_css_class("status-pill")
         status_row = Gtk.Box(halign=Gtk.Align.CENTER)
         status_row.append(self.status)
+        stack.append(status_row)
 
-        # The ring starts empty: a step fills it once its probe answers.
-        self.ring = Ring([], hub_icon=self.steps[0].icon,
-                         hub_tooltip="Close", on_root_hub=self.on_hub)
+        self.bar = Gtk.ProgressBar(halign=Gtk.Align.CENTER, visible=False)
+        self.bar.set_size_request(WIDTH - 140, -1)
+        bar_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        bar_row.append(self.bar)
+        stack.append(bar_row)
 
-        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                         halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        column.append(card)
-        column.append(status_row)
-        column.append(self.ring)
-        self.column = column
-        self._hit = (card, status_row, self.ring)
+        hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        self.back_btn = Gtk.Button(icon_name="go-previous-symbolic",
+                                   valign=Gtk.Align.CENTER,
+                                   tooltip_text="Back")
+        self.back_btn.add_css_class("satbtn")
+        self.back_btn.add_css_class("back")
+        self.back_btn.set_focusable(False)
+        self.back_btn.connect("clicked", lambda *_: self.back())
+        self.hub = Gtk.Button(icon_name=self.steps[0].icon)
+        self.hub.add_css_class("hubbtn")
+        self.hub.set_focusable(False)
+        self.hub.set_sensitive(False)     # an emblem, not a control
+        close = Gtk.Button(icon_name="window-close-symbolic",
+                           valign=Gtk.Align.CENTER, tooltip_text="Close  [Esc]")
+        close.add_css_class("satbtn")
+        close.set_focusable(False)
+        close.connect("clicked", lambda *_: self.close())
+        hub_row.append(self.back_btn)
+        hub_row.append(self.hub)
+        hub_row.append(close)
+        stack.append(hub_row)
+
+        self.column = stack
+        self._hit = (self.scroll, self.extra, self.choices, status_row,
+                     bar_row, hub_row)
 
         ls = radial.layer_shell()
         self.overlay = ls is not None
@@ -739,7 +854,9 @@ class Wizard(Gtk.ApplicationWindow):
                          ls.Edge.RIGHT):
                 ls.set_anchor(self, edge, True)
             GLib.timeout_add(250, self._update_input_region)
-        self.set_child(column)
+        outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        outer.append(stack)
+        self.set_child(outer)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
@@ -752,20 +869,15 @@ class Wizard(Gtk.ApplicationWindow):
         except ValueError:
             start = 0
         self.index = start
-        step = self.steps[start]
-        self.ring.hub.set_icon_name(step.icon)
-        self.title_label.set_label(step.title)
         self.connect("map", lambda *_: GLib.idle_add(self._opened))
 
     def _opened(self):
-        self.ring.open()
-        self.steps[self.index].enter()
+        self._enter(self.index)
         return False
 
     def _update_input_region(self):
-        """Clip input to the card, the status pill and the ring: clicks
-        anywhere else fall through, so the overlay never blocks the
-        desktop the way a modal dialog would."""
+        """Clip input to the column: clicks anywhere else fall through,
+        so the overlay never blocks the desktop like a modal dialog."""
         if self._closing:
             return False
         surface = self.get_surface()
@@ -774,16 +886,65 @@ class Wizard(Gtk.ApplicationWindow):
         region = cairo.Region()
         for widget in self._hit:
             ok, b = widget.compute_bounds(self)
-            if ok and b.size.width > 0:
+            if ok and b.size.width > 0 and widget.get_visible():
                 region.union(cairo.RectangleInt(
                     int(b.origin.x) - 4, int(b.origin.y) - 4,
                     int(b.size.width) + 8, int(b.size.height) + 8))
         surface.set_input_region(region)
         return True
 
+    # --- the transcript ---------------------------------------------------
+    def say(self, text, role="ai", title=None):
+        """Add a pill. The wizard's own lines carry the step title; the
+        line you chose comes back as your side of the exchange."""
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        inner.add_css_class("msg")
+        inner.add_css_class(f"msg-{role}")
+        if title:
+            head = Gtk.Label(label=title, xalign=0.0)
+            head.add_css_class("title")
+            inner.append(head)
+        lab = Gtk.Label(label=text, wrap=True, xalign=0.0, selectable=True)
+        lab.set_max_width_chars(40)
+        lab.add_css_class("body")
+        inner.append(lab)
+
+        wrap = Gtk.Box(halign=Gtk.Align.END if role == "user"
+                       else Gtk.Align.START)
+        wrap.append(inner)
+        rev = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.CROSSFADE,
+            transition_duration=200, child=wrap)
+        self.msgs.append(rev)
+        self._pills.append(rev)
+        GLib.idle_add(rev.set_reveal_child, True)
+        self._refade()
+        GLib.idle_add(self._scroll_down)
+        lab._rev = rev
+        return lab
+
+    def _refade(self):
+        """Older pills dim stepwise, so the live exchange reads first."""
+        n = len(self._pills)
+        for i, rev in enumerate(self._pills):
+            age = n - 1 - i
+            rev.set_opacity(1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age))
+
+    def _scroll_down(self):
+        adj = self.scroll.get_vadjustment()
+        adj.set_value(adj.get_upper() - adj.get_page_size())
+        return False
+
+    def _trim_to(self, count):
+        while len(self._pills) > count:
+            self.msgs.remove(self._pills.pop())
+        self._refade()
+
     # --- what the steps call ---------------------------------------------
     def set_body(self, text):
-        self.body.set_label(text)
+        """The step's opening line, as the wizard's own pill."""
+        step = self.steps[self.index]
+        self._body = self.say(text, "ai", title=step.title)
 
     def set_status(self, text, tone=""):
         for t in ("good", "bad"):
@@ -793,17 +954,33 @@ class Wizard(Gtk.ApplicationWindow):
         self.status.set_label(text)
         self.status.set_visible(bool(text))
 
-    def set_progress(self, fraction):
-        """A determinate arc on the hub, or None to clear it."""
-        self._fraction = 0.0 if fraction is None else fraction
-        self.ring.set_fraction(self._fraction)
+    def set_progress(self, fraction, text=None):
+        """A real bar with a real number under it. None clears both."""
+        if fraction is None:
+            self.bar.set_visible(False)
+            self.bar.set_fraction(0.0)
+            return
+        self.bar.set_visible(True)
+        self.bar.set_fraction(max(0.0, min(1.0, float(fraction))))
+        if text:
+            self.set_status(text)
 
     def busy(self, on):
-        """Spin the hub arc while a worker runs; stopping restores
-        whatever determinate progress the step had set."""
-        self.ring.set_indeterminate(bool(on))
-        if not on:
-            self.ring.set_fraction(self._fraction)
+        """While a worker runs with no percentage to show, pulse."""
+        if on:
+            self.bar.set_visible(True)
+            if self._pulse is None:
+                self._pulse = GLib.timeout_add(90, self._do_pulse)
+        elif self._pulse is not None:
+            GLib.source_remove(self._pulse)
+            self._pulse = None
+            self.bar.set_visible(self.bar.get_fraction() > 0)
+
+    _pulse = None
+
+    def _do_pulse(self):
+        self.bar.pulse()
+        return True
 
     def set_extra(self, widget=None):
         while child := self.extra.get_first_child():
@@ -812,8 +989,35 @@ class Wizard(Gtk.ApplicationWindow):
             self.extra.append(widget)
 
     def set_items(self, bubbles):
-        """Replace the ring's satellites with this step's choices."""
-        self.ring.swap(list(bubbles))
+        """Render the step's choices as labelled pills.
+
+        Steps hand over radial Bubbles, whose tooltip was always the
+        readable name of the action — here that name is the button, and
+        the icon is only decoration beside it.
+        """
+        while child := self.choices.get_first_child():
+            self.choices.remove(child)
+        for i, b in enumerate(bubbles):
+            btn = Gtk.Button()
+            btn.add_css_class("choice")
+            if i == 0:
+                btn.add_css_class("primary")
+            row = Gtk.Box(spacing=9)
+            row.append(Gtk.Image(icon_name=b.icon))
+            row.append(Gtk.Label(label=b.tooltip))
+            btn.set_child(row)
+            # A focused button fires on space or Return, so a stray
+            # keypress used to activate whatever held focus.
+            btn.set_focusable(False)
+            btn.connect("clicked", self._chose, b)
+            self.choices.append(btn)
+
+    def _chose(self, _btn, bubble):
+        """Picking is a turn: it lands in the transcript, then runs."""
+        self.say(bubble.tooltip, "user")
+        self.set_items([])
+        if bubble.action is not None:
+            bubble.action()
 
     def mark_complete(self):
         self.completed = True
@@ -821,37 +1025,40 @@ class Wizard(Gtk.ApplicationWindow):
     # --- navigation --------------------------------------------------------
     def advance(self):
         if self.index + 1 < len(self.steps):
-            self._show(self.index + 1)
+            self._enter(self.index + 1)
 
     def back(self):
         if self.index > 0:
-            self._show(self.index - 1, forward=False)
-
-    def on_hub(self):
-        """The hub is Back, and Close on the first step: the same
-        contract the menu's hub has."""
-        if self.index > 0:
-            self.back()
+            self._enter(self.index - 1, back=True)
         else:
             self.close()
 
-    def _show(self, index, forward=True):
-        self.index = index
+    def on_hub(self):
+        """Esc is Back, and Close on the first step, as it always was."""
+        self.back()
+
+    def _enter(self, index, back=False):
         step = self.steps[index]
+        if back:
+            # Walking back rewinds the transcript to where that step
+            # began, so its pills are not said twice.
+            self._trim_to(getattr(step, "_mark", 0))
+        self.index = index
+        step._mark = len(self._pills)
         self.set_extra(None)
+        self.set_items([])
         self.set_status("")
         self.set_progress(None)
-        self.title_label.set_label(step.title)
-        self.ring.hub.set_icon_name(step.icon)
-        self.ring.hub.set_tooltip_text(
-            "Back" if index else "Close")
-        self.ring.swap([], forward=forward, done=step.enter)
+        self.busy(False)
+        self.hub.set_icon_name(step.icon)
+        self.back_btn.set_tooltip_text("Back" if index else "Close")
+        step.enter()
 
     def _on_key(self, _c, keyval, _code, _state):
         if keyval == Gdk.KEY_Escape:
             self.on_hub()
             return True
-        return self.ring.handle_key(keyval)
+        return False
 
     def _on_close(self, *_):
         # Record that the wizard was seen either way, so the tray stops

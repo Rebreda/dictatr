@@ -87,7 +87,11 @@ async def _listen(prefer_typing: bool, ask: bool = False,
     try:
         # Server-side VAD (Moonshine + TEN-VAD) via /realtime, always.
         # The batch endpoint is only for `dictate file`.
-        await asyncio.to_thread(ensure_asr_loaded)
+        # A cold model loads before anything listens; say so, rather
+        # than leaving the user talking into a gap.
+        await asyncio.to_thread(
+            ensure_asr_loaded,
+            lambda m: dlv.notify(f"Loading {m}… (first time only)", 20000))
         text, pcm = await dictate_once(
             source, stop_now, on_state,
             on_partial=(on_partial if typer is not None else None))

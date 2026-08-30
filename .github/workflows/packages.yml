@@ -40,6 +40,11 @@ jobs:
           bash packaging/build-deb.sh
       - name: Sanity-check contents
         run: dpkg-deb --contents dist/*.deb
+      - name: Install it and run it
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ./dist/*.deb
+          dictate backend status
       - uses: actions/upload-artifact@v4
         with:
           name: deb
@@ -69,6 +74,10 @@ jobs:
           bash packaging/build-rpm.sh
       - name: Sanity-check contents
         run: rpm -qlp dist/noarch/*.rpm
+      - name: Install it and run it
+        run: |
+          dnf install -y dist/noarch/*.rpm
+          dictate backend status
       - uses: actions/upload-artifact@v4
         with:
           name: rpm

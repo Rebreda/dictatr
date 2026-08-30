@@ -42,10 +42,16 @@ async def _connect(url):
                                     additional_headers=cap.headers() or None)
 
 
-def ensure_asr_loaded() -> None:
+def ensure_asr_loaded(on_load=None) -> None:
     """The /realtime endpoint doesn't auto-load models (the batch endpoint
     does), and other models can evict the ASR model from Lemonade's memory.
-    Pre-flight: if it isn't loaded, a tiny batch request loads it."""
+    Pre-flight: if it isn't loaded, a tiny batch request loads it.
+
+    *on_load* is called only when a load actually has to happen, before
+    it starts. A cold model takes long enough that a caller which says
+    "listening" first is lying: nothing is listening until this returns,
+    and the first sentence spoken into that gap is lost.
+    """
     b, cap = _asr()
     try:
         loaded = {m.get("model_name")
@@ -57,6 +63,8 @@ def ensure_asr_loaded() -> None:
     from .batch import pcm_to_wav_bytes, transcribe_bytes
     try:
         log.info("loading %s via batch warmup", cap.model)
+        if on_load is not None:
+            on_load(cap.model)
         transcribe_bytes(pcm_to_wav_bytes(b"\x00" * 3200))
     except Exception as e:
         log.warning("ASR warmup failed: %s", e)

@@ -15,24 +15,28 @@ repo=$(dirname "$here")
 lib=$DESTDIR/usr/lib/dictatr
 
 # --- app tree -------------------------------------------------------
-for f in "$repo"/src/dictatr/*.py; do
-    install -Dpm644 "$f" "$lib/src/dictatr/$(basename "$f")"
-done
-for f in "$repo"/ui/*.py; do
-    install -Dpm644 "$f" "$lib/ui/$(basename "$f")"
-done
-for f in "$repo"/ui/icons/*.png; do
-    install -Dpm644 "$f" "$lib/ui/icons/$(basename "$f")"
-done
-# the wizard's own symbolic set, laid out as an icon theme it can add to
-# the search path (desktop themes render these names unreliably)
-for f in "$repo"/ui/icons/theme/hicolor/scalable/apps/*.svg; do
-    install -Dpm644 "$f" \
-        "$lib/ui/icons/theme/hicolor/scalable/apps/$(basename "$f")"
-done
-for f in "$repo"/bin/*; do
-    install -Dpm755 "$f" "$lib/bin/$(basename "$f")"
-done
+# Copy a subtree of the repo into $lib, keeping its layout. The flat
+# globs this replaced (src/dictatr/*.py, ui/*.py, ui/icons/*.png, and
+# the icon theme spelled out by hand) silently dropped every
+# subdirectory: 0.3.0 shipped without src/dictatr/backend/ at all, so
+# `dictate` died on import for everyone who installed a package. Depth
+# is the packager's problem, not something each new directory has to
+# remember to announce.
+stage_tree() {
+    local rel=$1 mode=$2; shift 2
+    local f
+    while IFS= read -r -d '' f; do
+        install -Dpm"$mode" "$f" "$lib/${f#"$repo"/}"
+    done < <(find "$repo/$rel" -type f "$@" -print0)
+}
+
+# The wizard's symbolic icons ride along under ui/icons/theme, laid out
+# as a theme it adds to the search path (desktop themes render these
+# names unreliably); ui/kwin/*.js is loaded into KWin by the tray.
+stage_tree src/dictatr 644 -name '*.py'
+stage_tree ui 644 \( -name '*.py' -o -name '*.png' -o -name '*.svg' \
+                     -o -name '*.js' \)
+stage_tree bin 755
 install -Dpm644 "$repo/docs/assets/logo.svg" "$lib/docs/assets/logo.svg"
 install -Dpm644 "$repo/docs/assets/logo.png" "$lib/docs/assets/logo.png"
 
