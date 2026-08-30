@@ -20,3 +20,15 @@ preload_layer_shell() {
         [ -e "$lib" ] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
     done
 }
+
+# Run a module from the dictatr package. The package is stdlib-only, so
+# unlike the surfaces it does not need the gi interpreter -- it needs
+# whichever python can import it: the checkout's venv, or the system one
+# with src/ on the path.
+dictatr_py() {
+    if [ -x "$repo/.venv/bin/python" ]; then
+        "$repo/.venv/bin/python" "$@"
+    else
+        PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}" python3 "$@"
+    fi
+}

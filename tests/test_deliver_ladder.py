@@ -73,7 +73,6 @@ def ladder(tmp_path, monkeypatch):
     monkeypatch.delenv("DICTATE_NO_PORTAL", raising=False)
     monkeypatch.setattr(deliver.runstate, "mark_done", lambda: None)
     monkeypatch.setattr(deliver, "notify", lambda *a, **k: None)
-    monkeypatch.setattr(deliver.shutil, "which", lambda name: f"/bin/{name}")
     # Typing waits for the hotkey chord to be released; no chord here.
     monkeypatch.setattr(deliver.runstate, "chord_held", lambda *a: False)
     # The portal tier has a config escape hatch; the ladder tests are

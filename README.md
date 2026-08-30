@@ -57,7 +57,7 @@ Wayland only, and the floating surfaces need the layer-shell protocol.
 **From source** (Fedora names; adapt for your distro):
 
 ```bash
-sudo dnf install pipewire-utils wl-clipboard libnotify   # mic, clipboard, notifications
+sudo dnf install pipewire-utils wl-clipboard             # mic, clipboard
 sudo dnf install gtk4 python3-gobject gtk4-layer-shell   # tray, menu, wizard
 ./install.sh                                             # uv sync, symlinks, autostart
 dictate setup                                            # same wizard

@@ -207,6 +207,32 @@ said while editing. Ask mode is also told which app you are in, and told
 not to mention it unless you ask. Off KDE none of this exists and
 everything behaves as before.
 
+## What it asks the desktop for
+
+Notifications and screenshots go over the session bus, not through
+programs: `src/dictatr/dbus.py` is a small D-Bus client (connect, call,
+read one signal) written against the wire protocol, because the package
+is stdlib-only and `dictate` runs with no display and no GTK.
+
+| Want | How | Was |
+| --- | --- | --- |
+| Notifications | `org.freedesktop.Notifications` | a `notify-send` process per bubble, plus `gdbus` to close one |
+| Screenshots | `org.freedesktop.portal.Screenshot` | `spectacle`, or `grim` plus `slurp`, or an error |
+| Hotkeys, typing | GlobalShortcuts and RemoteDesktop portals | (unchanged; `ui/portal.py`, which has gi and uses it) |
+| Clipboard | `wl-copy` | `wl-copy` |
+
+The clipboard stays a command, and not for want of trying: a Wayland
+selection is owned by a live client, so whatever sets it has to stay
+running to hand the data over. `dictate` exits. wl-copy forks a process
+to be that owner, which is the entire reason it exists, and the portal's
+Clipboard interface only works inside a RemoteDesktop session with the
+same problem. The GTK surfaces have a display and could use GDK's
+clipboard directly; the CLI cannot.
+
+The screenshot picker is now the desktop's own -- Spectacle on KDE, the
+shell's on GNOME -- so which region you get is that picker's business,
+where it used to be whichever of spectacle or grim+slurp was installed.
+
 ## Where the recordings live
 
 `~/.local/share/dictatr/archive` (`XDG_DATA_HOME` if set), alongside the

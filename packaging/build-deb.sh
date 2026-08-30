@@ -38,7 +38,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.11), python3-websockets, pipewire-bin, wl-clipboard, libnotify-bin
+Depends: python3 (>= 3.11), python3-websockets, pipewire-bin, wl-clipboard
 Recommends: python3-gi, gir1.2-gtk-4.0, libgtk4-layer-shell0
 Maintainer: $MAINTAINER
 Homepage: https://github.com/Rebreda/dictatr

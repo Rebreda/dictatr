@@ -11,7 +11,11 @@ keyboard. Two tiers:
              `portal_typing = false` skips it.
   wl-copy  - Wayland clipboard, plus a "Copied" notification. Always
              available, and where transcripts land when the portal is
-             unavailable or turned off.
+             unavailable or turned off. Still a command because the
+             Wayland clipboard is owned by a live client: whoever sets
+             it must stay running to hand the data over, and `dictate`
+             exits. wl-copy forks a process to be that owner, which is
+             the whole reason it exists.
 
 DICTATE_TYPE_CMD is a test seam, not a tier: the demo stage points it at
 a shim that forwards to wtype inside the nested compositor, because
@@ -29,60 +33,89 @@ wait_for_chord, which holds off until the tray sees the chord released.
 
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from . import runstate
+from . import dbus, runstate
 from .runstate import RUN
 
 _ID_FILE = RUN / "notify-id"
 _PORTAL_HELPER = Path(__file__).resolve().parents[2] / "ui" / "portal_typed.py"
 
 
+_NOTIFY = ("org.freedesktop.Notifications",
+           "/org/freedesktop/Notifications",
+           "org.freedesktop.Notifications")
+# Plasma groups by this and takes the icon from it, which is more than
+# notify-send's -a ever gave us.
+_HINTS = {"desktop-entry": dbus.Variant("s", "io.github.rebreda.dictatr")}
+_bus = None
+
+
+def _notifier():
+    """The session bus, reconnected if it went away.
+
+    Cached because the tray notifies on every state change and a
+    connection is a socket, a handshake and a Hello -- cheap, but not
+    free enough to redo hundreds of times a session."""
+    global _bus
+    if _bus is None:
+        _bus = dbus.session()
+    return _bus
+
+
+def _prev_id() -> int:
+    try:
+        raw = _ID_FILE.read_text().strip()
+        return int(raw) if raw.isdigit() else 0
+    except OSError:
+        return 0
+
+
 def notify(text: str, ms: int = 2500, category: str = "state") -> None:
     """Category-aware notifications, each toggleable in settings.
 
     "state" chatter (listening / transcribing) shares one replaceable
-    bubble (-r) so it never stacks — but Plasma doesn't re-pop a bubble
-    it already showed, which buried important messages too when
-    everything shared the slot. So every other category (delivery,
-    answers, toggles, errors) fires a fresh popup, after closing any
-    lingering state bubble."""
+    bubble so it never stacks — but Plasma doesn't re-pop a bubble it
+    already showed, which buried important messages too when everything
+    shared the slot. So every other category (delivery, answers,
+    toggles, errors) fires a fresh popup, after closing any lingering
+    state bubble.
+
+    The id of the shared bubble lives in a file because the processes
+    that write to it are different ones: the tray says "Listening" and
+    `dictate` says "Transcribing", and neither can replace the other's
+    bubble without being told its number.
+    """
     from .settings import settings
     if not getattr(settings.notify, category, True):
         return
-    if not shutil.which("notify-send"):
+    bus = _notifier()
+    if bus is None:
         return
-    cmd = ["notify-send", "-a", "Dictate", "-t", str(ms)]
-    prev = None
+    prev = _prev_id()
     try:
-        prev = _ID_FILE.read_text().strip()
-    except OSError:
-        pass
+        if category != "state" and prev:
+            # A fresh popup is about to say something newer than the
+            # state bubble; close the stale "Transcribing…" rather than
+            # leave it sitting there.
+            bus.call(*_NOTIFY, "CloseNotification", "u", (prev,))
+            _ID_FILE.unlink(missing_ok=True)
+            prev = 0
+        (new_id,) = bus.call(
+            *_NOTIFY, "Notify", "susssasa{sv}i",
+            ("Dictate", prev if category == "state" else 0, "dictatr",
+             "Dictate", text, [], _HINTS, ms))
+    except (dbus.DBusError, OSError):
+        # A bus that dropped us gets one more chance on the next call.
+        global _bus
+        _bus = None
+        return
     if category == "state":
-        cmd.append("-p")
-        if prev and prev.isdigit() and int(prev):
-            cmd += ["-r", prev]
-    elif prev and prev.isdigit() and int(prev):
-        # A fresh popup is about to say something newer than the state
-        # bubble; close the stale "Transcribing…" instead of leaving it.
-        subprocess.run(
-            ["gdbus", "call", "--session",
-             "--dest", "org.freedesktop.Notifications",
-             "--object-path", "/org/freedesktop/Notifications",
-             "--method", "org.freedesktop.Notifications.CloseNotification",
-             prev],
-            check=False, capture_output=True)
-        _ID_FILE.unlink(missing_ok=True)
-    r = subprocess.run(cmd + ["Dictate", text], check=False,
-                       capture_output=True, text=True)
-    new_id = (r.stdout or "").strip()
-    if category == "state" and new_id.isdigit():
         RUN.mkdir(parents=True, exist_ok=True)
-        _ID_FILE.write_text(new_id)
+        _ID_FILE.write_text(str(new_id))
 
 
 def portal_token() -> Path:

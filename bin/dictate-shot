@@ -3,21 +3,18 @@
 #
 # The capture has to happen before the chat exists: a region selection is
 # a fullscreen grab, and it would otherwise photograph our own window.
+#
+# The picker is the portal's, which means it is the desktop's own --
+# Spectacle on KDE, the shell's on GNOME -- rather than whichever of
+# spectacle or grim+slurp happened to be installed.
 set -u
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 shot=${XDG_RUNTIME_DIR:-/tmp}/dictatr/shot-$$.png
 mkdir -p "$(dirname "$shot")"
 
-if command -v spectacle >/dev/null; then
-    spectacle -b -n -r -o "$shot" >/dev/null 2>&1
-elif command -v grim >/dev/null && command -v slurp >/dev/null; then
-    grim -g "$(slurp)" "$shot" >/dev/null 2>&1
-else
-    notify-send -a Dictate "Dictate" "No region screenshot tool (spectacle or grim+slurp)"
-    exit 1
-fi
-
-# A cancelled selection writes nothing; say nothing back.
+# A cancelled selection captures nothing; say nothing back.
+export DICTATE_SHOT=$shot
+dictatr_py -m dictatr.shot >/dev/null || exit 0
 [[ -s $shot ]] || exit 0
 
 # Old shots are throwaway context, not an archive.

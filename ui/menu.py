@@ -163,8 +163,7 @@ class Radial(Gtk.ApplicationWindow):
         def action():
             text = self._suggest_text
             if not text:
-                subprocess.run(["notify-send", "-a", "Dictate", "Dictate",
-                                "Select some text first"], check=False)
+                deliver.notify("Select some text first", category="errors")
                 self.close()
                 return
             self.circle.set_hub(tooltip="Working…")
@@ -229,13 +228,9 @@ class Radial(Gtk.ApplicationWindow):
         self.close()
 
     def gc(self):
-        # Detached: the shell survives the menu closing, and reports the
-        # result with a notification like the tray does.
-        subprocess.Popen(
-            ["sh", "-c",
-             f'out=$("{DICTATE}" gc 2>/dev/null); '
-             f'notify-send -a Dictate "Archive gc" "${{out:-done}}"'],
-            start_new_session=True)
+        # Detached so it outlives the menu closing; --notify because a
+        # sweep started from a menu has no terminal to print to.
+        subprocess.Popen([DICTATE, "gc", "--notify"], start_new_session=True)
         self.close()
 
     def open_settings(self):
@@ -405,8 +400,7 @@ class SettingsWindow(Gtk.Window):
         # Merging write: the setup wizard owns the backend keys in the
         # same file and this window never shows them.
         write_config(cfg)
-        subprocess.run(["notify-send", "-a", "Dictate", "-t", "2500",
-                        "Dictate", f"Settings saved ({model})"], check=False)
+        deliver.notify(f"Settings saved ({model})", category="toggles")
         self.close()
 
 

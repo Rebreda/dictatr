@@ -298,6 +298,8 @@ def main() -> None:
                    help="override gc_purge_days for this run (0 = purge all trash now)")
     g.add_argument("--restore", metavar="UID",
                    help="move a quarantined clip back into the archive")
+    g.add_argument("--notify", action="store_true",
+                   help="report the result in a notification, not stdout")
     args = p.parse_args()
     _legacy_archive_note()
 
@@ -329,8 +331,16 @@ def main() -> None:
         summary = cleanup.sweep(dry_run=args.dry_run,
                                 purge_days=args.purge_days)
         q = summary["quarantined"]
-        print(f"kept {summary['kept']}, quarantined "
-              f"{sum(q.values())} ({q or 'none'}), purged {summary['purged']}")
+        line = (f"kept {summary['kept']}, quarantined "
+                f"{sum(q.values())} ({q or 'none'}), "
+                f"purged {summary['purged']}")
+        # --notify is for the surfaces: a sweep started from a menu has
+        # no terminal to print to, and the alternative was each of them
+        # spawning a shell to run this and then notify-send.
+        if args.notify:
+            dlv.notify(line, category="toggles")
+        else:
+            print(line)
         sys.exit(0)
 
 

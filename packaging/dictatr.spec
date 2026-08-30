@@ -20,8 +20,12 @@ Requires:       python3-websockets
 # library packages that happen to carry them today (rpmlint:
 # explicit-lib-dependency).
 Requires:       /usr/bin/pw-record
+# The clipboard is the one desktop service with no bus API: a Wayland
+# selection is owned by a live client, and `dictate` exits, so something
+# has to stay behind holding the text. That is what wl-copy forks to do.
+# Notifications and screenshots go over the session bus instead (see
+# src/dictatr/dbus.py), so libnotify and a screenshot tool are gone.
 Requires:       /usr/bin/wl-copy
-Requires:       /usr/bin/notify-send
 Recommends:     gtk4
 Recommends:     python3-gobject
 Recommends:     gtk4-layer-shell
