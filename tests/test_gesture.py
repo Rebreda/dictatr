@@ -15,7 +15,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "ui/kwin/activewindow.js"
 def thresholds():
     src = SCRIPT.read_text()
     return {name: int(re.search(rf"var {name} = (\d+)", src).group(1))
-            for name in ("TRAVEL", "LEGS", "DEADZONE", "WINDOW", "NET",
+            for name in ("STROKE", "BIG", "WINDOW", "DEADZONE", "NET",
                          "COOLDOWN")}
 
 
@@ -54,54 +54,60 @@ class Detector:
         while self.legs and now_ms - self.legs[0]["t"] > self.t["WINDOW"]:
             self.legs.pop(0)
 
-        travel = self.cur["dist"] + sum(l["dist"] for l in self.legs)
-        span = (self.cur["dist"] * self.cur["dir"]
-                + sum(l["dist"] * l["dir"] for l in self.legs))
-        if (len(self.legs) + 1 >= self.t["LEGS"]
-                and travel >= self.t["TRAVEL"]
-                and abs(span) <= self.t["NET"]
+        big = sum(1 for l in self.legs if l["dist"] >= self.t["STROKE"])
+        span = sum(l["dist"] * l["dir"] for l in self.legs)
+        if self.cur["dist"] >= self.t["STROKE"]:
+            big += 1
+        span += self.cur["dist"] * self.cur["dir"]
+
+        if (big >= self.t["BIG"] and abs(span) <= self.t["NET"]
                 and now_ms - self.last_fired > self.t["COOLDOWN"]):
             self.last_fired = now_ms
             self.legs, self.cur = [], None
             self.fired += 1
 
 
-def shake(d, clock, low=200, high=560, strokes=4, step=40):
-    """Move the pointer between two heights a few times, the way a hand
-    does: several samples per stroke, tens of milliseconds apart."""
-    for i in range(strokes):
-        a, b = (low, high) if i % 2 == 0 else (high, low)
-        for y in range(a, b, step if b > a else -step):
-            d.motion(y, clock)
-            clock += 12
+def sweep(d, clock, a, b, step=20, dt=10):
+    """Move between two heights the way a hand does, sampled."""
+    for y in range(a, b, step if b > a else -step):
+        d.motion(y, clock)
+        clock += dt
     return clock
 
 
 def test_a_deliberate_shake_fires():
     d = Detector(thresholds())
-    shake(d, 0)
+    clock = 0
+    for i in range(4):
+        clock = sweep(d, clock, *((200, 560) if i % 2 == 0 else (560, 200)))
     assert d.fired == 1
 
 
-def test_ordinary_pointing_does_not_fire():
+def test_working_movement_does_not_fire():
+    """The log from real use: many direction changes and thousands of
+    pixels of travel inside a second, but the strokes are short."""
     t = thresholds()
     d = Detector(t)
     clock = 0
-    for i in range(400):            # small jitter, no real travel
-        d.motion(400 + (i % 4) * 5, clock)
-        clock += 25
+    y = 400
+    for i in range(600):
+        y += (60 if i % 2 == 0 else -55)      # busy, but no long stroke
+        d.motion(y, clock)
+        clock += 8
     assert d.fired == 0
 
 
 def test_a_long_drag_does_not_fire():
-    """All the travel of a shake, but one direction and it ends far from
-    where it began: that is someone dragging, not shaking."""
-    t = thresholds()
-    d = Detector(t)
-    clock = 0
-    for y in range(100, 1200, 20):
-        d.motion(y, clock)
-        clock += 15
+    d = Detector(thresholds())
+    clock = sweep(d, 0, 100, 1200)
+    assert d.fired == 0
+
+
+def test_two_long_strokes_are_not_enough():
+    """Down and back up is how a pointer reaches a menu and returns."""
+    d = Detector(thresholds())
+    clock = sweep(d, 0, 200, 560)
+    sweep(d, clock, 560, 200)
     assert d.fired == 0
 
 
@@ -109,16 +115,17 @@ def test_slow_movement_does_not_fire():
     t = thresholds()
     d = Detector(t)
     clock = 0
-    for i in range(8):              # same shape, far too slow
-        for y in (200, 560):
-            d.motion(y, clock)
-            clock += t["WINDOW"]
+    for i in range(6):                        # the right shape, too slow
+        a, b = (200, 560) if i % 2 == 0 else (560, 200)
+        clock = sweep(d, clock, a, b, dt=t["WINDOW"] // 4)
     assert d.fired == 0
 
 
 def test_cooldown_stops_a_repeat():
     d = Detector(thresholds())
-    clock = shake(d, 0, strokes=12)
+    clock = 0
+    for i in range(12):
+        clock = sweep(d, clock, *((200, 560) if i % 2 == 0 else (560, 200)))
     assert d.fired == 1
 
 

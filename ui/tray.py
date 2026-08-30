@@ -382,7 +382,7 @@ def on_gesture(name: str) -> None:
     worth printing while someone is tuning the thresholds, so they wait
     on gesture_debug. Settings are read live, so turning that on in the
     settings file takes effect without restarting anything."""
-    if name.startswith("shaking"):
+    if name.startswith("shaking") or name.startswith("stroke"):
         if settings.gestures.debug:
             _log(f"gesture: {name}")
         return
