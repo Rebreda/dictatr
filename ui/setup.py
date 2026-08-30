@@ -975,7 +975,10 @@ class Wizard(Gtk.ApplicationWindow):
         self.set_progress(None)
         self.busy(False)
         self.hub.set_icon_name(step.icon)
-        self.back_btn.set_tooltip_text("Back" if index else "Close")
+        # On the first step there is nothing to go back to, and the row
+        # already carries a close button; two controls that both close
+        # is one too many.
+        self.back_btn.set_visible(index > 0)
         self.step_label.set_label(
             f"Step {index + 1} of {len(self.steps)}")
         step.enter()

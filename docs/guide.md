@@ -157,6 +157,22 @@ writes a command, so a suggestion is always something you have seen
 before and nothing it returns is executed as code. "Ask about this"
 hands the same text to the voice chat instead.
 
+## Shaking the pointer
+
+Shove the pointer up and down a few times and the voice chat opens. It
+is for the moment your hand is on the mouse and the hotkey is not where
+your hand is.
+
+Wayland gives an app no pointer stream, so this is the compositor's
+doing as well: the KWin script watches `cursorPosChanged` and reports
+only the conclusion. The rule is deliberately hard to trigger by
+accident, because a gesture that fires while you are working is worse
+than no gesture. A sweep counts only if it covers 90 px, four of them
+must land inside 1.1 seconds, and there is a four second cooldown
+afterwards. Ordinary pointing reverses direction constantly but in small
+steps; dragging a scrollbar is long but slow; requiring both distance
+and speed excludes each. `gesture_shake = false` turns it off.
+
 ## What dictatr knows about where you are
 
 Wayland gives an app no way to ask which window has focus, so the
@@ -329,6 +345,7 @@ environment.
 | `DICTATE_NO_PORTAL` | unset | `1` disables the portal typing tier and the tray's portal hotkeys |
 | `DICTATE_LIVE_TYPING` | `true` | type words as they are transcribed; `false` inserts once at the end |
 | `DICTATE_ASK_CONTEXT` | `selection` | what ask mode may read: `selection`, `clipboard`, both (comma-separated), or empty |
+| `DICTATE_GESTURE_SHAKE` | `true` | shake the pointer up and down to open the voice chat (KDE) |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

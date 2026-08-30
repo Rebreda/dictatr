@@ -1,14 +1,19 @@
-// Report the focused window's application to the dictatr tray.
+// What the compositor knows and a Wayland client cannot ask: which
+// application has focus, and where the pointer is going.
 //
-// Wayland gives an app no way to ask what else is focused, and KWin's
-// only DBus answer (queryWindowInfo) makes the user click a window. A
-// compositor script is the way in: KWin already knows, and it can call
-// out over DBus. The tray loads this at startup and unloads it on exit.
+// The tray loads this at startup and unloads it on exit. Everything it
+// learns leaves over DBus; nothing is stored here.
 //
-// The class (org.mozilla.firefox, code, konsole) is what gets sent. The
-// caption is deliberately left behind: window titles carry document
-// names and URLs, and knowing which app you are in is enough to steer
-// recall.
+// KWin's script engine has no timers (no setInterval, no QML objects),
+// so anything periodic has to hang off a signal. That is why the shake
+// detector below is written as a state machine over motion events
+// rather than as a sampler.
+
+var TRAY = "io.github.rebreda.dictatr.tray";
+var OBJ = "/Shortcuts";
+var IFACE = "io.github.rebreda.dictatr.Shortcuts";
+
+// --- which application has focus -------------------------------------
 
 // Transient system surfaces (portal permission dialogs, the shortcut
 // prompt) steal focus for a moment and are not where the user is.
@@ -29,10 +34,63 @@ function report(window) {
     // The pid travels too: dictatr's own surfaces are layer-shell and
     // carry no app id, so they all report as the interpreter. The tray
     // recognises its own and keeps the app you were actually in.
-    callDBus("io.github.rebreda.dictatr.tray", "/Shortcuts",
-             "io.github.rebreda.dictatr.Shortcuts", "ActiveApp",
+    callDBus(TRAY, OBJ, IFACE, "ActiveApp",
              String(window.resourceClass || ""), String(window.pid || 0));
 }
 
 workspace.windowActivated.connect(report);
 report(workspace.activeWindow);
+
+// --- the panic shake --------------------------------------------------
+//
+// Shove the pointer up and down a few times and the voice chat opens.
+// It has to be a gesture nobody performs by accident, so a swing only
+// counts when it is fast and long: SWING is the distance a single
+// up-or-down sweep must cover, and the whole sequence must finish
+// inside WINDOW milliseconds. Ordinary pointing reverses direction
+// constantly but in small steps, and dragging a scrollbar is long but
+// slow; requiring both filters each of them out.
+
+var SWING = 90;        // px a sweep must cover to count as one
+var NEEDED = 4;        // sweeps (up, down, up, down) to fire
+var WINDOW = 1100;     // ms the whole sequence must fit inside
+var COOLDOWN = 4000;   // ms of quiet after firing
+
+var dir = 0;           // +1 down, -1 up, 0 unknown
+var pivot = -1;        // y where the current sweep began
+var sweeps = [];       // timestamps of completed sweeps
+var lastFired = 0;
+
+function now() {
+    return new Date().getTime();
+}
+
+function shake() {
+    var y = workspace.cursorPos.y;
+    if (pivot < 0) {
+        pivot = y;
+        return;
+    }
+    var travel = y - pivot;
+    var heading = travel > 0 ? 1 : -1;
+    if (heading !== dir) {          // direction changed: a sweep ended
+        if (Math.abs(travel) >= SWING) {
+            var t = now();
+            sweeps.push(t);
+            while (sweeps.length && t - sweeps[0] > WINDOW) {
+                sweeps.shift();
+            }
+            if (sweeps.length >= NEEDED && t - lastFired > COOLDOWN) {
+                lastFired = t;
+                sweeps = [];
+                callDBus(TRAY, OBJ, IFACE, "Gesture", "shake");
+            }
+        }
+        dir = heading;
+        pivot = y;
+    } else if (Math.abs(travel) > SWING * 2) {
+        pivot = y - heading * SWING;   // a long glide is not a sweep
+    }
+}
+
+workspace.cursorPosChanged.connect(shake);

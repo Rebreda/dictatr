@@ -220,6 +220,13 @@ class TypingSettings:
     live = Setting("DICTATE_LIVE_TYPING", "live_typing", True, bool)
 
 
+class GestureSettings:
+    # Pointer gestures the compositor watches for (KDE only: see
+    # ui/kwin/activewindow.js). Shake the pointer up and down to open
+    # the voice chat, for when a hotkey is not where your hand is.
+    shake: bool = Setting("DICTATE_GESTURE_SHAKE", "gesture_shake", True, bool)
+
+
 class Settings:
     # Audio source override for tests: a wav file streamed instead of
     # the mic. No config key: it is a test seam, not a preference.
@@ -234,6 +241,7 @@ class Settings:
         self.listen = ListenSettings()
         self.gc = GCSettings()
         self.notify = NotifySettings()
+        self.gestures = GestureSettings()
 
 
 settings = Settings()

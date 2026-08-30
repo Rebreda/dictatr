@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Check the wizard's widget tree and keyboard path without showing it.
+
+    tools/wizcheck        # exit 0 only when every assertion holds
+
+Builds a Wizard and pokes it, but never present()s the window, so it
+runs against a live session without putting anything on the screen —
+which is the only way to check a layer-shell surface on the machine
+someone is working on. Needs a display (GTK cannot build widgets
+without one), so it is a tool rather than a pytest case.
+
+What it pins down is what a redesign is most likely to quietly break:
+that the step indicator counts, that the choices exist and are readable,
+and that the keyboard can still drive setup. Nothing in the column is
+focusable, so the number keys and Return are the whole keyboard path;
+when they broke, they broke silently and only a mouse noticed.
+"""
+import os, sys, tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+# PyGObject and cairo live in the system python; a checkout's venv comes
+# first on PATH without them, which is exactly when this gets run.
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+sys.argv = [sys.argv[0]]
+scratch = tempfile.mkdtemp(prefix="wizcheck-")
+os.environ["XDG_CONFIG_HOME"] = scratch + "/config"
+os.environ["XDG_DATA_HOME"] = scratch + "/data"
+import importlib.util
+sys.path.insert(0, str(REPO / "src"))
+from dictatr.backend import detect, lemond
+detect.detect = lambda *a, **k: None
+lemond.alive = lambda *a, **k: False
+lemond.status = lambda: {"running": False, "api_base": None, "binary": None,
+                         "version": "11.8.0", "state_dir": "/tmp"}
+spec = importlib.util.spec_from_file_location("setup", REPO / "ui" / "setup.py")
+setup = importlib.util.module_from_spec(spec); sys.modules["setup"] = setup
+spec.loader.exec_module(setup)
+from gi.repository import Gdk, GLib, Gtk
+
+fired = []
+setup.Wizard._chose = lambda self, btn, b: fired.append(b.tooltip)
+fails = []
+
+def check():
+    w = setup.Wizard(app)
+    w._enter(0)
+    def after():
+        labels = []
+        for btn in w._choice_buttons():
+            row = btn.get_child()
+            c = row.get_first_child()
+            while c is not None:
+                if isinstance(c, Gtk.Label) and not c.has_css_class("choice-key"):
+                    labels.append(c.get_label())
+                c = c.get_next_sibling()
+        print(f"step label : {w.step_label.get_label()!r}")
+        print(f"choices    : {labels}")
+        if w.step_label.get_label() != "Step 1 of 3":
+            fails.append("step label wrong")
+        if len(labels) < 2:
+            fails.append(f"expected >=2 choices, got {labels}")
+
+        # keyboard: 2 picks the second, Return picks the first
+        fired.clear()
+        w._on_key(None, Gdk.KEY_2, 0, 0)
+        print(f"press '2'  -> {fired}")
+        if fired != [labels[1]]:
+            fails.append(f"key 2 fired {fired}, expected [{labels[1]!r}]")
+        fired.clear()
+        w._on_key(None, Gdk.KEY_Return, 0, 0)
+        print(f"press Enter-> {fired}")
+        if fired != [labels[0]]:
+            fails.append(f"Enter fired {fired}, expected [{labels[0]!r}]")
+        fired.clear()
+        handled = w._on_key(None, Gdk.KEY_9, 0, 0)
+        print(f"press '9'  -> handled={handled} fired={fired}")
+        if handled or fired:
+            fails.append("out-of-range digit should be ignored")
+
+        # step 2 of 3 after advancing
+        w._enter(1)
+        print(f"after advance: {w.step_label.get_label()!r}")
+        if w.step_label.get_label() != "Step 2 of 3":
+            fails.append("step label did not advance")
+
+        print("\nFAILURES:" if fails else "\nall checks passed")
+        for f in fails:
+            print("  -", f)
+        app.release()
+        app.quit()
+        return False
+    GLib.timeout_add(900, after)   # let the probe thread settle
+    return False
+
+app = Gtk.Application(application_id="io.github.rebreda.dictatr.wizcheck")
+def activate(a):
+    a.hold()          # no window is ever presented, so hold the loop open
+    check()
+app.connect("activate", activate)
+app.run([])
+sys.exit(1 if fails else 0)

@@ -36,6 +36,7 @@ DICTATE = str(REPO / "bin" / "dictate")
 ICONS = REPO / "ui" / "icons"
 sys.path.insert(0, str(REPO / "src"))
 from dictatr import deliver, runstate  # noqa: E402
+from dictatr.settings import settings  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
 import portal  # noqa: E402
@@ -107,6 +108,7 @@ CONTROL_XML = """<node>
   <method name="ActiveApp">
    <arg type="s" direction="in"/><arg type="s" direction="in"/>
   </method>
+  <method name="Gesture"><arg type="s" direction="in"/></method>
  </interface>
 </node>"""
 
@@ -357,6 +359,20 @@ def _kwin(bus, method, sig, args):
         return True
     except GLib.Error:
         return False
+
+
+# gesture name -> what it opens. The KWin script decides that a gesture
+# happened; what it means is dictatr's business, not the compositor's.
+GESTURES = {"shake": [str(REPO / "bin" / "dictate-chat")]}
+
+
+def on_gesture(name: str) -> None:
+    """Act on a pointer gesture the compositor spotted for us."""
+    if not settings.gestures.shake:
+        return
+    cmd = GESTURES.get(name)
+    if cmd:
+        subprocess.Popen(cmd, start_new_session=True)
 
 
 def _is_ours(pid: str) -> bool:
@@ -617,6 +633,8 @@ def main():
             app, pid = params.unpack()
             if not _is_ours(pid):
                 runstate.write_app(app)
+        elif method == "Gesture":
+            on_gesture(params.unpack()[0])
         inv.return_value(None)
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]
