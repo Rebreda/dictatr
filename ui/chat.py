@@ -28,7 +28,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+gi.require_version("GLibUnix", "2.0")
+from gi.repository import (Gdk, GLib, GLibUnix,  # noqa: E402
+                           Gtk, Pango)
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
@@ -215,9 +217,9 @@ class Chat(Gtk.ApplicationWindow):
 
         if self.shot:
             GLib.idle_add(self._show_shot)
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
                              self._commit_now)
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM,
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM,
                              self._discard_now)
         self.connect("close-request", self.on_close)
         self.start_turn()

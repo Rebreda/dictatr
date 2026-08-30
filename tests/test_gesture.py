@@ -15,7 +15,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "ui/kwin/activewindow.js"
 def thresholds():
     src = SCRIPT.read_text()
     return {name: int(re.search(rf"var {name} = (\d+)", src).group(1))
-            for name in ("SWING", "NEEDED", "WINDOW", "COOLDOWN")}
+            for name in ("TRAVEL", "LEGS", "DEADZONE", "WINDOW", "NET",
+                         "COOLDOWN")}
 
 
 class Detector:
@@ -23,74 +24,101 @@ class Detector:
 
     def __init__(self, t):
         self.t = t
-        self.dir = 0
-        self.pivot = -1
-        self.sweeps = []
+        self.legs = []
+        self.cur = None
+        self.last_y = -1
         self.last_fired = -10 ** 9
         self.fired = 0
 
     def motion(self, y, now_ms):
-        if self.pivot < 0:
-            self.pivot = y
+        if self.last_y < 0:
+            self.last_y = y
             return
-        travel = y - self.pivot
-        heading = 1 if travel > 0 else -1
-        if heading != self.dir:
-            if abs(travel) >= self.t["SWING"]:
-                self.sweeps.append(now_ms)
-                while self.sweeps and now_ms - self.sweeps[0] > self.t["WINDOW"]:
-                    self.sweeps.pop(0)
-                if (len(self.sweeps) >= self.t["NEEDED"]
-                        and now_ms - self.last_fired > self.t["COOLDOWN"]):
-                    self.last_fired = now_ms
-                    self.sweeps = []
-                    self.fired += 1
-            self.dir = heading
-            self.pivot = y
-        elif abs(travel) > self.t["SWING"] * 2:
-            self.pivot = y - heading * self.t["SWING"]
+        dy = y - self.last_y
+        self.last_y = y
+        if dy == 0:
+            return
+        d = 1 if dy > 0 else -1
+
+        if self.cur is None or d == self.cur["dir"]:
+            if self.cur is None:
+                self.cur = {"t": now_ms, "dist": 0, "dir": d}
+            self.cur["dist"] += abs(dy)
+            self.cur["t"] = now_ms
+        elif self.cur["dist"] >= self.t["DEADZONE"]:
+            self.legs.append(self.cur)
+            self.cur = {"t": now_ms, "dist": abs(dy), "dir": d}
+        else:
+            self.cur = {"t": now_ms, "dist": abs(dy), "dir": d}
+
+        while self.legs and now_ms - self.legs[0]["t"] > self.t["WINDOW"]:
+            self.legs.pop(0)
+
+        travel = self.cur["dist"] + sum(l["dist"] for l in self.legs)
+        span = (self.cur["dist"] * self.cur["dir"]
+                + sum(l["dist"] * l["dir"] for l in self.legs))
+        if (len(self.legs) + 1 >= self.t["LEGS"]
+                and travel >= self.t["TRAVEL"]
+                and abs(span) <= self.t["NET"]
+                and now_ms - self.last_fired > self.t["COOLDOWN"]):
+            self.last_fired = now_ms
+            self.legs, self.cur = [], None
+            self.fired += 1
 
 
-def test_a_deliberate_shake_fires_once():
-    t = thresholds()
-    d = Detector(t)
-    clock = 0
-    for _ in range(4):                      # four full up-down swings
-        for y in (200, 700):
+def shake(d, clock, low=200, high=560, strokes=4, step=40):
+    """Move the pointer between two heights a few times, the way a hand
+    does: several samples per stroke, tens of milliseconds apart."""
+    for i in range(strokes):
+        a, b = (low, high) if i % 2 == 0 else (high, low)
+        for y in range(a, b, step if b > a else -step):
             d.motion(y, clock)
-            clock += 70
-    assert d.fired == 1, "a shake should fire exactly once"
+            clock += 12
+    return clock
+
+
+def test_a_deliberate_shake_fires():
+    d = Detector(thresholds())
+    shake(d, 0)
+    assert d.fired == 1
 
 
 def test_ordinary_pointing_does_not_fire():
     t = thresholds()
     d = Detector(t)
     clock = 0
-    for i in range(300):                    # small jittery movements
-        d.motion(400 + (i % 5) * 6, clock)
-        clock += 30
+    for i in range(400):            # small jitter, no real travel
+        d.motion(400 + (i % 4) * 5, clock)
+        clock += 25
     assert d.fired == 0
 
 
-def test_slow_scrolling_does_not_fire():
+def test_a_long_drag_does_not_fire():
+    """All the travel of a shake, but one direction and it ends far from
+    where it began: that is someone dragging, not shaking."""
     t = thresholds()
     d = Detector(t)
     clock = 0
-    for _ in range(6):                      # long sweeps, but far too slow
-        for y in (150, 800):
+    for y in range(100, 1200, 20):
+        d.motion(y, clock)
+        clock += 15
+    assert d.fired == 0
+
+
+def test_slow_movement_does_not_fire():
+    t = thresholds()
+    d = Detector(t)
+    clock = 0
+    for i in range(8):              # same shape, far too slow
+        for y in (200, 560):
             d.motion(y, clock)
-            clock += 900
+            clock += t["WINDOW"]
     assert d.fired == 0
 
 
 def test_cooldown_stops_a_repeat():
-    t = thresholds()
-    d = Detector(t)
-    clock = 0
-    for _ in range(10):                     # kept shaking without pause
-        for y in (200, 700):
-            d.motion(y, clock)
-            clock += 70
+    d = Detector(thresholds())
+    clock = shake(d, 0, strokes=12)
     assert d.fired == 1
 
 

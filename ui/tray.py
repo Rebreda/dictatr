@@ -30,7 +30,9 @@ from pathlib import Path
 import gi
 
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import GdkPixbuf, Gio, GLib  # noqa: E402
+gi.require_version("GLibUnix", "2.0")
+from gi.repository import (GdkPixbuf, Gio,  # noqa: E402
+                           GLib, GLibUnix)
 
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
@@ -175,7 +177,8 @@ class Tray:
         for xml, path, handler in ((SNI_XML, "/StatusNotifierItem", self.on_sni),
                                    (MENU_XML, "/MenuBar", self.on_menu)):
             iface = Gio.DBusNodeInfo.new_for_xml(xml).interfaces[0]
-            bus.register_object(path, iface, handler, self.on_get_prop, None)
+            bus.register_object_with_closures2(
+                path, iface, handler, self.on_get_prop, None)
         Gio.bus_watch_name_on_connection(
             bus, "org.kde.StatusNotifierWatcher",
             Gio.BusNameWatcherFlags.NONE, self._register, None)
@@ -379,7 +382,7 @@ def on_gesture(name: str) -> None:
     worth printing while someone is tuning the thresholds, so they wait
     on gesture_debug. Settings are read live, so turning that on in the
     settings file takes effect without restarting anything."""
-    if name.startswith("sweep"):
+    if name.startswith("shaking"):
         if settings.gestures.debug:
             _log(f"gesture: {name}")
         return
@@ -676,7 +679,8 @@ def main():
         inv.return_value(None)
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]
-    bus.register_object("/Shortcuts", iface, on_call, None, None)
+    bus.register_object_with_closures2("/Shortcuts", iface,
+                                      on_call, None, None)
 
     watch_apps(bus)
 
@@ -688,7 +692,7 @@ def main():
         return GLib.SOURCE_REMOVE
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        GLib.unix_signal_add(GLib.PRIORITY_HIGH, sig, shutdown)
+        GLibUnix.signal_add(GLib.PRIORITY_HIGH, sig, shutdown)
     loop.run()
     return 0
 

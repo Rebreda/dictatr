@@ -165,13 +165,15 @@ your hand is.
 
 Wayland gives an app no pointer stream, so this is the compositor's
 doing as well: the KWin script watches `cursorPosChanged` and reports
-only the conclusion. The rule is deliberately hard to trigger by
-accident, because a gesture that fires while you are working is worse
-than no gesture. A sweep counts only if it covers 90 px, four of them
-must land inside 1.1 seconds, and there is a four second cooldown
-afterwards. Ordinary pointing reverses direction constantly but in small
-steps; dragging a scrollbar is long but slow; requiring both distance
-and speed excludes each. `gesture_shake = false` turns it off.
+only the conclusion.
+
+What counts as a shake is the two things a shake actually is: a lot of
+vertical travel (380 px) across several changes of direction (three
+strokes) inside a second and a half, ending up near where it began. A
+drag has the travel but no reversals and finishes somewhere else;
+ordinary pointing reverses constantly but covers little ground; each
+fails one half. Then four seconds of quiet before it can fire again.
+`gesture_shake = false` turns it off.
 
 To see whether it is firing, follow the tray's own output: `./dev logs`
 in a checkout, `journalctl --user -t dictatr-tray -f` for an installed

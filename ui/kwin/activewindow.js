@@ -43,22 +43,28 @@ report(workspace.activeWindow);
 
 // --- the panic shake --------------------------------------------------
 //
-// Shove the pointer up and down a few times and the voice chat opens.
-// It has to be a gesture nobody performs by accident, so a swing only
-// counts when it is fast and long: SWING is the distance a single
-// up-or-down sweep must cover, and the whole sequence must finish
-// inside WINDOW milliseconds. Ordinary pointing reverses direction
-// constantly but in small steps, and dragging a scrollbar is long but
-// slow; requiring both filters each of them out.
+// Shove the pointer up and down and the voice chat opens.
+//
+// The first rule counted discrete sweeps, each of which had to cover a
+// fixed distance on its own, and in practice the count kept resetting:
+// a real shake is not four tidy equal strokes, and cursorPosChanged
+// samples a fast movement coarsely enough to swallow a reversal whole.
+// This measures the two things a shake actually is, over a window: a
+// lot of vertical travel, and several changes of direction, ending up
+// roughly where it started. A drag has the travel but no reversals and
+// a large net displacement; ordinary pointing has reversals but little
+// travel.
 
-var SWING = 90;        // px a sweep must cover to count as one
-var NEEDED = 4;        // sweeps (up, down, up, down) to fire
-var WINDOW = 1100;     // ms the whole sequence must fit inside
+var TRAVEL = 380;      // px of vertical movement inside the window
+var LEGS = 3;          // up/down strokes (so at least two reversals)
+var DEADZONE = 25;     // px: shorter strokes are jitter, not direction
+var WINDOW = 1500;     // ms the whole thing must fit inside
+var NET = 300;         // px: end near where you began, or it was a move
 var COOLDOWN = 4000;   // ms of quiet after firing
 
-var dir = 0;           // +1 down, -1 up, 0 unknown
-var pivot = -1;        // y where the current sweep began
-var sweeps = [];       // timestamps of completed sweeps
+var legs = [];         // {t, dist, dir} for recent strokes
+var cur = null;        // the stroke in progress
+var lastY = -1;
 var lastFired = 0;
 
 function now() {
@@ -67,35 +73,55 @@ function now() {
 
 function shake() {
     var y = workspace.cursorPos.y;
-    if (pivot < 0) {
-        pivot = y;
+    if (lastY < 0) {
+        lastY = y;
         return;
     }
-    var travel = y - pivot;
-    var heading = travel > 0 ? 1 : -1;
-    if (heading !== dir) {          // direction changed: a sweep ended
-        if (Math.abs(travel) >= SWING) {
-            var t = now();
-            sweeps.push(t);
-            while (sweeps.length && t - sweeps[0] > WINDOW) {
-                sweeps.shift();
-            }
-            // Every sweep is reported, not just the fourth: tuning
-            // this by feel needs to show near misses, and the tray
-            // stays quiet about them unless asked (gesture_debug).
-            callDBus(TRAY, OBJ, IFACE, "Gesture",
-                     "sweep " + sweeps.length + "/" + NEEDED +
-                     " travel=" + Math.round(Math.abs(travel)));
-            if (sweeps.length >= NEEDED && t - lastFired > COOLDOWN) {
-                lastFired = t;
-                sweeps = [];
-                callDBus(TRAY, OBJ, IFACE, "Gesture", "shake");
-            }
+    var dy = y - lastY;
+    lastY = y;
+    if (dy === 0) {
+        return;
+    }
+    var dir = dy > 0 ? 1 : -1;
+    var t = now();
+
+    if (cur === null || dir === cur.dir) {
+        if (cur === null) {
+            cur = {t: t, dist: 0, dir: dir};
         }
-        dir = heading;
-        pivot = y;
-    } else if (Math.abs(travel) > SWING * 2) {
-        pivot = y - heading * SWING;   // a long glide is not a sweep
+        cur.dist += Math.abs(dy);
+        cur.t = t;
+    } else if (cur.dist >= DEADZONE) {
+        legs.push(cur);                    // a real change of direction
+        cur = {t: t, dist: Math.abs(dy), dir: dir};
+    } else {
+        cur = {t: t, dist: Math.abs(dy), dir: dir};   // jitter, restart
+    }
+
+    while (legs.length && t - legs[0].t > WINDOW) {
+        legs.shift();
+    }
+
+    var travel = cur.dist;
+    var span = 0;
+    for (var i = 0; i < legs.length; i++) {
+        travel += legs[i].dist;
+        span += legs[i].dist * legs[i].dir;
+    }
+    span += cur.dist * cur.dir;
+
+    if (legs.length + 1 >= LEGS) {
+        callDBus(TRAY, OBJ, IFACE, "Gesture",
+                 "shaking legs=" + (legs.length + 1) + "/" + LEGS +
+                 " travel=" + Math.round(travel) + "/" + TRAVEL +
+                 " net=" + Math.round(Math.abs(span)));
+    }
+    if (legs.length + 1 >= LEGS && travel >= TRAVEL &&
+            Math.abs(span) <= NET && t - lastFired > COOLDOWN) {
+        lastFired = t;
+        legs = [];
+        cur = null;
+        callDBus(TRAY, OBJ, IFACE, "Gesture", "shake");
     }
 }
 
