@@ -1,5 +1,5 @@
 Name:           dictatr
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Hotkey voice dictation for Wayland desktops
 License:        MIT
@@ -78,6 +78,39 @@ bash packaging/stage.sh %{buildroot}
 %{_mandir}/man1/dictate*.1*
 
 %changelog
+* Sun Aug 30 2026 Rebreda - 0.5.0-1
+- Recordings move to ~/.local/share/dictatr/archive, out of listenr's
+  directory. An existing ~/.listenr/dictation is left where it is until
+  tools/archive-migrate --go moves it, and an explicit archive= or
+  DICTATE_ARCHIVE still wins; dictatr says the script exists once per
+  command until it is run
+- Ask about a screen region (Ctrl+Alt+G): drag out a region, crop, mark
+  up or redact it, and the picture goes to the vision model with the
+  question you then speak or type
+- Selection actions on a ring (Ctrl+Alt+S): what dictatr can do with the
+  highlighted text, on screen at once and replaced by the model's
+  shortlist for that text a moment later. The model only ever picks from
+  the catalogue, so every action is one you have seen
+- A hotkey for the voice chat (Ctrl+Alt+Q), which now takes typed
+  questions as well as spoken ones, and offers what to do next with an
+  answer instead of ending at it
+- Conversations are kept: each is written as it happens to
+  chats/YYYY-MM-DD/chat_<uid>.jsonl in the archive, assets beside it
+- Pointer gestures on KDE: shake the pointer, or draw a circle, to run
+  any of the shortcuts. Off unless mapped, except a vertical shake,
+  which opens the voice chat. gesture_shake_v = "" turns it off
+- The chat can show its working (chat_details): the context it read,
+  what it recalled, every tool it called and what came back
+- dictatr knows which application has focus, so a dictation records the
+  app it was spoken in and recall prefers what you said in the app in
+  front of you. The class only, never the window title
+- Settings are read when they are used, so a value the settings window
+  or the wizard writes reaches the tray, the chat and the listener
+  without restarting any of them
+- Diagnostics are named topics now: debug = "gesture" logs every trace
+  the compositor hands over with the measurements behind the verdict
+- Notifications from the menu and the tray respect the categories in
+  Settings, which they previously bypassed
 * Sat Aug 29 2026 Rebreda - 0.4.0-1
 - Type as you speak: words land at the cursor while the utterance is
   still being transcribed, erasing back to the part that still matches
