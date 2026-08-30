@@ -7,6 +7,8 @@ a 4K panel stand in for the range.
 """
 
 import math
+import pathlib
+import re
 
 import pytest
 
@@ -106,3 +108,115 @@ def test_parse_reads_what_the_script_sends():
 def test_a_half_circle_is_not_a_circle():
     w, h = 2880, 1800
     assert gestures.classify(circle(w, h, turns=0.5), h) != "circle-cw"
+
+
+def test_debug_topics(monkeypatch):
+    """Diagnostics are opt-in per topic, so turning one on does not
+    subscribe you to every other firehose."""
+    from dictatr.settings import DebugSettings
+
+    d = DebugSettings()
+    monkeypatch.delenv("DICTATE_DEBUG", raising=False)
+    assert "gesture" not in d                      # off by default
+
+    monkeypatch.setenv("DICTATE_DEBUG", "gesture")
+    assert "gesture" in d
+    assert "backend" not in d
+
+    monkeypatch.setenv("DICTATE_DEBUG", " backend , gesture ")
+    assert "gesture" in d and "backend" in d
+
+    monkeypatch.setenv("DICTATE_DEBUG", "all")
+    assert "gesture" in d and "anything" in d
+
+
+# --- the compositor's prefilter and the classifier must agree ----------
+#
+# The KWin script cannot import any of this, so the numbers it gates on
+# are written out twice. What keeps them honest is that each is only
+# ever a looser version of the rule gestures.py applies: the script may
+# forward something the tray then rejects, but it must never drop
+# something the tray would have accepted.
+
+SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "ui/kwin/activewindow.js"
+
+
+def js_consts():
+    src = SCRIPT.read_text()
+    return {name: float(re.search(rf"var {name} = ([\d.]+)", src).group(1))
+            for name in ("GATE", "RETURN_MAX", "SPAN_MS", "STEP", "MAX_POINTS")}
+
+
+def test_script_gate_does_not_forward_certain_rejects():
+    """A trace under MIN_PATH is rejected on arrival, so handing one
+    over is a few kilobytes and a wakeup spent to learn nothing."""
+    assert js_consts()["GATE"] >= gestures.MIN_PATH
+
+
+def test_script_prefilter_cannot_drop_a_real_gesture():
+    """The script's return check has to be the looser of the two, or a
+    gesture the tray would have named never reaches it."""
+    assert js_consts()["RETURN_MAX"] >= gestures.MAX_RETURN
+
+
+def test_script_window_fits_the_classifier():
+    assert js_consts()["SPAN_MS"] / 1000.0 <= gestures.MAX_SECONDS
+
+
+def dense(w, h, kind, rate=125, span_ms=1200):
+    """A trace at a real pointer's reporting rate, where the shared
+    helpers above are already coarser than the script's STEP and so
+    have nothing to thin."""
+    n = int(span_ms * rate / 1000)
+    pts = []
+    for i in range(n):
+        u = i / (n - 1)
+        if kind == "shake":
+            x, y = w / 2, h / 2 + h * 0.22 * math.sin(2 * math.pi * 2 * u)
+        else:
+            a = 2 * math.pi * u
+            x, y = w / 2 + h * 0.16 * math.cos(a), h / 2 + h * 0.16 * math.sin(a)
+        pts.append((span_ms * u, x, y))
+    return pts
+
+
+def decimate(points, min_px):
+    """What the KWin script now keeps of a trace."""
+    kept = [points[0]]
+    for t, x, y in points[1:]:
+        if math.hypot(x - kept[-1][1], y - kept[-1][2]) >= min_px:
+            kept.append((t, x, y))
+    return kept
+
+
+@pytest.mark.parametrize("w,h", SCREENS)
+@pytest.mark.parametrize("kind,expected", [("shake", "shake-v"),
+                                           ("circle", "circle-cw")])
+@pytest.mark.parametrize("rate", [125, 1000])
+def test_decimation_does_not_change_the_verdict(w, h, kind, expected, rate):
+    """Thinning to one point per STEP screen heights must not move an
+    answer, whatever the pointer reports at."""
+    full = dense(w, h, kind, rate=rate)
+    assert gestures.classify(full, h) == expected
+    thinned = decimate(full, js_consts()["STEP"] * h)
+    assert gestures.classify(thinned, h) == expected
+
+
+@pytest.mark.parametrize("w,h", SCREENS)
+def test_decimation_makes_a_trace_cost_what_it_is_worth(w, h):
+    """The point of thinning is not a fixed saving; it is that the size
+    of a trace follows the movement instead of the hardware.
+
+    A gaming mouse reports eight times as often as a touchpad and draws
+    the same circle. Undecimated it sends eight times the bytes and
+    costs eight times the work at the far end, all of it sub-pixel steps
+    that are quantisation noise. Decimated, the gap closes to under two:
+    greedy thinning cannot do better, because a coarse input divides
+    into STEP with a remainder, but 8x to 2x is the whole point."""
+    step = js_consts()["STEP"] * h
+    slow = len(decimate(dense(w, h, "circle", rate=125), step))
+    fast = len(decimate(dense(w, h, "circle", rate=1000), step))
+    raw_ratio = len(dense(w, h, "circle", rate=1000)) / len(dense(w, h, "circle", rate=125))
+    assert raw_ratio == pytest.approx(8, rel=0.05)      # what arrives
+    assert fast / slow < 2.0                             # what is kept
+    assert fast <= len(dense(w, h, "circle", rate=1000)) * 0.25

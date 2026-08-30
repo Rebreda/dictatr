@@ -278,8 +278,32 @@ class GestureSettings:
     shake_h = Setting("DICTATE_GESTURE_SHAKE_H", "gesture_shake_h", "")
     circle_cw = Setting("DICTATE_GESTURE_CIRCLE_CW", "gesture_circle_cw", "")
     circle_ccw = Setting("DICTATE_GESTURE_CIRCLE_CCW", "gesture_circle_ccw", "")
-    # Log every trace with its measurements, for tuning.
-    debug = Setting("DICTATE_GESTURE_DEBUG", "gesture_debug", False, bool)
+
+
+class DebugSettings:
+    """Which diagnostics are on: a comma-separated list of topics, or
+    "all". Empty by default, and deliberately absent from the settings
+    window and the wizard -- these are firehoses for tuning and for bug
+    reports, not preferences, and a checkbox only invites turning one on
+    by accident.
+
+    A list rather than one switch because the topics are unrelated and
+    each is loud: whoever is tuning a gesture should not have to read
+    everything else at the same time.
+
+    Topics:
+      gesture  every trace the compositor hands over, with the
+               measurements behind the verdict (src/dictatr/gestures.py)
+
+    Read live, like every other setting, so a topic can be turned on in
+    the config file without restarting anything.
+    """
+
+    topics = Setting("DICTATE_DEBUG", "debug", "")
+
+    def __contains__(self, topic: str) -> bool:
+        wanted = {t.strip() for t in self.topics.split(",") if t.strip()}
+        return "all" in wanted or topic in wanted
 
 
 class Settings:
@@ -298,6 +322,7 @@ class Settings:
         self.gc = GCSettings()
         self.notify = NotifySettings()
         self.gestures = GestureSettings()
+        self.debug = DebugSettings()
 
 
 settings = Settings()

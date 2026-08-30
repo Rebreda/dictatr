@@ -388,9 +388,9 @@ def on_trace(blob: str) -> None:
     width, height, points = gestures.parse(blob)
     if not points or not height:
         return
-    name = gestures.classify(points, height)
-    if settings.gestures.debug:
-        _log(f"trace {name or '-'}: {gestures.describe(points, height)}")
+    name, numbers = gestures.judge(points, height)
+    if "gesture" in settings.debug:
+        _log(f"trace {name or '-'}: {numbers}")
     if name is None:
         return
     action = getattr(settings.gestures, GESTURE_KEYS[name].replace(

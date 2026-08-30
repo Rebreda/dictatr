@@ -112,15 +112,12 @@ def _features(points, height):
     }
 
 
-def classify(points, height: int) -> str | None:
-    """Name the gesture in *points*, or None for ordinary movement.
+def _verdict(f) -> str | None:
+    """Name the gesture the features describe, or None.
 
     Ordinary work is the class that matters: it produces far more traces
     than gestures do, so every rule here is written to reject rather
     than to match."""
-    if height <= 0 or len(points) < 8:
-        return None
-    f = _features(points, height)
     if (f["seconds"] > MAX_SECONDS or f["seconds"] <= 0
             or f["path"] < MIN_PATH
             or f["return_ratio"] > MAX_RETURN):
@@ -143,13 +140,32 @@ def classify(points, height: int) -> str | None:
     return None
 
 
-def describe(points, height: int) -> str:
+def _report(f) -> str:
     """The numbers behind a verdict, for the log while tuning."""
-    if height <= 0 or len(points) < 8:
-        return "too short"
-    f = _features(points, height)
     return (f"path={f['path']:.2f} back={f['return_ratio']:.2f} "
             f"s={f['seconds']:.2f} "
             f"turn={f['turn']:.1f}/{f['turn_abs']:.1f} max={f['turn_max']:.1f} "
             f"vert={f['vertical']:.2f} "
             f"strokes={f['strokes_x']}x/{f['strokes_y']}y")
+
+
+def judge(points, height: int):
+    """The verdict and the numbers behind it, from one pass.
+
+    The tray wants both whenever the gesture debug topic is on, and
+    measuring the same trace twice to get them is pure waste on a path
+    that runs for every trace the compositor hands over."""
+    if height <= 0 or len(points) < 8:
+        return None, "too short"
+    f = _features(points, height)
+    return _verdict(f), _report(f)
+
+
+def classify(points, height: int) -> str | None:
+    """Name the gesture in *points*, or None for ordinary movement."""
+    return judge(points, height)[0]
+
+
+def describe(points, height: int) -> str:
+    """The measurements behind what classify() decided."""
+    return judge(points, height)[1]

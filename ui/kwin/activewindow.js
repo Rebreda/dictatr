@@ -54,7 +54,10 @@ report(workspace.activeWindow);
 // same thing on a laptop panel and a 4K monitor.
 
 var SPAN_MS = 1600;        // how much movement to remember
-var GATE = 0.4;            // screen heights of movement worth judging
+var GATE = 0.45;           // screen heights of movement worth judging
+var RETURN_MAX = 0.4;      // end displacement, as a share of what was drawn
+var STEP = 0.008;          // screen heights: nearer than this is the same place
+var MAX_POINTS = 256;      // backstop on how long a trail may grow
 var QUIET_MS = 900;        // wait after handing one over
 
 var trail = [];            // {t, x, y}
@@ -73,18 +76,30 @@ function screenHeight() {
 function watch() {
     var p = workspace.cursorPos;
     var t = now();
+    var h = screenHeight();
     var last = trail.length ? trail[trail.length - 1] : null;
     if (last) {
         var dx = p.x - last.x;
         var dy = p.y - last.y;
-        if (dx === 0 && dy === 0) {
+        var step = Math.sqrt(dx * dx + dy * dy);
+        // A pointer reports far finer than a gesture is drawn: a step
+        // is a pixel or two, which is quantisation noise and not shape.
+        // Thinning here makes what a trace costs follow the movement
+        // instead of the hardware -- a 1000Hz mouse and a 125Hz
+        // touchpad drawing the same circle send about the same trace,
+        // where before one sent eight times the other. No verdict in
+        // gestures.py moves; there is a test for that. Dropping the
+        // point rather than only omitting it from the message also
+        // keeps drawn measured over exactly what the tray will see.
+        if (step < STEP * h) {
             return;
         }
-        drawn += Math.sqrt(dx * dx + dy * dy);
+        drawn += step;
     }
     trail.push({t: t, x: p.x, y: p.y});
 
-    while (trail.length > 1 && t - trail[0].t > SPAN_MS) {
+    while (trail.length > 1 &&
+           (t - trail[0].t > SPAN_MS || trail.length > MAX_POINTS)) {
         var a = trail.shift();
         var b = trail[0];
         drawn -= Math.sqrt((b.x - a.x) * (b.x - a.x) +
@@ -94,8 +109,20 @@ function watch() {
         drawn = 0;
     }
 
-    var h = screenHeight();
     if (drawn < GATE * h || t - handedAt < QUIET_MS || trail.length < 8) {
+        return;
+    }
+    // The one judgement worth making here, because it is the cheapest
+    // and it rejects the commonest movement there is: a gesture ends
+    // near where it began, and a sweep across the screen does not. The
+    // tray would reach the same verdict after parsing a few kilobytes.
+    // Deliberately looser than MAX_RETURN in gestures.py, so nothing
+    // the tray would have accepted can be dropped here; the tray still
+    // decides. Checked on every event, so a shake that is lopsided
+    // halfway through is simply handed over once it comes back.
+    var ex = trail[trail.length - 1].x - trail[0].x;
+    var ey = trail[trail.length - 1].y - trail[0].y;
+    if (Math.sqrt(ex * ex + ey * ey) > RETURN_MAX * drawn) {
         return;
     }
     handedAt = t;
