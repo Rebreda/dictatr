@@ -157,33 +157,41 @@ writes a command, so a suggestion is always something you have seen
 before and nothing it returns is executed as code. "Ask about this"
 hands the same text to the voice chat instead.
 
-## Shaking the pointer
+## Pointer gestures
 
-Shove the pointer up and down a few times and the voice chat opens. It
-is for the moment your hand is on the mouse and the hotkey is not where
-your hand is.
+Shake the pointer up and down and the voice chat opens. Four gestures
+are recognised, and each can be bound to any of the shortcut actions
+(chat, menu, suggest, dictate, listen, shot) or left unbound:
 
-Wayland gives an app no pointer stream, so this is the compositor's
-doing as well: the KWin script watches `cursorPosChanged` and reports
-only the conclusion.
+| Gesture | Config key | Default |
+| --- | --- | --- |
+| shake up and down | `gesture_shake_v` | `chat` |
+| shake left and right | `gesture_shake_h` | unbound |
+| circle clockwise | `gesture_circle_cw` | unbound |
+| circle anticlockwise | `gesture_circle_ccw` | unbound |
 
-What counts as a shake is the two things a shake actually is: a lot of
-vertical travel (380 px) across several changes of direction (three
-strokes) inside a second and a half, ending up near where it began. A
-drag has the travel but no reversals and finishes somewhere else;
-ordinary pointing reverses constantly but covers little ground; each
-fails one half. Then four seconds of quiet before it can fire again.
-`gesture_shake = false` turns it off.
+Wayland gives an app no pointer stream, so the compositor does the
+watching: the KWin script keeps the last 1.6 seconds of movement and,
+once it covers more than 0.4 screen heights, hands the trace to the
+tray. It decides nothing itself. What was drawn is worked out in
+[gestures.py](../src/dictatr/gestures.py), which is where the rules can
+be tested against traces rather than against a person waving a mouse.
 
-To see whether it is firing, follow the tray's own output: `./dev logs`
-in a checkout, `journalctl --user -t dictatr-tray -f` for an installed
-one. A gesture logs one line. Set `gesture_debug = true` and every
-counted sweep is logged too, with how far it travelled and how many of
-the four it is, which is what tuning SWING and WINDOW against your own
-hand needs. The setting is read live, so it takes effect without
-restarting the tray.
+Everything is measured in screen heights, never pixels: a gesture that
+wants 220px is a different movement on a laptop panel than on a 4K
+monitor, while one that wants a third of the screen is the same
+movement everywhere. The test suite runs every case at 1080p, 1800p and
+4K for that reason.
 
-## What dictatr knows about where you are
+What separates a gesture from ordinary work is shape, not size. A
+gesture returns to near where it began (end displacement under a third
+of the distance drawn), which excludes dragging; a circle bends gently
+at every step and is as wide as it is tall, which excludes a shake,
+whose half-turn at each end sums to the same total turning while
+looking nothing like a circle. `gesture_debug = true` logs every judged
+trace with its measurements, which is how those numbers were chosen.
+
+## What dictatr knows about where you are## What dictatr knows about where you are
 
 Wayland gives an app no way to ask which window has focus, so the
 knowledge comes from the compositor: on KDE the tray loads a small KWin
@@ -299,10 +307,11 @@ dictatr talks to an OpenAI-compatible inference server through one
 provider seam (`src/dictatr/backend/`). Three provider kinds, picked
 automatically unless `backend` is set in config.toml:
 
-- **managed**: dictatr's own private `lemond` (the Lemonade daemon).
-  The binary is vendored by the packages at `/usr/lib/dictatr/lemond`
-  or downloaded once to `~/.local/share/dictatr/lemond` (sha256-pinned
-  release; see `packaging/lemond-version.env`). The instance keeps its
+- **managed**: dictatr's own private `lemond` (the Lemonade daemon),
+  downloaded once to `~/.local/share/dictatr/lemond` (sha256-pinned
+  release; the pin lives in `src/dictatr/backend/lemond.py`). A distro
+  package may instead provide it at `/usr/lib/dictatr/lemond/lemond`,
+  which is preferred when present. The instance keeps its
   state in `~/.local/share/dictatr/lemonade` with its own port and a
   generated API key, runs with `--no-broadcast`, and stores models in
   the shared HuggingFace cache so other local-AI apps reuse them.
@@ -355,8 +364,11 @@ environment.
 | `DICTATE_NO_PORTAL` | unset | `1` disables the portal typing tier and the tray's portal hotkeys |
 | `DICTATE_LIVE_TYPING` | `true` | type words as they are transcribed; `false` inserts once at the end |
 | `DICTATE_ASK_CONTEXT` | `selection` | what ask mode may read: `selection`, `clipboard`, both (comma-separated), or empty |
-| `DICTATE_GESTURE_SHAKE` | `true` | shake the pointer up and down to open the voice chat (KDE) |
-| `DICTATE_GESTURE_DEBUG` | `false` | log every counted sweep, for tuning the shake thresholds |
+| `DICTATE_GESTURE_SHAKE_V` | `chat` | what an up-and-down shake does; empty to unbind (KDE) |
+| `DICTATE_GESTURE_SHAKE_H` | unset | what a left-and-right shake does |
+| `DICTATE_GESTURE_CIRCLE_CW` | unset | what a clockwise circle does |
+| `DICTATE_GESTURE_CIRCLE_CCW` | unset | what an anticlockwise circle does |
+| `DICTATE_GESTURE_DEBUG` | `false` | log every judged trace with its measurements |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

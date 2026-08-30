@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """System tray icon for dictatr: mic state at a glance, quick actions.
 
 A StatusNotifierItem + com.canonical.dbusmenu implemented directly over
@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
 ICONS = REPO / "ui" / "icons"
 sys.path.insert(0, str(REPO / "src"))
-from dictatr import deliver, runstate  # noqa: E402
+from dictatr import deliver, gestures, runstate  # noqa: E402
 from dictatr.settings import settings  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
@@ -111,7 +111,7 @@ CONTROL_XML = """<node>
   <method name="ActiveApp">
    <arg type="s" direction="in"/><arg type="s" direction="in"/>
   </method>
-  <method name="Gesture"><arg type="s" direction="in"/></method>
+  <method name="Trace"><arg type="s" direction="in"/></method>
  </interface>
 </node>"""
 
@@ -370,32 +370,44 @@ def _kwin(bus, method, sig, args):
         return False
 
 
-# gesture name -> what it opens. The KWin script decides that a gesture
-# happened; what it means is dictatr's business, not the compositor's.
-GESTURES = {"shake": [str(REPO / "bin" / "dictate-chat")]}
+# Which shortcut each gesture performs. The names are the ones in
+# ui/shortcuts.py, so a gesture and a hotkey are the same catalogue.
+GESTURE_KEYS = {
+    "shake-v": "gesture_shake_v",
+    "shake-h": "gesture_shake_h",
+    "circle-cw": "gesture_circle_cw",
+    "circle-ccw": "gesture_circle_ccw",
+}
 
 
-def on_gesture(name: str) -> None:
-    """Act on a pointer gesture the compositor spotted for us.
+def on_trace(blob: str) -> None:
+    """Judge a stretch of pointer movement the compositor handed over.
 
-    Sweeps are the near misses on the way to a gesture; they are only
-    worth printing while someone is tuning the thresholds, so they wait
-    on gesture_debug. Settings are read live, so turning that on in the
-    settings file takes effect without restarting anything."""
-    if name.startswith("shaking") or name.startswith("stroke"):
-        if settings.gestures.debug:
-            _log(f"gesture: {name}")
+    The compositor only knows that something happened; what it was, and
+    whether it was anything at all, is decided here."""
+    width, height, points = gestures.parse(blob)
+    if not points or not height:
         return
-    if not settings.gestures.shake:
+    name = gestures.classify(points, height)
+    if settings.gestures.debug:
+        _log(f"trace {name or '-'}: {gestures.describe(points, height)}")
+    if name is None:
         return
-    cmd = GESTURES.get(name)
+    action = getattr(settings.gestures, GESTURE_KEYS[name].replace(
+        "gesture_", ""), "")
+    if not action:
+        return
+    cmd = next((c for sid, _d, _t, c in PORTAL_SHORTCUTS if sid == action),
+               None)
     if cmd:
-        _log(f"gesture: {name} -> {Path(cmd[0]).name}")
+        _log(f"gesture {name} -> {action}")
         spawn(cmd, start_new_session=True)
 
 
 # Everything the tray launches, kept until it is reaped. The tray
-# outlives its children by design, so nothing else will.
+# outlives its children by design, so nothing else will: an unreaped
+# one lingers as a zombie that still answers kill(pid, 0), which is
+# indistinguishable from a live session to anything watching pidfiles.
 _CHILDREN = []
 
 
@@ -674,8 +686,8 @@ def main():
             app, pid = params.unpack()
             if not _is_ours(pid):
                 runstate.write_app(app)
-        elif method == "Gesture":
-            on_gesture(params.unpack()[0])
+        elif method == "Trace":
+            on_trace(params.unpack()[0])
         inv.return_value(None)
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]

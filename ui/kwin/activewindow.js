@@ -41,102 +41,71 @@ function report(window) {
 workspace.windowActivated.connect(report);
 report(workspace.activeWindow);
 
-// --- the panic shake --------------------------------------------------
+// --- pointer gestures --------------------------------------------------
 //
-// Shove the pointer up and down and the voice chat opens.
+// This end stays deliberately stupid. The script engine has no timers,
+// no numbers library and nothing here can be tested, so it does not
+// decide anything: it keeps the last stretch of pointer movement and,
+// when enough has happened to be worth a look, hands the trace to the
+// tray. Every judgement about what was drawn is made in
+// src/dictatr/gestures.py, where it can be tested against traces.
 //
-// Two rules were wrong before this one, and the debug log said why.
-// Counting fixed-length sweeps never got past one, because a shake is
-// not tidy equal strokes. Measuring total travel fired constantly:
-// ordinary work racks up 1500-3000px of vertical movement and fifteen
-// changes of direction inside a second and a half, and usually ends up
-// near where it started, which is every condition that rule had.
-//
-// What separates them is not how much movement, but its shape: a shake
-// is a few LONG strokes in quick alternation. Ordinary pointing makes
-// many short ones. So only strokes past STROKE count at all, and BIG of
-// them must land inside WINDOW.
+// The gate is in screen heights rather than pixels, so it means the
+// same thing on a laptop panel and a 4K monitor.
 
-var STROKE = 220;      // px: shorter strokes are movement, not a shake
-var BIG = 4;           // long strokes needed, alternating by nature
-var WINDOW = 800;      // ms they must all fall inside
-var DEADZONE = 60;     // px before a direction change ends a stroke
-var NET = 200;         // px: end near where you began
-var COOLDOWN = 4000;   // ms of quiet after firing
+var SPAN_MS = 1600;        // how much movement to remember
+var GATE = 0.4;            // screen heights of movement worth judging
+var QUIET_MS = 900;        // wait after handing one over
 
-var legs = [];         // completed strokes: {t, dist, dir}
-var cur = null;
-var lastY = -1;
-var lastFired = 0;
+var trail = [];            // {t, x, y}
+var drawn = 0;             // distance in the trail, in pixels
+var handedAt = 0;
 
 function now() {
     return new Date().getTime();
 }
 
-function shake() {
-    var y = workspace.cursorPos.y;
-    if (lastY < 0) {
-        lastY = y;
-        return;
-    }
-    var dy = y - lastY;
-    lastY = y;
-    if (dy === 0) {
-        return;
-    }
-    var dir = dy > 0 ? 1 : -1;
-    var t = now();
-
-    if (cur === null || dir === cur.dir) {
-        if (cur === null) {
-            cur = {t: t, t0: t, dist: 0, dir: dir};
-        }
-        cur.dist += Math.abs(dy);
-        cur.t = t;
-    } else if (cur.dist >= DEADZONE) {
-        legs.push(cur);
-        // Every completed stroke, so the thresholds can be chosen from
-        // how a person actually moves rather than from guesswork.
-        callDBus(TRAY, OBJ, IFACE, "Gesture",
-                 "stroke dist=" + Math.round(cur.dist) +
-                 " ms=" + (t - cur.t0));
-        cur = {t: t, t0: t, dist: Math.abs(dy), dir: dir};
-    } else {
-        cur = {t: t, t0: t, dist: Math.abs(dy), dir: dir};   // jitter, restart
-    }
-
-    while (legs.length && t - legs[0].t > WINDOW) {
-        legs.shift();
-    }
-
-    var big = 0;
-    var travel = 0;
-    var span = 0;
-    for (var i = 0; i < legs.length; i++) {
-        if (legs[i].dist >= STROKE) {
-            big += 1;
-        }
-        travel += legs[i].dist;
-        span += legs[i].dist * legs[i].dir;
-    }
-    if (cur.dist >= STROKE) {          // the stroke in progress counts too
-        big += 1;
-    }
-    travel += cur.dist;
-    span += cur.dist * cur.dir;
-
-    if (big >= BIG - 1 && big > 1) {              // quiet until it is nearly there
-        callDBus(TRAY, OBJ, IFACE, "Gesture",
-                 "shaking long=" + big + "/" + BIG +
-                 " travel=" + Math.round(travel) +
-                 " net=" + Math.round(Math.abs(span)));
-    }
-    if (big >= BIG && Math.abs(span) <= NET && t - lastFired > COOLDOWN) {
-        lastFired = t;
-        legs = [];
-        cur = null;
-        callDBus(TRAY, OBJ, IFACE, "Gesture", "shake");
-    }
+function screenHeight() {
+    var size = workspace.virtualScreenSize;
+    return size && size.height ? size.height : 1080;
 }
 
-workspace.cursorPosChanged.connect(shake);
+function watch() {
+    var p = workspace.cursorPos;
+    var t = now();
+    var last = trail.length ? trail[trail.length - 1] : null;
+    if (last) {
+        var dx = p.x - last.x;
+        var dy = p.y - last.y;
+        if (dx === 0 && dy === 0) {
+            return;
+        }
+        drawn += Math.sqrt(dx * dx + dy * dy);
+    }
+    trail.push({t: t, x: p.x, y: p.y});
+
+    while (trail.length > 1 && t - trail[0].t > SPAN_MS) {
+        var a = trail.shift();
+        var b = trail[0];
+        drawn -= Math.sqrt((b.x - a.x) * (b.x - a.x) +
+                           (b.y - a.y) * (b.y - a.y));
+    }
+    if (drawn < 0) {
+        drawn = 0;
+    }
+
+    var h = screenHeight();
+    if (drawn < GATE * h || t - handedAt < QUIET_MS || trail.length < 8) {
+        return;
+    }
+    handedAt = t;
+
+    var parts = [workspace.virtualScreenSize.width + "x" + h];
+    for (var i = 0; i < trail.length; i++) {
+        parts.push((trail[i].t - trail[0].t) + "," +
+                   Math.round(trail[i].x) + "," + Math.round(trail[i].y));
+    }
+    callDBus(TRAY, OBJ, IFACE, "Trace", parts.join(" "));
+}
+
+workspace.cursorPosChanged.connect(watch);

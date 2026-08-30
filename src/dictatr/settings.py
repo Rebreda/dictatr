@@ -180,6 +180,10 @@ class LLMSettings:
     context = Setting("DICTATE_ASK_CONTEXT", "ask_context", "selection")
     # Tag archived dictations with LLM-extracted concepts.
     concepts = Setting("DICTATE_CONCEPTS", "concepts", True, bool)
+    # Show the chat's working: which context was read, what was recalled
+    # from the archive, every tool the model called and what it answered.
+    # Off by default -- an answer is the point, the trace is the audit.
+    details = Setting("DICTATE_CHAT_DETAILS", "chat_details", False, bool)
 
 
 class NotifySettings:
@@ -221,13 +225,18 @@ class TypingSettings:
 
 
 class GestureSettings:
-    # Pointer gestures the compositor watches for (KDE only: see
-    # ui/kwin/activewindow.js). Shake the pointer up and down to open
-    # the voice chat, for when a hotkey is not where your hand is.
-    shake: bool = Setting("DICTATE_GESTURE_SHAKE", "gesture_shake", True, bool)
-    # Print every counted sweep to the tray's log, for tuning the
-    # thresholds against how you actually move.
-    debug: bool = Setting("DICTATE_GESTURE_DEBUG", "gesture_debug", False, bool)
+    """Pointer gestures, and which shortcut each performs.
+
+    A value is a shortcut id from ui/shortcuts.py (chat, menu, suggest,
+    dictate, listen, cancel, shot); empty means the gesture does
+    nothing. KDE only: the compositor is what sees the pointer."""
+
+    shake_v = Setting("DICTATE_GESTURE_SHAKE_V", "gesture_shake_v", "chat")
+    shake_h = Setting("DICTATE_GESTURE_SHAKE_H", "gesture_shake_h", "")
+    circle_cw = Setting("DICTATE_GESTURE_CIRCLE_CW", "gesture_circle_cw", "")
+    circle_ccw = Setting("DICTATE_GESTURE_CIRCLE_CCW", "gesture_circle_ccw", "")
+    # Log every trace with its measurements, for tuning.
+    debug = Setting("DICTATE_GESTURE_DEBUG", "gesture_debug", False, bool)
 
 
 class Settings:

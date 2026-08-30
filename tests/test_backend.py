@@ -229,14 +229,29 @@ def test_pull_parses_sse_progress(monkeypatch):
     assert last["percent"] == 100
 
 
-# --- the version pin and packaging must agree ------------------------
+# --- the version pin is now the only copy ----------------------------
 
-def test_pinned_version_matches_packaging():
-    env_file = (Path(__file__).resolve().parent.parent
-                / "packaging" / "lemond-version.env")
-    pins = dict(
-        line.split("=", 1) for line in env_file.read_text().splitlines()
-        if "=" in line and not line.startswith("#"))
-    assert pins["LEMOND_VERSION"] == lemond.PINNED_VERSION
-    assert pins["LEMOND_SHA256"] == lemond.PINNED_SHA256
+def test_pinned_version_is_the_url_that_gets_fetched():
+    """Packaging no longer carries a second copy of this pin (the engine
+    is not vendored), so the only thing left to keep honest is that the
+    version and the URL agree."""
     assert lemond.PINNED_VERSION in lemond.TARBALL_URL
+    assert len(lemond.PINNED_SHA256) == 64
+
+
+# --- websockets is a different library on every distro ----------------
+
+def test_header_keyword_follows_the_installed_websockets():
+    """connect()'s header argument was renamed in websockets 14.0, and
+    distros ship both sides of that line (Ubuntu 24.04 LTS: 10.4,
+    Fedora: 15.x). Passing the wrong one is a TypeError at connect time,
+    which no import check and no `backend status` would catch."""
+    from dictatr import engine
+
+    def old(uri, *, extra_headers=None, max_size=None): ...
+    def new(uri, *, additional_headers=None, max_size=None): ...
+
+    assert engine._headers_kw(old) == "extra_headers"
+    assert engine._headers_kw(new) == "additional_headers"
+    # and whatever is installed here must be one of the two
+    assert engine._HEADERS_KW in ("extra_headers", "additional_headers")
