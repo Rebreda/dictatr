@@ -62,24 +62,35 @@ def _post_chat(payload: dict, timeout: float = 180.0) -> dict:
         return json.load(r)["choices"][0]["message"]
 
 
-def _desktop_context() -> str:
+def _no_step(kind: str, detail: str) -> None:
+    """Where a trace goes when nobody asked for one."""
+
+
+def _desktop_context(step=_no_step) -> str:
     names = [n.strip() for n in settings.llm.context.split(",") if n.strip()]
-    section = desktop.prompt_section(desktop.gather(names)) if names else ""
+    items = desktop.gather(names) if names else []
+    for label, text in items:
+        step("context", f"{label.lower()} ({len(text)} chars)")
+    section = desktop.prompt_section(items) if items else ""
     app = runstate.read_app()
     if app:
+        step("context", f"focused app: {app}")
         section += (f"\nThe user is working in {app} right now. Let it "
                     "colour how you answer (a question asked in an editor "
                     "is usually about code); never mention it unasked.")
     return section
 
 
-def _system_prompt(context: list[dict] | None) -> str:
-    system = SYSTEM_PROMPT + _desktop_context()
+def _system_prompt(context: list[dict] | None, step=_no_step) -> str:
+    system = SYSTEM_PROMPT + _desktop_context(step)
     memories = toolbox.load_memories()
     if memories:
+        step("memory", f"{len(memories)} remembered fact(s)")
         system += ("\nLasting facts you remembered about the user:\n"
                    + "\n".join(f"- {m}" for m in memories))
     if context:
+        for c in context:
+            step("recall", f"[{c['date']}] {c['text'][:60]}")
         notes = "\n".join(f"- [{c['date']}] {c['text']}" for c in context)
         system += (
             "\nYou can consult entries the user previously dictated on this "
@@ -99,32 +110,47 @@ def _image_part(path: str) -> dict | None:
 
 
 def chat(question: str, context: list[dict] | None = None,
-         history: list[dict] | None = None, image: str | None = None) -> str:
+         history: list[dict] | None = None, image: str | None = None,
+         on_step=None) -> str:
     """Tool-calling conversation loop: the model may consult local tools
     (time, file search, calendar, remember) before answering. *history*
     is prior turns as {"role", "content"} dicts (the chat window's
     running conversation). *image* is a path the question is about; the
     tools are dropped for that turn, since a model reading a picture has
-    what it needs and the two rarely combine well."""
+    what it needs and the two rarely combine well.
+
+    *on_step* (kind, detail) narrates the work: which desktop context was
+    read, which archived notes were recalled, every tool called and what
+    it answered. An answer arrives with none of that visible otherwise,
+    and "why did it say that" is not answerable from the answer alone.
+    """
+    step = on_step or _no_step
     schemas, executors = toolbox.registry()
     content = question
     part = _image_part(image) if image else None
     if part is not None:
         content = [{"type": "text", "text": question}, part]
         schemas = []
+        step("image", Path(image).name)
+    model = backend.get_backend().cap("chat").model
+    step("model", model + ("" if schemas else " (no tools this turn)"))
     messages = [
-        {"role": "system", "content": _system_prompt(context)},
+        {"role": "system", "content": _system_prompt(context, step)},
         *(history or []),
         {"role": "user", "content": content},
     ]
     for _ in range(4):
         msg = _post_chat({
-            "model": backend.get_backend().cap("chat").model,
+            "model": model,
             "messages": messages,
             **({"tools": schemas} if schemas else {}),
             "max_tokens": 2048,
             "chat_template_kwargs": {"enable_thinking": False},
         })
+        # Thinking is off for latency, but a server that reasons anyway
+        # puts it here, and it is the most interesting thing in a trace.
+        if reasoning := (msg.get("reasoning_content") or "").strip():
+            step("thinking", reasoning)
         calls = msg.get("tool_calls") or []
         if not calls:
             return (msg.get("content") or "").strip()
@@ -140,9 +166,12 @@ def chat(question: str, context: list[dict] | None = None,
                 args = {}
             result = (executors[name](args) if name in executors
                       else f"(unknown tool {name})")
+            shown = ", ".join(f"{k}={v!r}" for k, v in args.items())
+            step("tool", f"{name}({shown}) → {result}")
             messages.append({"role": "tool",
                              "tool_call_id": call.get("id", ""),
                              "content": result})
+    step("tool", "gave up after 4 rounds of tool calls")
     return "(tool loop did not converge)"
 
 
@@ -164,10 +193,15 @@ def speak(text: str) -> None:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             f.write(audio)
             path = f.name
-        if shutil.which("ffplay"):
-            subprocess.run(["ffplay", "-nodisp", "-autoexit",
-                            "-loglevel", "quiet", path], check=False)
-        else:
-            subprocess.run(["pw-play", path], check=False)
+        try:
+            if shutil.which("ffplay"):
+                subprocess.run(["ffplay", "-nodisp", "-autoexit",
+                                "-loglevel", "quiet", path], check=False)
+            else:
+                subprocess.run(["pw-play", path], check=False)
+        finally:
+            # Spoken and done: the answer is on the clipboard and in the
+            # archive, so a stray mp3 in /tmp is only a leak.
+            Path(path).unlink(missing_ok=True)
     except Exception:
         pass  # a silent answer is fine; the text is on the clipboard

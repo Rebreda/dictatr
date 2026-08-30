@@ -112,6 +112,21 @@ async def _listen(prefer_typing: bool, ask: bool = False,
         dlv.notify("No speech detected")
         return 0
 
+    # Archive before anything that can fail: the audio has already been
+    # spoken and the transcript is final, so an LLM that never answers
+    # must not cost the user the recording.
+    record = None
+    if settings.storage.enabled and pcm:
+        try:
+            record = save_recording(
+                pcm, text,
+                storage_base=Path(settings.storage.base).expanduser(),
+                whisper_model=settings.whisper.model,
+                meta={"mode": "ask" if ask else "dictate"},
+            )
+        except (OSError, ValueError) as e:
+            print(f"archive failed: {e!r}", file=sys.stderr)
+
     if ask:
         dlv.notify(f"You: {text}", 3000)
         context = []
@@ -141,20 +156,13 @@ async def _listen(prefer_typing: bool, ask: bool = False,
             dlv.notify(f"Typed: {text[:120]}", category="delivery")
         else:
             dlv.deliver(text, prefer_typing)
-    if settings.storage.enabled and pcm:
-        record = save_recording(
-            pcm, text,
-            storage_base=Path(settings.storage.base).expanduser(),
-            whisper_model=settings.whisper.model,
-            meta={"mode": "ask" if ask else "dictate"},
-        )
-        if settings.llm.concepts:
-            try:
-                await asyncio.to_thread(concepts.annotate, record)
-                if ask:  # LLM is warm anyway: backfill older rows too
-                    await asyncio.to_thread(concepts.sweep, 10)
-            except Exception as e:  # best-effort, never blocks the user
-                print(f"concept tagging failed: {e!r}", file=sys.stderr)
+    if record is not None and settings.llm.concepts:
+        try:
+            await asyncio.to_thread(concepts.annotate, record)
+            if ask:  # LLM is warm anyway: backfill older rows too
+                await asyncio.to_thread(concepts.sweep, 10)
+        except Exception as e:  # best-effort, never blocks the user
+            print(f"concept tagging failed: {e!r}", file=sys.stderr)
     return 0
 
 
@@ -250,9 +258,9 @@ def _legacy_archive_note() -> None:
 
     Early versions archived into ~/.listenr/dictation, which is not
     dictatr's to write to. Moving is a one-time script rather than
-    something the app does on its own: it is the user's data, tens of
-    megabytes of it, and quietly relocating it while they are dictating
-    is not an improvement worth making behind their back."""
+    something the app does on its own: it is the user's data, 46 MB of
+    it here, and quietly relocating it while they are dictating is not
+    an improvement worth making behind their back."""
     from .settings import legacy_archive_pending
     if not legacy_archive_pending():
         return
