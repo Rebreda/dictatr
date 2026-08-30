@@ -40,8 +40,9 @@ from dictatr.settings import (CONFIG_PATH, REGISTRY, settings,  # noqa: E402
                               write_config)
 
 sys.path.insert(0, str(REPO / "ui"))
+import handoff  # noqa: E402
 import radial  # noqa: E402
-from radial import CHARCOAL, INK, SIZE, Bubble, Ring  # noqa: E402
+from radial import CHARCOAL, INK, Bubble, Ring  # noqa: E402
 
 MENU_CSS = f"""
 /* The kit makes every window transparent for the overlays; a normal
@@ -65,9 +66,12 @@ class Radial(Gtk.ApplicationWindow):
         self._dismissing = False
 
         # No hit widgets: the menu swallows clicks on purpose, so that
-        # clicking away from it dismisses it.
-        self.ov = radial.Overlay(self, self.circle, (SIZE, SIZE),
-                                 on_place=lambda *_: self.circle.open())
+        # clicking away from it dismisses it. The ring reports its own
+        # size — it is as wide as the deepest submenu it may draw, which
+        # is not something this window gets to guess.
+        side = self.circle.size
+        self.ov = radial.Overlay(self, self.circle, (side, side),
+                                 on_place=lambda *_: self._opened())
         if self.ov.start():
             self.canvas = self.ov.canvas
             outside = Gtk.GestureClick()
@@ -75,7 +79,7 @@ class Radial(Gtk.ApplicationWindow):
             self.canvas.add_controller(outside)
             self.ov.enable_drag(self._hub_at)
         else:
-            self.set_default_size(SIZE, SIZE)
+            self.set_default_size(round(side), round(side))
             self.canvas = None
             self.set_child(self.circle)
             self.connect("map", lambda *_: GLib.idle_add(self.circle.open))
@@ -83,6 +87,11 @@ class Radial(Gtk.ApplicationWindow):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.add_controller(keys)
+
+    def _opened(self):
+        """Placed: bloom, and reach back to whatever opened us."""
+        self.circle.open()
+        handoff.arrive(self, self.canvas, self.circle.hub)
 
     def _build_ring(self):
         # Root ring, top position first, then clockwise.
@@ -164,7 +173,7 @@ class Radial(Gtk.ApplicationWindow):
             text = self._suggest_text
             if not text:
                 deliver.notify("Select some text first", category="errors")
-                self.close()
+                self.dismiss()
                 return
             self.circle.set_hub(tooltip="Working…")
             threading.Thread(target=self._run_action, daemon=True,
@@ -179,7 +188,7 @@ class Radial(Gtk.ApplicationWindow):
             deliver.notify(f"Could not do that: {e}", category="errors")
         if out:
             deliver.deliver(out)
-        GLib.idle_add(self.close)
+        GLib.idle_add(self.dismiss)
 
     # --- overlay ------------------------------------------------------
     def _hub_at(self, x, y):
@@ -220,30 +229,32 @@ class Radial(Gtk.ApplicationWindow):
     def run(self, args):
         def action():
             subprocess.Popen([DICTATE, *args])
-            self.close()
+            # No surface to hand over to, but the ring should still leave
+            # the way it arrived instead of being destroyed mid-flight.
+            self.dismiss()
         return action
 
     def chat(self):
-        subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
-        self.close()
+        handoff.leave(self, self.circle,
+                      [str(REPO / "bin" / "dictate-chat")])
 
     def gc(self):
         # Detached so it outlives the menu closing; --notify because a
         # sweep started from a menu has no terminal to print to.
         subprocess.Popen([DICTATE, "gc", "--notify"], start_new_session=True)
-        self.close()
+        self.dismiss()
 
     def open_settings(self):
         SettingsWindow(self.get_application()).present()
-        self.close()
+        self.dismiss()
 
     def open_setup(self):
         # Its own process: the wizard is a plain window and this one is a
         # layer-shell overlay with the gtk4-layer-shell preload loaded,
         # which would turn the wizard into a fullscreen surface too.
-        subprocess.Popen([str(REPO / "bin" / "dictate-setup")],
-                         start_new_session=True)
-        self.close()
+        handoff.leave(self, self.circle,
+                      [str(REPO / "bin" / "dictate-setup")],
+                      start_new_session=True)
 
     def pick_file(self):
         dialog = Gtk.FileDialog(title="Transcribe audio file")
@@ -258,10 +269,10 @@ class Radial(Gtk.ApplicationWindow):
             try:
                 gfile = d.open_finish(res)
             except GLib.Error:
-                self.close()
+                self.dismiss()
                 return
             subprocess.Popen([DICTATE, "file", gfile.get_path()])
-            self.close()
+            self.dismiss()
 
         dialog.open(self, None, done)
 
@@ -340,16 +351,22 @@ class SettingsWindow(Gtk.Window):
             cbox.append(cb)
         row(8, "Ask can read", cbox)
 
+        self.details_sw = Gtk.Switch(
+            halign=Gtk.Align.START, active=settings.llm.details)
+        self.details_sw.set_tooltip_text(
+            "Show context, recall and tool calls under each answer")
+        row(9, "Show the chat's working", self.details_sw)
+
         note = Gtk.Label(
             label=f"Saved to {CONFIG_PATH}\nEnvironment variables override.",
             xalign=0.0)
         note.add_css_class("dim-label")
-        grid.attach(note, 0, 9, 2, 1)
+        grid.attach(note, 0, 10, 2, 1)
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
         save.connect("clicked", self.on_save)
-        grid.attach(save, 1, 10, 1, 1)
+        grid.attach(save, 1, 11, 1, 1)
 
         self.set_child(grid)
 
@@ -391,6 +408,7 @@ class SettingsWindow(Gtk.Window):
             "silence_ms": int(self.silence.get_value()),
             "idle_s": round(self.idle.get_value(), 1),
             "speak_answers": self.speak_sw.get_active(),
+            "chat_details": self.details_sw.get_active(),
             "archive": archive,
         }
         cfg["ask_context"] = ",".join(

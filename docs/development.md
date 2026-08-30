@@ -118,7 +118,10 @@ that would need those is exercised by hand or on the demo stage instead.
 | `portal_typing = false` | same, from config, for a desktop where it misbehaves |
 | `DICTATE_NO_SETUP=1` | stop the tray offering the setup wizard |
 | `DICTATR_SETUP_STEP=N` | open the wizard straight on page N (0 to 3) |
-| `RADIAL_DEMO=progress` | `python3 ui/radial.py` shows the progress bubble on its own |
+| `RADIAL_DEMO=layout` | `python3 ui/radial.py` is a playground for the ring's geometry: item count, grouping, arc, depth |
+| `RADIAL_DEMO=tether` | the same file shows the line that joins two surfaces during a handoff |
+| `DICTATR_FROM=x,y,pid` | set by a surface handing over; the one arriving tethers back to that point and signals that pid |
+| `RADIAL_DEMO=progress` | the same file shows the progress bubble on its own |
 
 There is a scripted Lemonade stand-in at `docs/demo/lib/stub_lemonade.py`:
 it answers health, models, transcriptions, chat and speech from a JSON
@@ -173,11 +176,12 @@ it, which matters because one step waits on a portal dialog and another
 downloads a gigabyte.
 
 The chrome is `ui/radial.py`, and the wizard is a layer-shell overlay
-like the menu, not a dialog: `set_items` hands the step's choices to
-`Ring.swap`, which twirls the old ones into the hub and blooms the new
-ones. The hub carries the step emblem and the progress arc, and acts as
-Back (Close on the first step). The input region is clipped to the card
-and the ring, so clicks elsewhere fall through to the desktop.
+like the menu, not a dialog. Its Back and Close orbit the step badge on
+a `Ring` in the card style — the same ring the menu is and the chat card
+hangs off itself. The step's choices stay labelled pills rather than
+bubbles: they are prose, and an icon plus a hover cannot carry "Set up
+the built-in engine". The input region is clipped to the card and to the
+ring's bubbles one at a time, so clicks elsewhere fall through.
 
 `DICTATR_SETUP_STEP=N` opens straight on step N.
 
@@ -187,7 +191,10 @@ and the ring, so clicks elsewhere fall through to the desktop.
 |---|---|
 | `src/dictatr/` | the package: CLI, engine, delivery, archive, backend |
 | `src/dictatr/backend/` | provider config, detection, managed lemond, client |
-| `ui/radial.py` | the visual kit: palette, bubbles, ring, transitions, progress arc, icon theme |
+| `ui/radial_layout.py` | where the bubbles go: arcs, packing, grouping, depth. No GTK, so `tests/test_radial_layout.py` covers it |
+| `ui/motion.py` | how anything moves: easing, `Track`/`Timeline`, the tether's outline. No GTK either; `tests/test_motion.py` |
+| `ui/handoff.py` | one surface handing over to the next, with a tether across the gap |
+| `ui/radial.py` | the visual kit: palette, bubbles, ring, overlay, transitions, progress arc, icon theme |
 | `ui/menu.py` | radial menu and the settings window |
 | `ui/setup.py` | setup wizard |
 | `ui/tray.py` | tray icon and the hotkey portal host |
@@ -199,8 +206,34 @@ and the ring, so clicks elsewhere fall through to the desktop.
 | `docs/demo/` | the capture harness (see its own README) |
 
 Anything that draws should paint with `ui/radial.py`: import the palette
-and geometry rather than restating hex codes or pixel sizes, and call
-`radial.apply_css()` so the bundled symbolic icons resolve.
+and a `Style` rather than restating hex codes or pixel sizes, and call
+`radial.apply_css()` so the bundled symbolic icons resolve. A surface
+that needs a hub and satellites mounts a `Ring` — it takes items, a
+style and, if something is in the way, the widgets to lay itself out
+around. It should never work out an angle or a radius for itself; that
+is what `ui/radial_layout.py` is, and a second copy of it is how the
+surfaces drifted apart the last time.
+
+Nothing outside `ui/radial.py` should write a tick callback. `drive`,
+`fade`, `grow`, `crossfade`, `scroll_to` and `play` are the animator, and
+they settle instantly on a widget with no frame clock — motion is a way
+of arriving somewhere, and somewhere is where it has to end up even when
+nobody watches. That is also what lets the check tools drive these
+surfaces without a window on screen.
+
+Surfaces are separate processes, so handing over is a protocol rather
+than a call: `handoff.leave` holds the old surface open and spawns the
+new one knowing where the bubble you clicked was, `handoff.arrive` draws
+the tether back to it and says when it has landed, and a 1.5s timeout
+means a surface that never starts cannot strand the one that launched
+it.
+
+`tools/radialcheck`, `tools/chatcheck`, `tools/wizcheck` and
+`tools/handoffcheck` build these surfaces without presenting them and
+assert on the result, which is the only way to check a layer-shell
+overlay on the machine you are working on. `tools/radialcheck --png
+out.png` draws the layouts and the tether straight from the solver, with
+no GTK and no display involved.
 
 ## Commits
 

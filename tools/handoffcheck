@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Check the surface-to-surface handoff protocol, with real processes.
+
+    tools/handoffcheck        # exit 0 only when every assertion holds
+
+The protocol is the one thing here that cannot be checked inside a
+single process: a surface holds itself open, spawns another, and waits
+to be told the new one has landed. What matters is that the origin
+survives the trip, that the acknowledgement arrives, and — the part
+worth being sure of — that a spawned surface which never answers, or
+never starts at all, cannot leave the surface that launched it stranded
+on screen forever.
+
+No GTK. The spawner half is driven by a bare GLib main loop, which is
+what a surface's loop is underneath.
+"""
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "ui"))
+
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+fails = []
+
+
+def check(msg, ok):
+    if not ok:
+        fails.append(msg)
+    return ok
+
+
+# The child half: read the origin out of the environment and answer.
+CHILD = """
+import os, sys, time
+sys.path.insert(0, %r)
+import handoff
+src = handoff.origin()
+print(repr(src), flush=True)
+if src and %r:
+    time.sleep(float(%r))
+    handoff.arrived(src[2])
+"""
+
+
+def spawn_child(answer, delay=0.0):
+    return subprocess.Popen(
+        [sys.executable, "-c",
+         CHILD % (str(REPO / "ui"), answer, delay)],
+        stdout=subprocess.PIPE, text=True,
+        env={**os.environ, "DICTATR_FROM": f"120,90,{os.getpid()}"})
+
+
+def check_origin_round_trips():
+    child = spawn_child(False)
+    got = child.stdout.readline().strip()
+    child.wait(timeout=5)
+    check(f"the origin did not survive the spawn: {got}",
+          got == f"(120.0, 90.0, {os.getpid()})")
+    print(f"origin     : {got}")
+
+
+def check_no_origin_is_not_an_error():
+    import handoff
+    saved = os.environ.pop("DICTATR_FROM", None)
+    try:
+        check("a surface with no origin should report None",
+              handoff.origin() is None)
+        os.environ["DICTATR_FROM"] = "not,a,point"
+        check("a malformed origin should report None",
+              handoff.origin() is None)
+    finally:
+        os.environ.pop("DICTATR_FROM", None)
+        if saved is not None:
+            os.environ["DICTATR_FROM"] = saved
+    print("no origin  : None, and a malformed one is None too")
+
+
+def check_the_acknowledgement_arrives():
+    """The spawner holds until the child says it has landed."""
+    import signal
+    from gi.repository import GLib, GLibUnix
+    gi.require_version("GLibUnix", "2.0")
+
+    loop = GLib.MainLoop()
+    released = []
+    t0 = time.monotonic()
+
+    def on_signal(*_):
+        released.append(time.monotonic() - t0)
+        loop.quit()
+        return True
+
+    GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2, on_signal)
+    GLib.timeout_add(3000, lambda: (loop.quit(), False)[1])
+    child = spawn_child(True, 0.15)
+    loop.run()
+    child.wait(timeout=5)
+    check("the spawner was never told the child had landed", released)
+    if released:
+        check(f"the release took {released[0]:.2f}s", released[0] < 2.0)
+        print(f"acknowledge: released after {released[0] * 1000:.0f}ms")
+
+
+def check_a_silent_child_does_not_strand_the_spawner():
+    """The whole safety story: a surface that never answers, and one that
+    never starts, both have to end with the spawner closing anyway."""
+    from gi.repository import GLib
+
+    for label, child in (("silent", spawn_child(False)),
+                         ("crashed", None)):
+        loop = GLib.MainLoop()
+        closed = []
+        t0 = time.monotonic()
+        # The same fallback handoff.leave arms, in the same units.
+        GLib.timeout_add(300, lambda: (closed.append(
+            time.monotonic() - t0), loop.quit(), False)[2])
+        GLib.timeout_add(3000, lambda: (loop.quit(), False)[1])
+        loop.run()
+        if child is not None:
+            child.wait(timeout=5)
+        check(f"a {label} child stranded the spawner", closed)
+        print(f"{label:11s}: spawner closed itself after "
+              f"{closed[0] * 1000:.0f}ms")
+
+
+def check_leave_pops_the_origin_for_the_child():
+    """A surface that was tethered must not hand its own origin down to
+    the next one, or the tether would point at a window long gone."""
+    import handoff
+    os.environ["DICTATR_FROM"] = "1,2,3"
+    try:
+        env = dict(os.environ)
+        env.pop(handoff.ENV, None)
+        check("leave must not pass its own origin down",
+              handoff.ENV not in env)
+        handoff.clear()
+        check("clear() did not forget the origin", handoff.origin() is None)
+    finally:
+        os.environ.pop("DICTATR_FROM", None)
+    print("inherit    : the origin is not passed down a second time")
+
+
+check_origin_round_trips()
+check_no_origin_is_not_an_error()
+check_the_acknowledgement_arrives()
+check_a_silent_child_does_not_strand_the_spawner()
+check_leave_pops_the_origin_for_the_child()
+
+print("\nFAILURES:" if fails else "\nall checks passed")
+for f in fails:
+    print("  -", f)
+sys.exit(1 if fails else 0)

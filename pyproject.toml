@@ -15,6 +15,12 @@ dictatr = "dictatr.cli:main"
 [dependency-groups]
 dev = ["pytest>=8"]
 
+[tool.pytest.ini_options]
+# ui/ is not a package (the surfaces are scripts run through bin/), but
+# ui/radial_layout.py is pure arithmetic with no GTK in it, so it can be
+# tested like anything else.
+pythonpath = ["ui"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

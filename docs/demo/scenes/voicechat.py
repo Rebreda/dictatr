@@ -17,11 +17,15 @@ scripted word-level deltas paced to the audio, and the answers come from
 the stub's chat endpoint. Nothing in the UI is faked.
 """
 
+import sys
 import time
 
 from director import Director
 from hero import speech_duration
 from session import DEMO, REPO, W, H
+
+sys.path.insert(0, str(REPO / "ui"))
+import radial_layout  # noqa: E402  (the ring's own geometry)
 
 TRANSCRIPTS = [
     "Draft a status update for Robin: tray rewrite merged, voice "
@@ -66,9 +70,12 @@ DM_X, DM_Y, DM_W, DM_H = 20, 150, 440, 476
 BR_X, BR_Y, BR_W, BR_H = 832, 128, 440, 430
 
 MENU_CX, MENU_CY = W // 2, 371     # overlay surface center (below the bar)
-# "Ask the AI" is bubble 2 of the 6-bubble ring (dictate, clipboard,
-# ask, always-on, More, cancel): angle -90° + 2·60° = 30°, r=84.
-CHAT_BUBBLE = (MENU_CX + 73, MENU_CY + 42)
+# "Ask the AI" is bubble 3 of the 6-bubble root ring (dictate,
+# clipboard, ask, always-on, More, cancel), asked for rather than
+# measured: the orbit is the ring's business and it adapts to the item
+# count, so a number written here goes stale without saying so.
+_DX, _DY = radial_layout.slot_offset(6, 2)
+CHAT_BUBBLE = (MENU_CX + _DX, MENU_CY + _DY)
 HUB = (W // 2, 456)                # chat fallback: hub at 62% height
 PARK = (HUB[0] + 118, HUB[1] + 44)  # cursor rest: clear of the satellites
 # Camera target for the conversation. Sits BELOW the hub on purpose:

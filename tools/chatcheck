@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Check the voice chat's ring and turn flow without showing the card.
+
+    tools/chatcheck        # exit 0 only when every assertion holds
+
+Builds a Chat and pokes it, but never present()s the window, so it runs
+against a live session without putting anything on the screen — the same
+trick tools/wizcheck uses for the wizard.
+
+The card's controls are a radial.Ring now rather than a row of buttons,
+so what is worth pinning down is that the ring is the card's chrome and
+not a second copy of it: that the microphone is its hub and still wears
+a different face per phase, that the message and settings levels are
+levels of that one ring, and that the keyboard reaches them.
+
+The arc itself is not checked here. Nothing is allocated in a window
+that is never shown, so every obstacle measures as nothing and the ring
+falls back to a full circle by design; tools/radialcheck covers the arc
+against rects of the card's real size.
+"""
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+sys.argv = [sys.argv[0]]
+scratch = tempfile.mkdtemp(prefix="chatcheck-")
+os.environ["XDG_CONFIG_HOME"] = scratch + "/config"
+os.environ["XDG_DATA_HOME"] = scratch + "/data"
+os.environ["DICTATE_ARCHIVE"] = "off"
+# A wav rather than the microphone, and a backend that is not there, so
+# the card's opening turn fails fast instead of listening to the room.
+os.environ["DICTATE_INPUT"] = str(REPO / "docs/demo/audio/chat.wav")
+os.environ["LEMONADE_URL"] = "http://127.0.0.1:9/api/v1"
+
+import importlib.util  # noqa: E402
+sys.path.insert(0, str(REPO / "src"))
+sys.path.insert(0, str(REPO / "ui"))
+spec = importlib.util.spec_from_file_location("chat", REPO / "ui" / "chat.py")
+chat = importlib.util.module_from_spec(spec)
+sys.modules["chat"] = chat
+spec.loader.exec_module(chat)
+
+from gi.repository import Gdk, Gtk  # noqa: E402
+
+fails = []
+
+
+def check(msg, ok):
+    if not ok:
+        fails.append(msg)
+    return ok
+
+
+def keys_of(ring):
+    return [it.key for it, _b in ring.levels[-1].visible()]
+
+
+def run(win):
+    ring = win.ring
+
+    # --- the chrome is the ring ---------------------------------------
+    check(f"chrome is {keys_of(ring)}",
+          keys_of(ring) == ["back", "close", "settings"])
+    check("the microphone is not the ring's hub", ring.hub is win.mic_btn)
+    groups = [it.group for it in ring.levels[0].items]
+    check(f"chrome groups are {groups}",
+          groups == ["leave", "leave", "act", "act"])
+    print(f"chrome     : {keys_of(ring)} (+suggest hidden), groups {groups}")
+
+    # --- the mic wears the phase --------------------------------------
+    faces = {}
+    for phase in ("idle", "listening", "thinking"):
+        win.phase = phase
+        faces[phase] = (win.mic_btn.get_icon_name(),
+                        win.mic_btn.get_sensitive(),
+                        win.mic_btn.has_css_class("rec"))
+    check(f"listening does not show a stop: {faces['listening']}",
+          faces["listening"][0] == "media-playback-stop-symbolic"
+          and faces["listening"][2])
+    check(f"thinking is still clickable: {faces['thinking']}",
+          not faces["thinking"][1])
+    check(f"idle is not a microphone: {faces['idle']}",
+          faces["idle"][0] == "audio-input-microphone-symbolic"
+          and faces["idle"][1] and not faces["idle"][2])
+    print("mic faces  : " + ", ".join(
+        f"{k}={v[0].split('-')[1]}{'/rec' if v[2] else ''}"
+        f"{'' if v[1] else '/off'}" for k, v in faces.items()))
+    win.phase = "idle"
+
+    # --- the shortlist takes its place --------------------------------
+    # The bubble only earns its slot once there is an answer to act on.
+    win.history.append({"role": "assistant", "content": "an answer"})
+    win._show_follow_ups([{"id": "todo", "arg": "", "label": "Extract tasks",
+                           "icon": "view-list-symbolic"}])
+    ring._apply(ring._pose(), settle=True)
+    check(f"the shortlist did not appear: {keys_of(ring)}",
+          "suggest" in keys_of(ring))
+    print(f"shortlist  : {keys_of(ring)}")
+
+    # --- levels, not floating rings -----------------------------------
+    win.open_settings()
+    ring._navigating = False
+    ring._apply(ring._pose(), settle=True)
+    check(f"settings is not a level: depth {ring.depth}", ring.depth == 1)
+    check(f"the card did not make room for the level: gap {win._gap:.0f} "
+          f"vs ring reach {ring.extent:.0f}", win._gap >= 2 * ring.extent - 1)
+    check(f"settings level is {keys_of(ring)}",
+          keys_of(ring) == ["chat_details", "speak_answers", "recall"])
+    check("the microphone stopped being the hub inside a level",
+          ring.hub is win.mic_btn
+          and win.mic_btn.get_icon_name() == "audio-input-microphone-symbolic")
+    print(f"settings   : depth {ring.depth}, {keys_of(ring)}, mic still the hub")
+    print(f"make room  : ring reaches {ring.extent:.0f}px, card gap grew "
+          f"{chat.RING_H:.0f} -> {win._gap:.0f}px")
+
+    # a toggle rewrites the level in place rather than re-spiralling it
+    before = ring.levels[-1].buttons[0]
+    win._toggle("details", "chat_details", "Show the chat's working")()
+    check("toggling rebuilt the level instead of updating it",
+          ring.levels[-1].buttons[0] is before)
+    check("toggling did not paint the bubble",
+          before.has_css_class("on"))
+    print(f"toggle     : in place, bubble now "
+          f"{'on' if before.has_css_class('on') else 'off'}")
+
+    # Escape leaves the level, not the card
+    handled = win.ring.handle_key(Gdk.KEY_Escape)
+    ring._navigating = False
+    check("Escape did not leave the settings level", handled)
+    check(f"Escape left depth {ring.depth}", ring.depth == 0)
+    check("Escape at the root should fall through to closing the card",
+          not win.ring.handle_key(Gdk.KEY_Escape))
+    print(f"escape     : level -> depth {ring.depth}, then falls through")
+
+    # --- a message's actions are a level too --------------------------
+    lab = Gtk.Label(label="the quick brown fox")
+    win.on_msg_menu(None, lab)
+    ring._navigating = False
+    ring._apply(ring._pose(), settle=True)
+    check(f"a message's actions are not a level: depth {ring.depth}",
+          ring.depth == 1)
+    check(f"actions level is {keys_of(ring)}", "copy" in keys_of(ring))
+    print(f"message    : depth {ring.depth}, {keys_of(ring)}")
+
+    # --- relayout is safe on an unallocated card ----------------------
+    win._reflow()
+    print("reflow     : safe with nothing allocated")
+
+    # --- motion -------------------------------------------------------
+    # Nothing here is presented, so radial.drive has no frame clock and
+    # settles every animation at once. That is the point: motion is a
+    # way of arriving somewhere, and somewhere has to be where it ends
+    # up even when nobody watches it get there.
+    win.set_status("thinking…")
+    win.set_status("speaking…")
+    check(f"the status landed on {win.status.get_label()!r}",
+          win.status.get_label() == "speaking…")
+    check("the status was left faded out",
+          win.status.get_opacity() > 0.99)
+    win.set_status("that went wrong", error=True)
+    check("an error status did not paint itself",
+          win.status.has_css_class("error"))
+    win.set_status("fine")
+    check("the error class outlived the error",
+          not win.status.has_css_class("error"))
+    print(f"status     : crossfades, lands on the latest, "
+          f"opacity {win.status.get_opacity():.2f}")
+
+    pill = win.bubble("ai")
+    count = len(list(win.msgs))
+    win.drop_bubble(pill)
+    check(f"a dropped pill is still in the column: "
+          f"{len(list(win.msgs))} of {count}",
+          len(list(win.msgs)) == count - 1)
+    print(f"drop       : faded out, then removed ({count} -> "
+          f"{len(list(win.msgs))})")
+
+    grown = win.bubble("ai")
+    grown.set_label("· · ·")
+    win._grow_into(grown, "a much longer answer that wraps onto "
+                          "several lines of the pill it arrives in")
+    check("growing a pill lost its text",
+          grown.get_label().startswith("a much longer answer"))
+    print("grow       : the answer lands in the pill, height eased")
+
+    print("\nFAILURES:" if fails else "\nall checks passed")
+    for f in fails:
+        print("  -", f)
+
+
+app = Gtk.Application(application_id="io.github.rebreda.dictatr.chatcheck")
+
+
+def activate(a):
+    a.hold()
+    win = chat.Chat(a)          # never presented
+    try:
+        run(win)
+    finally:
+        win._closing = True
+        a.release()
+        a.quit()
+
+
+app.connect("activate", activate)
+app.run([])
+sys.exit(1 if fails else 0)

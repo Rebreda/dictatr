@@ -14,11 +14,15 @@ by the director in sync with the voice, and the app's end-of-utterance
 delivery is swallowed so nothing types twice.
 """
 
+import sys
 import time
 
 from director import Director
 from hero import speech_duration
 from session import DEMO, REPO
+
+sys.path.insert(0, str(REPO / "ui"))
+import radial_layout  # noqa: E402  (the ring's own geometry)
 
 TRANSCRIPT = ("Almost there. The tray rewrite is merged and the voice "
               "detection is tuned - I'll cut a release candidate "
@@ -34,7 +38,11 @@ SCENARIO = {
 CHAT_X, CHAT_Y = 24, 32
 CHAT_W, CHAT_H = 560, 520
 MENU_CX, MENU_CY = 640, 371      # overlay surface center (below the bar)
-TYPE_BUBBLE = (MENU_CX, MENU_CY - 84)   # top bubble: Dictate
+# Bubble 1 of the 6-bubble root ring (Dictate), asked for rather than
+# measured: the orbit is the ring's business and it adapts to the item
+# count, so a number written here goes stale without saying so.
+_DX, _DY = radial_layout.slot_offset(6, 0)
+TYPE_BUBBLE = (MENU_CX + _DX, MENU_CY + _DY)
 # The round send button, bottom-right of the composer.
 SEND_BTN = (CHAT_X + CHAT_W - 30, CHAT_Y + CHAT_H - 28)
 # The compose entry, where the transcript lands live.

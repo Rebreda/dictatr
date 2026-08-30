@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+"""Check the radial ring's geometry and navigation without showing it.
+
+    tools/radialcheck             # exit 0 only when every assertion holds
+    tools/radialcheck --png OUT   # draw the layouts, no GTK involved
+
+Builds real Rings and pokes them, but never present()s a window, so it
+runs against a live session without putting anything on the screen —
+the same trick tools/wizcheck uses, and the only way to check a
+layer-shell surface on the machine someone is working on.
+
+What it pins down is what the old hardcoded layout got wrong and what a
+future change is most likely to get wrong again: bubbles that touch,
+bubbles outside the widget (and therefore outside the input region,
+painted but unclickable), ancestor levels stacked on one orbit, and a
+parked bubble that fires the wrong item because its index was local to
+a level nobody remembered.
+
+--png needs no display at all: it draws from the same solver the widgets
+use, so it is a picture of the arithmetic rather than a screenshot.
+"""
+import math
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "ui"))
+
+PNG = None
+if "--png" in sys.argv:
+    PNG = sys.argv[sys.argv.index("--png") + 1]
+
+# PyGObject and cairo live in the system python; a checkout's venv comes
+# first on PATH without them, which is exactly when this gets run.
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+fails = []
+
+
+def check(msg, ok):
+    if not ok:
+        fails.append(msg)
+    return ok
+
+
+# --- the picture (pure arithmetic, no GTK) -----------------------------
+def draw(path):
+    import cairo
+    import motion as M
+    import radial_layout as L
+
+    card_arc = L.arc_avoiding((0, 0), 56, 21,
+                              [(-180, -400, 360, 380)]).reversed()
+    # (title, style, arc, levels innermost-last) — each level is its own
+    # group list, because ancestors keep their own angles.
+    scenes = [
+        ("menu, 6", L.STYLE_MENU, L.Arc.full(), [["g"] * 6]),
+        ("menu, 10", L.STYLE_MENU, L.Arc.full(), [["g"] * 10]),
+        ("menu, 20", L.STYLE_MENU, L.Arc.full(), [["g"] * 20]),
+        ("menu, depth 3", L.STYLE_MENU, L.Arc.full(),
+         [["g"] * 6, ["g"] * 4, ["g"] * 7, ["g"] * 3]),
+        ("card chrome", L.STYLE_CARD, card_arc,
+         [["nav", "nav", "card", "card"]]),
+        ("card, depth 2", L.STYLE_CARD, card_arc,
+         [["nav", "nav", "card", "card"], ["g"] * 3, ["g"] * 5]),
+    ]
+    cols, cell = 3, 500
+    rows = (len(scenes) + cols - 1) // cols
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, cols * cell,
+                              (rows + 2) * cell)
+    cr = cairo.Context(surf)
+    cr.set_source_rgb(0.06, 0.07, 0.09)
+    cr.paint()
+    cr.select_font_face("sans")
+    for i, (title, style, arc, levels) in enumerate(scenes):
+        cx = (i % cols) * cell + cell / 2
+        cy = (i // cols) * cell + cell / 2 + 12
+        solved = [L.solve(g, arc, style) for g in levels]
+        live = solved[-1]
+        cr.set_source_rgb(0.55, 0.58, 0.66)
+        cr.set_font_size(13)
+        cr.move_to((i % cols) * cell + 14, (i // cols) * cell + 24)
+        cr.show_text(f"{title}  r={live.radius:.0f} b={live.bubble:.0f}"
+                     + (f" overflow={live.overflow}" if live.overflow else ""))
+        top = len(levels) - 1
+        for depth, metrics in enumerate(solved):
+            orbit = L.ancestor_metrics(live, top - depth, style)
+            if orbit is None:
+                continue
+            cr.set_source_rgba(0.54, 0.71, 0.97, orbit.alpha)
+            for a in metrics.angles:
+                cr.arc(cx + orbit.radius * math.cos(a),
+                       cy + orbit.radius * math.sin(a), orbit.bubble / 2,
+                       0, 2 * math.pi)
+                cr.fill()
+        cr.set_source_rgb(0.11, 0.11, 0.13)
+        cr.arc(cx, cy, style.hub / 2, 0, 2 * math.pi)
+        cr.fill_preserve()
+        cr.set_source_rgb(0.54, 0.71, 0.97)
+        cr.set_line_width(1.5)
+        cr.stroke()
+    # The tether, at four points of its attach-and-release.
+    band_y = rows * cell
+    o, t = (60.0, 80.0), (330.0, 190.0)
+    for i, (label, extent, slack, start) in enumerate([
+            ("reaching", 0.45, 1.0, 0.0),
+            ("landed, slack", 1.0, 0.55, 0.0),
+            ("taut", 1.0, 0.0, 0.0),
+            ("releasing", 1.0, 0.0, 0.55)]):
+        ox = (i % cols) * cell
+        oy = band_y + (i // cols) * cell
+        cr.set_source_rgb(0.55, 0.58, 0.66)
+        cr.set_font_size(13)
+        cr.move_to(ox + 14, oy + 24)
+        cr.show_text(f"tether: {label}")
+        p0 = M.bezier(o, t, 26.0 * slack, start)
+        pts = M.taper(p0, t, 15.0 * (1 - start), 2.0, 26.0 * slack, extent)
+        if pts:
+            cr.move_to(ox + pts[0][0], oy + pts[0][1] + 40)
+            for x, y in pts[1:]:
+                cr.line_to(ox + x, oy + y + 40)
+            cr.close_path()
+            cr.set_source_rgba(0.54, 0.71, 0.97, 0.55)
+            cr.fill()
+        for (px, py), r in ((o, 26), (t, 22)):
+            cr.set_source_rgb(0.11, 0.11, 0.13)
+            cr.arc(ox + px, oy + py + 40, r, 0, 2 * math.pi)
+            cr.fill_preserve()
+            cr.set_source_rgb(0.54, 0.71, 0.97)
+            cr.set_line_width(1.5)
+            cr.stroke()
+    surf.write_to_png(path)
+    print(f"wrote {path}  ({cols * cell}x{surf.get_height()})")
+
+
+if PNG:
+    draw(PNG)
+    sys.exit(0)
+
+# --- the widgets -------------------------------------------------------
+from gi.repository import Gdk, Gtk  # noqa: E402
+
+import radial  # noqa: E402
+import motion as M  # noqa: E402
+import radial_layout as L  # noqa: E402
+from radial import Bubble, Ring  # noqa: E402
+
+fired = []
+
+
+def items(n, prefix="a", group=""):
+    return [Bubble("dialog-information-symbolic", f"{prefix}{i}",
+                   lambda i=i, p=prefix: fired.append(f"{p}{i}"),
+                   group=group, key=f"{prefix}{i}")
+            for i in range(n)]
+
+
+def nested(depth, width=4):
+    """A stack `depth` levels deep, each level `width` wide."""
+    if depth == 0:
+        return items(width, "leaf")
+    kids = nested(depth - 1, width)
+    inner = items(width - 1, f"d{depth}")
+    return inner + [Bubble("view-more-symbolic", f"into{depth}",
+                           children=kids, key=f"into{depth}")]
+
+
+def centre(ring, btn):
+    """Where a button actually sits, from the Fixed's own transform.
+
+    get_child_position returns zeros on this GTK; the transform is the
+    only honest read-back.
+    """
+    t = ring.get_child_transform(btn)
+    x, y = t.to_translate()
+    size = ring._applied.get(btn, 0)
+    return x + size / 2, y + size / 2, size
+
+
+def settle(ring):
+    ring._apply(ring._pose(), settle=True)
+
+
+def check_packing():
+    for n in range(1, 21):
+        ring = Ring(items(n))
+        settle(ring)
+        placed = [centre(ring, b) for _it, b in ring.levels[0].visible()]
+        for j in range(len(placed)):
+            for k in range(j + 1, len(placed)):
+                (x1, y1, s1), (x2, y2, s2) = placed[j], placed[k]
+                gap = math.hypot(x1 - x2, y1 - y2) - (s1 + s2) / 2
+                if not check(f"n={n}: bubbles {j} and {k} overlap by "
+                             f"{-gap:.1f}px", gap > -0.5):
+                    break
+        side = ring.size
+        for x, y, s in placed:
+            check(f"n={n}: bubble escapes the {side:.0f}px widget",
+                  -0.5 <= x - s / 2 and x + s / 2 <= side + 0.5
+                  and -0.5 <= y - s / 2 and y + s / 2 <= side + 0.5)
+    print("packing    : n=1..20, no overlaps, all inside the widget")
+
+
+def check_menu_is_unchanged():
+    ring = Ring(items(6))
+    settle(ring)
+    m = ring.levels[0].metrics
+    check(f"menu radius drifted to {m.radius}", abs(m.radius - 84) < 0.01)
+    check(f"menu bubble drifted to {m.bubble}", abs(m.bubble - 52) < 0.01)
+    check("menu no longer starts at the top",
+          abs(m.angles[0] + math.pi / 2) < 1e-6)
+    print(f"menu       : r={m.radius:.0f} bubble={m.bubble:.0f} "
+          f"first at {math.degrees(m.angles[0]):.0f}deg")
+
+
+def check_depth():
+    ring = Ring(nested(3))
+    for _ in range(3):
+        into = [i for i, it in enumerate(ring.levels[-1].items)
+                if it.children][0]
+        ring.activate(into)
+        ring._navigating = False
+    settle(ring)
+    check(f"expected 4 levels, got {len(ring.levels)}", len(ring.levels) == 4)
+    orbits = []
+    for depth, level in enumerate(ring.levels):
+        vis = level.visible()
+        if not vis:
+            continue
+        x, y, s = centre(ring, vis[0][1])
+        r = math.hypot(x - ring._cx, y - ring._cy)
+        orbits.append((depth, round(r, 1), round(vis[0][1].get_opacity(), 3), s))
+    drawn = [o for o in orbits if o[2] > 0.01]
+    radii = [o[1] for o in drawn]
+    check(f"ancestor orbits collide: {radii}",
+          len(set(radii)) == len(radii))
+    check(f"ancestor orbits not ordered: {radii}",
+          radii == sorted(radii, reverse=True))
+    alphas = [o[2] for o in drawn]
+    check(f"ancestors share an opacity: {alphas}",
+          len(set(alphas)) == len(alphas))
+    hits = ring.hit_widgets()
+    for level in ring.levels:
+        for _it, b in level.visible():
+            if b.get_opacity() > 0.05:
+                check("hit_widgets misses a visible bubble", b in hits)
+    print(f"depth      : {len(ring.levels)} levels, drawn orbits "
+          f"{[(o[0], o[1], o[2]) for o in drawn]}")
+
+
+def check_navigation():
+    ring = Ring(nested(3))
+    for _ in range(3):
+        into = [i for i, it in enumerate(ring.levels[-1].items)
+                if it.children][0]
+        ring.activate(into)
+        ring._navigating = False
+    settle(ring)
+    # A parked bubble two levels up must fire *its* item, not whatever
+    # the level in between has at that index.
+    want = ring.levels[1].items[0].tooltip
+    fired.clear()
+    ring.go_to(1, 0)
+    ring._navigating = False
+    check(f"go_to(1, 0) fired {fired}, expected [{want!r}]", fired == [want])
+    check(f"go_to did not pop to depth 1: {len(ring.levels)}",
+          len(ring.levels) == 2)
+    print(f"navigation : go_to(1,0) -> {fired}, back to "
+          f"{len(ring.levels)} levels")
+
+
+def check_keyboard():
+    ring = Ring(items(11))
+    settle(ring)
+    fired.clear()
+    check("key 3 did not fire item 3",
+          ring.handle_key(Gdk.KEY_3) and fired == ["a2"])
+    fired.clear()
+    for keyval, name in ((0x03a, ":"), (0x03b, ";"), (Gdk.KEY_0, "0")):
+        handled = ring.handle_key(keyval)
+        check(f"{name!r} fired {fired} on an 11-item ring",
+              not handled and not fired)
+    fired.clear()
+    ring.handle_key(Gdk.KEY_9)
+    check("key 9 did not fire item 9", fired == ["a8"])
+    print("keyboard   : 1-9 map to items, ':' ';' '0' do nothing")
+
+
+def check_hidden_items():
+    ring = Ring([Bubble("dialog-information-symbolic", f"x{i}", key=f"x{i}")
+                 for i in range(4)])
+    settle(ring)
+    before = len(ring.levels[0].visible())
+    ring.set_item_shown("x1", False)
+    settle(ring)
+    after = ring.levels[0].visible()
+    check(f"hiding an item left {len(after)} of {before}",
+          len(after) == before - 1)
+    check("a hidden bubble is still visible",
+          not ring.levels[0].buttons[1].get_visible())
+    print(f"hiding     : {before} -> {len(after)} bubbles, gap closed")
+
+
+def check_arc_follows_the_card():
+    """A ring told what is above it lays its items out below it.
+
+    The obstacle is given as a rect: nothing here is ever allocated, so
+    a widget would measure as nothing — which is the case the next check
+    covers.
+    """
+    side = 2 * L.STYLE_CARD.max_reach
+    card = (side / 2 - 180, side / 2 - 400, 360, 380)   # the column above
+    ring = Ring(items(4), style=L.STYLE_CARD, obstacles=lambda: (card,))
+    settle(ring)
+    ys = [centre(ring, b)[1] - ring._cy for _it, b in ring.levels[0].visible()]
+    check(f"items are not below the hub: {[round(y) for y in ys]}",
+          all(y > -1 for y in ys))
+    print(f"arc        : all {len(ys)} items below the hub "
+          f"(dy {min(ys):.0f}..{max(ys):.0f})")
+
+
+def check_unallocated_surface_is_safe():
+    """tools/wizcheck builds surfaces it never presents, so every widget
+    measures as nothing. That must be a full circle, not a divide."""
+    card = Gtk.Box()
+    ring = Ring(items(3), style=L.STYLE_CARD, obstacles=lambda: (card,))
+    settle(ring)
+    check("an unmeasured obstacle did not fall back to a full circle",
+          ring.levels[0].metrics.angles[0] is not None
+          and len(ring.levels[0].visible()) == 3)
+    print("unmeasured : falls back to the whole circle, no exception")
+
+
+def check_lifecycle():
+    ring = Ring(nested(2))
+    ring.open()
+    for _ in range(2):
+        into = [i for i, it in enumerate(ring.levels[-1].items)
+                if it.children][0]
+        ring.activate(into)
+        ring._navigating = False
+    ring.back()
+    ring._navigating = False
+    ring.back()
+    ring._navigating = False
+    done = []
+    ring.dismiss(then=lambda: done.append(1))
+    ring.dismiss(then=lambda: done.append(2))   # must not hang or strand
+    # Every caller gets its callback exactly once. The second dismiss is
+    # a no-op for the ring but must still call through, or a menu whose
+    # close is the callback never closes.
+    check(f"dismiss did not call each caller back once: {done}",
+          done == [1, 2])
+    ring.swap(items(3))                          # must be a no-op, not a loop
+    print("lifecycle  : open/push/push/back/back/dismiss, no strand")
+
+
+def check_collapse_to():
+    """The waiting state of a handoff: one bubble stays lit, the rest go."""
+    ring = Ring(items(5))
+    settle(ring)
+    anchor = ring.collapse_to(2)
+    check("collapse_to did not report where the anchor sits",
+          anchor is not None)
+    lit = [b for _it, b in ring.levels[0].visible() if b.get_opacity() > 0.5]
+    check(f"{len(lit)} bubbles left lit, expected 1", len(lit) == 1)
+    check("the wrong bubble stayed", lit and lit[0] is ring.levels[0].buttons[2])
+    check("the hub did not go with the rest", ring.hub.get_opacity() < 0.01)
+    x, y, size = anchor
+    bx, by, bsize = centre(ring, ring.levels[0].buttons[2])
+    check(f"anchor {x:.0f},{y:.0f} is not where the bubble is "
+          f"{bx:.0f},{by:.0f}", abs(x - bx) < 1 and abs(y - by) < 1)
+    check("collapse_to on a hidden or missing item should report nothing",
+          Ring(items(2)).collapse_to(9) is None)
+    print(f"collapse   : 1 of 5 lit, anchor at ({x:.0f}, {y:.0f}) "
+          f"size {size:.0f}")
+
+
+def check_tether():
+    """The line that spans the gap between two surfaces."""
+    origin, target = (120.0, 90.0), (420.0, 300.0)
+    tether = radial.Tether(origin, target)
+    check("a tether draws before it is attached", tether._extent == 0.0)
+    done = []
+    tether.attach(lambda: done.append("taut"))
+    check(f"attach did not finish: {done}", done == ["taut"])
+    check(f"attach left extent at {tether._extent}", tether._extent == 1.0)
+    check(f"attach left slack at {tether._slack}", tether._slack == 0.0)
+    check("attach left it invisible", tether.get_opacity() > 0.9)
+    outline = M.taper(origin, target, tether.W0, tether.W1, 0.0, 1.0)
+    reach = max(math.dist(p, origin) for p in outline)
+    check(f"a taut tether does not reach the target: {reach:.0f} of "
+          f"{math.dist(origin, target):.0f}",
+          reach > math.dist(origin, target) - tether.W0)
+    done.clear()
+    tether.detach(lambda: done.append("gone"))
+    check(f"detach did not finish: {done}", done == ["gone"])
+    check("detach left the tether visible", tether.get_opacity() < 0.01)
+    check(f"detach did not release the origin end: {tether._start}",
+          tether._start == 1.0)
+    print(f"tether     : attach -> taut (reach {reach:.0f}px), "
+          f"detach -> released and gone")
+
+
+def check_animator_cancels():
+    """A second animation on one widget replaces the first."""
+    box = Gtk.Box()
+    seen = []
+    radial.drive(box, 0.2, lambda t: seen.append("a"))
+    radial.drive(box, 0.2, lambda t: seen.append("b"))
+    check("the animator did not run without a frame clock", seen)
+    # With no frame clock both settle immediately; the generation still
+    # has to advance, or a real surface would run both at once.
+    check("the animator did not bump its generation", box._anim_gen == 2)
+    print("animator   : settles without a frame clock, generation advances")
+
+
+def run():
+    check_menu_is_unchanged()
+    check_packing()
+    check_depth()
+    check_navigation()
+    check_keyboard()
+    check_hidden_items()
+    check_arc_follows_the_card()
+    check_unallocated_surface_is_safe()
+    check_collapse_to()
+    check_tether()
+    check_animator_cancels()
+    check_lifecycle()
+    print("\nFAILURES:" if fails else "\nall checks passed")
+    for f in fails:
+        print("  -", f)
+
+
+app = Gtk.Application(application_id="io.github.rebreda.dictatr.radialcheck")
+
+
+def activate(a):
+    a.hold()          # no window is ever presented, so hold the loop open
+    radial.apply_css()
+    try:
+        run()
+    finally:
+        a.release()
+        a.quit()
+
+
+app.connect("activate", activate)
+app.run([])
+sys.exit(1 if fails else 0)

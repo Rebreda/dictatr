@@ -50,6 +50,8 @@ from dictatr.settings import settings, write_config  # noqa: E402
 sys.path.insert(0, str(REPO / "ui"))
 import portal_typed  # noqa: E402  (pure helpers only; its gi imports are lazy)
 import portal  # noqa: E402
+import handoff  # noqa: E402
+import motion  # noqa: E402
 import radial  # noqa: E402
 from shortcuts import SHORTCUTS, pretty  # noqa: E402
 from radial import BLUE, CHECK_ICON, GREEN, INK, Bubble  # noqa: E402
@@ -750,45 +752,58 @@ class Wizard(Gtk.ApplicationWindow):
         bar_row.append(self.bar)
         stack.append(bar_row)
 
-        hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
-        self.back_btn = Gtk.Button(icon_name="go-previous-symbolic",
-                                   valign=Gtk.Align.CENTER,
-                                   tooltip_text="Back")
-        self.back_btn.add_css_class("satbtn")
-        self.back_btn.add_css_class("back")
-        self.back_btn.set_focusable(False)
-        self.back_btn.connect("clicked", lambda *_: self.back())
+        # The wizard's chrome is the same ring the menu and the chat use,
+        # in the card style: an emblem for a hub — this one is a badge
+        # for the step, not a control — with Back and Close orbiting it.
+        # It was a row of three buttons, which meant hiding Back on the
+        # first step slid Close sideways.
         self.hub = Gtk.Button(icon_name=self.steps[0].icon)
         self.hub.add_css_class("hubbtn")
         self.hub.set_focusable(False)
-        self.hub.set_sensitive(False)     # an emblem, not a control
-        close = Gtk.Button(icon_name="window-close-symbolic",
-                           valign=Gtk.Align.CENTER, tooltip_text="Close  [Esc]")
-        close.add_css_class("satbtn")
-        close.set_focusable(False)
-        close.connect("clicked", lambda *_: self.close())
-        hub_row.append(self.back_btn)
-        hub_row.append(self.hub)
-        hub_row.append(close)
-        stack.append(hub_row)
+        self.hub.set_sensitive(False)
+        self.ring = radial.Ring(
+            [radial.Bubble("go-previous-symbolic", "Back", self.back,
+                           css=("back",), key="back", group="nav",
+                           shown=False),
+             radial.Bubble("window-close-symbolic", "Close  [Esc]",
+                           self.close, css=("danger",), key="close",
+                           group="nav")],
+            hub=radial.Hub(self.steps[0].icon, widget=self.hub,
+                           sensitive=False, keep=True),
+            style=radial.STYLE_CARD)
+        ring_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        ring_row.append(self.ring)
+        stack.append(ring_row)
 
         self.column = stack
         self._hit = (step_row, self.scroll, self.extra, self.choices,
-                     status_row, bar_row, hub_row)
+                     status_row, bar_row)
 
-        ls = radial.layer_shell()
-        self.overlay = ls is not None
+        # The overlay is the kit's, not a second copy of it: this window
+        # had its own transcription of layer-shell setup and input-region
+        # polling, and the two had already drifted apart.
+        # The hub goes under the pointer, like the menu's and the
+        # chat's. Without an anchor the column was centred on the
+        # cursor, which put its hub some 300px below it.
+        hub_y = STACK_H - self.ring.size / 2
+        self.ov = radial.Overlay(self, stack, (WIDTH, STACK_H),
+                                 hit_widgets=self._hits, clamp=12,
+                                 on_place=self._enter_from,
+                                 anchor=(0.5, hub_y / STACK_H))
+        # Invisible until it is placed. Without this the whole column
+        # painted, fully opaque, in the screen's top-left corner and
+        # then teleported to the pointer — for up to two seconds, if the
+        # compositor was slow to say where the pointer was.
+        stack.set_opacity(0.0)
+        self.overlay = self.ov.start()
         if self.overlay:
-            ls.init_for_window(self)
-            ls.set_layer(self, ls.Layer.OVERLAY)
-            ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
-            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
-                         ls.Edge.RIGHT):
-                ls.set_anchor(self, edge, True)
-            GLib.timeout_add(250, self._update_input_region)
-        outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        outer.append(stack)
-        self.set_child(outer)
+            self.ov.enable_drag(self._draggable_at)
+        else:
+            stack.set_opacity(1.0)
+            outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            outer.append(stack)
+            self.set_child(outer)
+            GLib.timeout_add(120, self._open_ring)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
@@ -807,10 +822,45 @@ class Wizard(Gtk.ApplicationWindow):
         self._enter(self.index)
         return False
 
-    def _update_input_region(self):
-        if self._closing:
-            return False
-        return radial.clip_input_region(self, self._hit)
+    def _hits(self):
+        """Where the overlay takes clicks: the column, plus the ring's
+        bubbles one at a time rather than the square they are drawn in."""
+        return (*self._hit, *self.ring.hit_widgets())
+
+    def _enter_from(self, cx, cy):
+        """Rise into place, then bloom — the chat card's arrival, on the
+        wizard. It used to have no entrance at all."""
+        arrival = motion.Timeline(
+            alpha=motion.Track(0.0, 1.0, 0.22),
+            lift=motion.Track(26.0, 0.0, 0.22),
+            bloom=motion.Track(0.0, 1.0, 0.001, delay=0.12))
+        bloomed = [False]
+
+        def apply(v):
+            self.column.set_opacity(v["alpha"])
+            self.ov.move(cx, cy + v["lift"])
+            if v["bloom"] > 0.5 and not bloomed[0]:
+                bloomed[0] = True
+                self._open_ring()
+
+        radial.play(self, arrival, apply)
+
+    def _open_ring(self):
+        self.ring.open()
+        handoff.arrive(self, self.ov.canvas, self.ring.hub)
+        return False
+
+    def _draggable_at(self, x, y):
+        """Anywhere on the column that is not a control moves it."""
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        on_card = False
+        while target is not None:
+            if isinstance(target, (Gtk.Button, Gtk.Entry)):
+                return False
+            if target is self.column or target is self.ring:
+                on_card = True
+            target = target.get_parent()
+        return on_card
 
     def say(self, text, role="ai", title=None):
         """Add a pill. The wizard's own lines carry the step title; the
@@ -849,7 +899,9 @@ class Wizard(Gtk.ApplicationWindow):
         n = len(self._pills)
         for i, rev in enumerate(self._pills):
             age = n - 1 - i
-            rev.set_opacity(1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age))
+            want = 1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age)
+            if abs(rev.get_opacity() - want) > 0.01:
+                radial.fade(rev, want, 0.25)
 
     def _scroll_down(self):
         adj = self.scroll.get_vadjustment()
@@ -857,9 +909,23 @@ class Wizard(Gtk.ApplicationWindow):
         return False
 
     def _trim_to(self, count):
+        """Rewind the transcript, one pill at a time.
+
+        Walking back used to remove several at once, in one frame, so
+        the column collapsed instead of unwinding.
+        """
+        going = []
         while len(self._pills) > count:
-            self.msgs.remove(self._pills.pop())
-        self._refade()
+            going.append(self._pills.pop())
+
+        def gone(pill):
+            if pill.get_parent() is self.msgs:
+                self.msgs.remove(pill)
+            self._refade()
+
+        for i, pill in enumerate(reversed(going)):
+            radial.fade_out_then(pill, lambda p=pill: gone(p),
+                                 duration=0.16, delay=i * 0.04)
 
     # --- what the steps call ---------------------------------------------
     def set_body(self, text):
@@ -868,36 +934,73 @@ class Wizard(Gtk.ApplicationWindow):
         self._body = self.say(text, "ai", title=step.title)
 
     def set_status(self, text, tone=""):
-        for t in ("good", "bad"):
-            self.status.remove_css_class(t)
-        if tone:
-            self.status.add_css_class(tone)
-        self.status.set_label(text)
-        self.status.set_visible(bool(text))
+        """Crossfade the status line; the pill itself fades in and out.
+
+        It used to appear and disappear outright, changing the column's
+        height in one frame in the middle of a probe."""
+        self._status = (text, tone)
+
+        def apply():
+            label, colour = self._status
+            for t in ("good", "bad"):
+                self.status.remove_css_class(t)
+            if colour:
+                self.status.add_css_class(colour)
+            self.status.set_label(label)
+            self.status.set_visible(bool(label))
+
+        if self.status.get_label() == text and bool(text):
+            apply()
+        elif not text:
+            radial.fade_out_then(self.status, apply)
+        else:
+            was_empty = not self.status.get_visible()
+            apply()
+            if was_empty:
+                self.status.set_opacity(0.0)
+                radial.fade(self.status, 1.0, 0.20)
+            else:
+                self.status.set_opacity(1.0)
 
     def set_progress(self, fraction, text=None):
         """A real bar with a real number under it. None clears both."""
         if fraction is None:
-            self.bar.set_visible(False)
-            self.bar.set_fraction(0.0)
+            radial.fade_out_then(self.bar, self._hide_bar)
             return
+        if not self.bar.get_visible():
+            self.bar.set_opacity(0.0)
+            self.bar.set_visible(True)
+            radial.fade(self.bar, 1.0, 0.20)
         self.bar.set_visible(True)
         self.bar.set_fraction(max(0.0, min(1.0, float(fraction))))
         if text:
             self.set_status(text)
 
+    def _hide_bar(self):
+        self.bar.set_visible(False)
+        self.bar.set_fraction(0.0)
+        self.bar.set_opacity(1.0)
+
     def busy(self, on):
         """While a worker runs with no percentage to show, pulse."""
         if on:
-            self.bar.set_visible(True)
+            if not self.bar.get_visible():
+                self.bar.set_opacity(0.0)
+                self.bar.set_visible(True)
+                radial.fade(self.bar, 1.0, 0.20)
             if self._pulse is None:
                 self._pulse = GLib.timeout_add(90, self._do_pulse)
         elif self._pulse is not None:
             GLib.source_remove(self._pulse)
             self._pulse = None
-            self.bar.set_visible(self.bar.get_fraction() > 0)
+            if self.bar.get_fraction() <= 0:
+                radial.fade_out_then(self.bar, self._hide_bar)
 
     _pulse = None
+    # The status the pill is on its way to showing, so two in quick
+    # succession land on the later one rather than on whichever fade
+    # happened to survive.
+    _status = ("", "")
 
     def _do_pulse(self):
         self.bar.pulse()
@@ -909,32 +1012,64 @@ class Wizard(Gtk.ApplicationWindow):
         if widget is not None:
             self.extra.append(widget)
 
+    def _choice_button(self, i, bubble):
+        btn = Gtk.Button()
+        btn.add_css_class("choice")
+        if i == 0:
+            btn.add_css_class("primary")
+        row = Gtk.Box(spacing=9)
+        row.append(Gtk.Image(icon_name=bubble.icon))
+        row.append(Gtk.Label(label=bubble.tooltip, hexpand=True, xalign=0.0))
+        key = Gtk.Label(label=str(i + 1))
+        key.add_css_class("choice-key")
+        row.append(key)
+        btn.set_child(row)
+        # A focused button fires on space or Return, so a stray keypress
+        # used to activate whatever held focus.
+        btn.set_focusable(False)
+        btn.connect("clicked", self._chose, bubble)
+        return btn
+
     def set_items(self, bubbles):
         """Render the step's choices as labelled pills.
 
         Steps hand over radial Bubbles, whose tooltip was always the
         readable name of the action — here that name is the button, and
         the icon is only decoration beside it.
+
+        They leave and arrive one after another rather than being torn
+        down and rebuilt in a single frame. The choices are the wizard's
+        primary interaction and they used to be the one part of it with
+        no transition at all: picking one faded a pill into the
+        transcript while the list it came from blinked out of existence.
         """
-        while child := self.choices.get_first_child():
-            self.choices.remove(child)
-        for i, b in enumerate(bubbles):
-            btn = Gtk.Button()
-            btn.add_css_class("choice")
-            if i == 0:
-                btn.add_css_class("primary")
-            row = Gtk.Box(spacing=9)
-            row.append(Gtk.Image(icon_name=b.icon))
-            row.append(Gtk.Label(label=b.tooltip, hexpand=True, xalign=0.0))
-            key = Gtk.Label(label=str(i + 1))
-            key.add_css_class("choice-key")
-            row.append(key)
-            btn.set_child(row)
-            # A focused button fires on space or Return, so a stray
-            # keypress used to activate whatever held focus.
-            btn.set_focusable(False)
-            btn.connect("clicked", self._chose, b)
-            self.choices.append(btn)
+        specs = list(bubbles)
+        going = self._choice_buttons()
+
+        def arrive():
+            _, per = motion.stagger(len(specs), 0.30, 0.05)
+            for i, spec in enumerate(specs):
+                btn = self._choice_button(i, spec)
+                btn.set_opacity(0.0)
+                self.choices.append(btn)
+                radial.fade(btn, 1.0, 0.22, delay=i * per)
+
+        if not going:
+            arrive()
+            return
+
+        left = [len(going)]
+
+        def gone(btn):
+            if btn.get_parent() is self.choices:
+                self.choices.remove(btn)
+            left[0] -= 1
+            if left[0] == 0:
+                arrive()
+
+        for i, btn in enumerate(going):
+            radial.fade_out_then(btn, lambda b=btn: gone(b),
+                                 duration=0.14, delay=i * 0.03)
 
     def _chose(self, _btn, bubble):
         """Picking is a turn: it lands in the transcript, then runs."""
@@ -974,11 +1109,11 @@ class Wizard(Gtk.ApplicationWindow):
         self.set_status("")
         self.set_progress(None)
         self.busy(False)
-        self.hub.set_icon_name(step.icon)
-        # On the first step there is nothing to go back to, and the row
+        self.ring.set_hub(icon=step.icon)
+        # On the first step there is nothing to go back to, and the ring
         # already carries a close button; two controls that both close
-        # is one too many.
-        self.back_btn.set_visible(index > 0)
+        # is one too many. Its slot closes up rather than sitting empty.
+        self.ring.set_item_shown("back", index > 0)
         self.step_label.set_label(
             f"Step {index + 1} of {len(self.steps)}")
         step.enter()
@@ -1005,8 +1140,9 @@ class Wizard(Gtk.ApplicationWindow):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             buttons[0].emit("clicked")
             return True
-        if Gdk.KEY_1 <= keyval <= Gdk.KEY_0 + len(buttons):
-            buttons[keyval - Gdk.KEY_1].emit("clicked")
+        i = radial.digit_index(keyval, len(buttons))
+        if i is not None:
+            buttons[i].emit("clicked")
             return True
         return False
 

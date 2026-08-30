@@ -37,16 +37,24 @@ sys.path.insert(0, str(REPO / "src"))
 from dictatr import (actions, chatlog, concepts, llm,  # noqa: E402
                      mic, recall, runstate)
 from dictatr.engine import dictate_once, ensure_asr_loaded  # noqa: E402
-from dictatr.settings import settings  # noqa: E402
+from dictatr.settings import settings, write_config  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
+import handoff  # noqa: E402
+import motion  # noqa: E402
 import radial  # noqa: E402
-from radial import (BLUE, CHARCOAL, GREEN, INK, RED,  # noqa: E402
-                    SIZE as RSIZE, Bubble, Ring)
+from radial import (BLUE, CHARCOAL, INK, STYLE_CARD,  # noqa: E402
+                    Bubble, Hub, Ring)
 
 WIDTH = 360
-STACK_H = 620   # spacer + pills + status + hub; hub sits at the bottom
+STACK_H = 620   # spacer + pills + status + entry + room for the ring
+
+# What the card's ring takes up when nothing is open below it: the
+# column reserves that much and no more, so a submenu is free to grow
+# past the card instead of shoving the conversation around.
+RING_H = 2 * (STYLE_CARD.radius + STYLE_CARD.bubble / 2)
+HUB_Y = STACK_H - RING_H / 2      # the hub's centre, within the column
 
 # Same visual vocabulary as the radial menu — the palette comes from the
 # radial kit: round dark bubbles with thin white borders, blue hub mic,
@@ -85,10 +93,23 @@ window {{ background: transparent; }}
 }}
 .msgdot image {{ color: alpha({INK}, 0.75); -gtk-icon-size: 12px; }}
 .msgdot:hover {{ opacity: 1; border-color: alpha({BLUE}, 0.6); }}
+/* The working behind an answer: present but subordinate to it, so a
+   card with details on still reads as a conversation and not as a log. */
+.msg-trace {{
+  border-color: alpha(#ffffff, 0.08);
+  background: alpha({CHARCOAL}, 0.75);
+  color: alpha({INK}, 0.60);
+  font-size: 11px;
+  padding: 7px 12px;
+}}
 """.encode()
 
 
 class Chat(Gtk.ApplicationWindow):
+    # Set before the column is built, because the ring can report how
+    # much room it wants while the card is still being assembled.
+    _closing = False
+
     def __init__(self, app):
         super().__init__(application=app, decorated=False,
                          default_width=WIDTH)
@@ -118,6 +139,7 @@ class Chat(Gtk.ApplicationWindow):
         self.scroll.set_child(self.msgs)
         stack.append(self.scroll)
 
+        self._status = ("", False)
         self.status = Gtk.Label(label="")
         self.status.set_ellipsize(Pango.EllipsizeMode.END)
         self.status.add_css_class("status-pill")
@@ -137,54 +159,52 @@ class Chat(Gtk.ApplicationWindow):
         entry_row.append(self.entry)
         stack.append(entry_row)
 
-        hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
-        back = Gtk.Button(icon_name="go-previous-symbolic",
-                          valign=Gtk.Align.CENTER,
-                          tooltip_text="Back to the menu")
-        back.add_css_class("satbtn")
-        back.add_css_class("back")
-        back.connect("clicked", self.on_back)
-        self.mic_btn = Gtk.Button(icon_name="audio-input-microphone-symbolic")
-        self.mic_btn.add_css_class("hubbtn")
-        self.mic_btn.connect("clicked", self.on_mic)
-        close = Gtk.Button(icon_name="window-close-symbolic",
-                           valign=Gtk.Align.CENTER)
-        close.add_css_class("satbtn")
-        close.connect("clicked", lambda *_: self.close())
-        self.suggest_btn = Gtk.Button(icon_name="starred-symbolic",
-                                      valign=Gtk.Align.CENTER)
-        self.suggest_btn.add_css_class("satbtn")
-        self.suggest_btn.set_focusable(False)
-        self.suggest_btn.set_tooltip_text("What to do with the answer")
-        self.suggest_btn.set_visible(False)
-        self.suggest_btn.connect("clicked", self.on_suggest_ring)
+        # Room for the ring, which is not in this column: it hangs off
+        # the card. The gap grows when the ring does, so opening a level
+        # lifts the conversation clear of it instead of letting the new
+        # bubbles be drawn over the card that spawned them.
+        self._gap = RING_H
+        self.ring_gap = Gtk.Box(height_request=round(RING_H))
+        stack.append(self.ring_gap)
 
-        hub_row.append(back)
-        hub_row.append(self.mic_btn)
-        hub_row.append(self.suggest_btn)
-        hub_row.append(close)
-        stack.append(hub_row)
+        # The card's controls are a ring like every other ring in the
+        # family, with the microphone as its hub. They were a bespoke
+        # widget of their own, which is a whole second way of laying out
+        # a hub and its satellites for four buttons that do nothing a
+        # bubble cannot. Two groups: leaving the card, then acting on
+        # it, and the layout leaves more room between the pairs than
+        # inside them.
+        self.mic_btn = Gtk.Button()
+        self.mic_btn.add_css_class("hubbtn")
+        self.ring = Ring(
+            self._chrome_items(), style=STYLE_CARD,
+            hub=Hub("audio-input-microphone-symbolic", "Talk",
+                    action=self.on_mic, widget=self.mic_btn, keep=True),
+            obstacles=self._in_the_way, on_geometry=self._ring_grew)
 
         self.stack = stack
-        self._hit_widgets = (self.scroll, status_row, entry_row, hub_row)
+        self._hit_widgets = (self.scroll, status_row, entry_row)
         # Clicks land only where the card is painted; the rest of the
-        # desktop stays live under it. The hub sits at the bottom of the
-        # stack, so that is what meets the pointer.
+        # desktop stays live under it, and the ring reports its bubbles
+        # one by one rather than as the square it is drawn in.
         self.ov = radial.Overlay(
-            self, stack, (WIDTH, STACK_H),
-            hit_widgets=lambda: (*self._hit_widgets,
-                                 *( [self._ring] if self._ring else [] )),
-            on_place=self._enter_from, clamp=12)
+            self, stack, (WIDTH, STACK_H), hit_widgets=self._hits,
+            on_place=self._enter_from, clamp=12,
+            anchor=(0.5, HUB_Y / STACK_H))
         stack.set_opacity(0.0)   # invisible until placed at the pointer
         self.overlay = self.ov.start()
         if self.overlay:
             self.canvas = self.ov.canvas
+            self.ov.add_floating(self.ring, (WIDTH / 2 - self.ring.size / 2,
+                                             HUB_Y - self.ring.size / 2))
             self.ov.enable_drag(self._draggable_at)
         else:
-            # No layer-shell: an ordinary window, and no canvas to put
-            # rings on, so the per-message rings stay closed.
+            # No layer-shell: an ordinary window. The ring goes in the
+            # column instead of beside it, which costs it the room to
+            # grow but keeps every surface working on GNOME.
             self.canvas = None
             stack.set_opacity(1.0)
+            stack.append(self.ring)
             outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
                             margin_end=8)
             outer.append(stack)
@@ -196,7 +216,8 @@ class Chat(Gtk.ApplicationWindow):
 
         # --- session state ---
         self.history: list[dict] = []
-        self.phase = "idle"      # idle | warmup | listening | thinking | speaking
+        self._phase = None
+        self.phase = "idle"      # idle | listening | thinking
         self.live_label = None   # streaming user bubble
         self.think_label = None
         self._discard = False
@@ -206,8 +227,8 @@ class Chat(Gtk.ApplicationWindow):
         self._dots = 0
         # A screenshot the conversation is about, until it is asked about.
         self.shot = os.environ.get("DICTATE_SHOT") or None
-        self._ring = None        # the radial currently over the card
         self._picks = {}         # text -> the model's shortlist for it
+        self._acting_on = None   # the text the open action level is about
         self.log = chatlog.ChatLog()   # the conversation, kept
         self._turn_no = 0
 
@@ -224,20 +245,60 @@ class Chat(Gtk.ApplicationWindow):
         self.connect("close-request", self.on_close)
         self.start_turn()
 
+    # --- the hub ------------------------------------------------------
+    # What the one big button is for, per phase. It was a microphone
+    # whatever the card was doing, so the only way to find out what
+    # pressing it did was to press it.
+    MIC_FACES = {
+        "idle": ("audio-input-microphone-symbolic", "Talk", True),
+        "listening": ("media-playback-stop-symbolic",
+                      "Send now — stop listening", True),
+        "thinking": ("audio-input-microphone-symbolic", "Answering…", False),
+    }
+
+    @property
+    def phase(self):
+        return self._phase
+
+    @phase.setter
+    def phase(self, value):
+        """One place decides what the hub looks like, because every
+        branch that changed the phase used to also have to remember to
+        change the button, and they did not all remember."""
+        self._phase = value
+        icon, tip, live = self.MIC_FACES.get(value, self.MIC_FACES["idle"])
+        self.ring.set_hub(icon=icon, tooltip=tip, sensitive=live,
+                          css=("rec",) if value == "listening" else ())
+
     # --- overlay -------------------------------------------------------
     def _enter_from(self, cx, cy):
-        """Rise into place: the ring that opened this spiralled into its
-        hub, and a card that simply blinks on breaks that thread."""
-        start = self.get_frame_clock().get_frame_time() / 1e6
+        """Rise into place, then bloom.
 
-        def tick(_w, clock):
-            p = min(1.0, (clock.get_frame_time() / 1e6 - start) / 0.22)
-            e = 1 - (1 - p) ** 3
-            self.stack.set_opacity(e)
-            self.ov.canvas.move(self.stack, cx, cy + (1 - e) * 26)
-            return p < 1.0
+        One timeline rather than a tick callback and an unrelated
+        timeout whose numbers happened to add up: the column settles,
+        and a beat later the ring twirls out of its hub, picking up the
+        motion of the ring that spiralled into it to open this card. By
+        then the column has been allocated, which is also the first
+        moment the arc can be solved against what is above it.
+        """
+        arrival = motion.Timeline(
+            alpha=motion.Track(0.0, 1.0, 0.22),
+            lift=motion.Track(26.0, 0.0, 0.22),
+            # A cue, not a value: it flips a beat in and opens the ring.
+            bloom=motion.Track(0.0, 1.0, 0.001, delay=0.12))
+        bloomed = [False]
 
-        self.add_tick_callback(tick)
+        def apply(v):
+            self.stack.set_opacity(v["alpha"])
+            # Through the overlay, so the ring hanging off the card
+            # rises with it instead of sitting at its final spot while
+            # the card climbs past.
+            self.ov.move(cx, cy + v["lift"])
+            if v["bloom"] > 0.5 and not bloomed[0]:
+                bloomed[0] = True
+                self._open_ring()
+
+        radial.play(self, arrival, apply)
 
     def _draggable_at(self, x, y):
         """Anywhere on the card that is not a control moves it: the hub
@@ -247,7 +308,10 @@ class Chat(Gtk.ApplicationWindow):
         while target is not None:
             if isinstance(target, (Gtk.Button, Gtk.Entry)):
                 return False
-            if target is self.stack:
+            # The ring hangs off the card rather than sitting in it, so
+            # the empty circle around the hub has to count as the card
+            # too — it is most of what is under the pointer down there.
+            if target is self.stack or target is self.ring:
                 on_card = True
             target = target.get_parent()
         return on_card
@@ -260,13 +324,34 @@ class Chat(Gtk.ApplicationWindow):
         return not self._closing
 
     def set_status(self, text, error=False):
-        self.status.set_label(text)
-        (self.status.add_css_class if error
-         else self.status.remove_css_class)("error")
+        """Crossfade the status line.
+
+        Its text and its width both change, and it is centred, so a hard
+        swap moves the pill sideways under the eye that is reading it.
+        The pending text is held on self, so two statuses in quick
+        succession land on the later one rather than on whichever
+        animation happened to survive.
+        """
+        self._status = (text, error)
+
+        def apply():
+            label, bad = self._status
+            self.status.set_label(label)
+            (self.status.add_css_class if bad
+             else self.status.remove_css_class)("error")
+
+        if self.status.get_label() == text:
+            apply()
+        else:
+            radial.crossfade(self.status, apply)
 
     def _scroll_down(self):
         adj = self.scroll.get_vadjustment()
-        GLib.idle_add(lambda: adj.set_value(adj.get_upper()) and False)
+        # On idle, so the new pill has been allocated and the target is
+        # the real bottom rather than the one from before it landed.
+        GLib.idle_add(lambda: (radial.scroll_to(
+            self.scroll, adj, adj.get_upper() - adj.get_page_size()),
+            False)[1])
 
     def _show_shot(self):
         """The screenshot as its own pill, so the conversation shows what
@@ -325,10 +410,78 @@ class Chat(Gtk.ApplicationWindow):
         lab._rev = rev
         return lab
 
+    TRACE_MAX = 10       # lines; a long tool loop is a summary, not a log
+    TRACE_CHARS = 110    # per line, before the tail is cut
+
+    def trace_bubble(self, steps):
+        """The working behind the last answer, as its own quiet pill.
+
+        Deliberately not a bubble(): it carries no dot handle, because
+        there is nothing to do with a trace except read it."""
+        lines = []
+        for st in steps[:self.TRACE_MAX]:
+            detail = " ".join((st["detail"] or "").split())
+            if len(detail) > self.TRACE_CHARS:
+                detail = detail[:self.TRACE_CHARS - 1] + "…"
+            # Pango markup, not CSS: a label's spans are styled by
+            # attribute, and a stylesheet cannot reach inside one.
+            lines.append(
+                f'<span foreground="{BLUE}" weight="bold">'
+                f'{GLib.markup_escape_text(st["kind"])}</span>  '
+                f'{GLib.markup_escape_text(detail)}')
+        if len(steps) > self.TRACE_MAX:
+            lines.append(f"… and {len(steps) - self.TRACE_MAX} more")
+
+        lab = Gtk.Label(wrap=True, xalign=0.0, selectable=True)
+        lab.set_max_width_chars(40)
+        lab.set_markup("\n".join(lines))
+        inner = Gtk.Box()
+        inner.add_css_class("msg")
+        inner.add_css_class("msg-trace")
+        inner.append(lab)
+        wrap = Gtk.Box(halign=Gtk.Align.START)
+        wrap.append(inner)
+        rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
+                           transition_duration=200, child=wrap)
+        self.msgs.append(rev)
+        GLib.idle_add(rev.set_reveal_child, True)
+        self._refade()
+        self._scroll_down()
+
+    def _grow_into(self, lab, text):
+        """Put text in a pill and let the pill grow to hold it.
+
+        A one-line "· · ·" becoming a paragraph in a single frame shoves
+        the whole column upward; easing the height turns the same event
+        into the answer arriving.
+        """
+        wrap = lab._inner
+        was = wrap.get_height()
+        lab.set_label(text)
+        if was <= 0:
+            return
+        _, want, _, _ = wrap.measure(Gtk.Orientation.VERTICAL,
+                                     wrap.get_width())
+        if want > was:
+            radial.grow(wrap, was, want)
+
     def drop_bubble(self, lab):
-        if lab is not None:
-            self.msgs.remove(lab._rev)
+        """Fade a pill out, then take it away.
+
+        It used to be removed outright — the revealer that faded it in
+        was never asked to fade it out — so a cancelled utterance
+        vanished mid-gesture.
+        """
+        if lab is None:
+            return
+        rev = lab._rev
+
+        def gone():
+            if rev.get_parent() is self.msgs:
+                self.msgs.remove(rev)
             self._refade()
+
+        radial.fade_out_then(rev, gone)
 
     def _refade(self):
         """Older pills fade with age: the freshest exchange is solid, the
@@ -341,7 +494,15 @@ class Chat(Gtk.ApplicationWindow):
         n = len(pills)
         for i, rev in enumerate(pills):
             age = n - 1 - i  # 0 = newest
-            rev.set_opacity(1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age))
+            want = 1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age)
+            # Every pill's opacity used to be rewritten in one frame, so
+            # the whole history stepped back at once each time a line
+            # landed. Only what actually changed moves, and it ramps.
+            if abs(rev.get_opacity() - want) > 0.01:
+                radial.fade(rev, want, 0.25)
+        # The column just changed height, so the ring has a different
+        # amount of circle to work with than it did a moment ago.
+        GLib.idle_add(self._reflow)
 
     # --- turn flow (UI side; work happens on the asyncio thread) -------
     def start_turn(self):
@@ -349,26 +510,12 @@ class Chat(Gtk.ApplicationWindow):
             return
         self.phase = "listening"
         self._discard = False
-        self.mic_btn.add_css_class("rec")
         # No empty pill while waiting: the green hub says "listening";
         # the pill appears with the first words.
         self.live_label = None
         self.set_status("warming up…" if not self._warmed else
                         "listening — just talk")
         asyncio.run_coroutine_threadsafe(self._turn(), self.aio)
-
-    def _draggable_at(self, x, y):
-        """Anywhere on the card that is not a control moves it: the hub
-        alone was a 58px target for repositioning a conversation."""
-        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
-        on_card = False
-        while target is not None:
-            if isinstance(target, (Gtk.Button, Gtk.Entry)):
-                return False
-            if target is self.stack:
-                on_card = True
-            target = target.get_parent()
-        return on_card
 
     def on_entry(self, entry):
         text = entry.get_text().strip()
@@ -384,7 +531,6 @@ class Chat(Gtk.ApplicationWindow):
     def _typed_turn(self, text):
         if self._closing:
             return False
-        self.mic_btn.remove_css_class("rec")
         self.drop_bubble(self.live_label)
         self.live_label = self.bubble("user")
         self.live_label.set_label(text)
@@ -396,62 +542,117 @@ class Chat(Gtk.ApplicationWindow):
         asyncio.run_coroutine_threadsafe(self._answer(text, b""), self.aio)
         return False
 
-    # --- rings over the conversation ----------------------------------
-    def _open_ring(self, items, at_x, at_y, hub_tip="Close"):
-        """Put a radial where the thing it acts on is."""
-        if self.canvas is None or self._ring is not None:
-            return
-        ring = Ring(items, hub_icon="window-close-symbolic",
-                    hub_tooltip=f"{hub_tip}  [Esc]",
-                    on_root_hub=self._close_ring)
-        x = min(max(at_x - RSIZE / 2, 4), max(self.get_width() - RSIZE - 4, 4))
-        y = min(max(at_y - RSIZE / 2, 4), max(self.get_height() - RSIZE - 4, 4))
-        self.canvas.put(ring, x, y)
-        self._ring = ring
-        ring.open()
+    # --- the card's ring ----------------------------------------------
+    def _chrome_items(self):
+        """What the card's own ring offers.
 
-    def _close_ring(self):
-        ring, self._ring = self._ring, None
-        if ring is not None:
-            ring.dismiss(then=lambda: self.canvas.remove(ring))
+        Two groups, and the layout leaves more room between them than
+        inside them: getting out of the card, then acting on it.
+        """
+        return [
+            Bubble("go-previous-symbolic", "Back to the menu", self.on_back,
+                   key="back", group="leave"),
+            Bubble("window-close-symbolic", "Close  [Esc]", self.close,
+                   css=("danger",), key="close", group="leave"),
+            Bubble("emblem-system-symbolic", "Chat settings",
+                   self.open_settings, key="settings", group="act"),
+            Bubble("starred-symbolic", "What to do with the answer",
+                   self.open_suggest, key="suggest", group="act",
+                   shown=False),
+        ]
+
+    def _in_the_way(self):
+        """What the ring lays itself out around.
+
+        Everything above it: the conversation, the status line, the
+        entry. The arc is whatever they leave, so a card with ten
+        messages gives the ring a different sweep than a card with one
+        and neither of them is a number anybody wrote down.
+        """
+        return (self.scroll, self.status, self.entry)
+
+    def _hits(self):
+        """Where the overlay takes clicks: the card, plus the ring's
+        bubbles one at a time rather than the square they are drawn in."""
+        return (*self._hit_widgets, *self.ring.hit_widgets())
+
+    def _open_ring(self):
+        """Bloom, and reach back to whatever opened this card."""
+        self.ring.open()
+        handoff.arrive(self, self.canvas, self.ring.hub)
+        return False
+
+    def _ring_grew(self, reach):
+        """Make room for the ring, then let it use the room.
+
+        A level opening used to be drawn straight over the conversation:
+        the ring hangs off the card and simply got bigger. Now the gap it
+        sits in grows to match, which lifts the column clear, and the arc
+        is re-solved against where the column has moved to — so a deep
+        level gets more of the circle than a shallow one, because there
+        is more of the circle free.
+        """
+        want = max(RING_H, 2 * reach + 8)
+        if abs(self._gap - want) < 1:
+            return
+        # Not radial.grow: that releases the height back to natural when
+        # it lands, and this gap has no natural height to go back to.
+        track = motion.Track(self._gap, want, 0.24)
+        self._gap = want
+        radial.drive(
+            self.ring_gap, 0.24,
+            lambda t: self.ring_gap.set_size_request(-1, round(track.at(t))),
+            lambda: GLib.idle_add(self._reflow))
+
+    def _reflow(self):
+        """Re-solve the ring's arc, after the column changed shape."""
+        if not self._closing:
+            self.ring.relayout()
+        return False
 
     def _ring_items(self, text, picks):
         """Catalogue bubbles for one piece of text, plus copy."""
-        items = [Bubble(p["icon"], p["label"],
-                        self._ring_action(p, text)) for p in picks]
-        items.append(Bubble("edit-copy-symbolic", "Copy",
-                            self._copy(text)))
+        items = [Bubble(p["icon"], p["label"], self._ring_action(p, text),
+                        key=f"{p['id']}:{p.get('arg', '')}") for p in picks]
+        items.append(Bubble("edit-copy-symbolic", "Copy", self._copy(text),
+                            key="copy"))
         return items
 
     def _ring_action(self, pick, text):
         def run():
-            self._close_ring()
+            self.ring.go_to(0)
             self.run_action(pick, text)
         return run
 
     def _copy(self, text):
         def run():
-            self._close_ring()
+            self.ring.go_to(0)
             subprocess.run(["wl-copy"], input=text.encode(), check=False)
             self.set_status("copied")
         return run
 
-    def on_msg_menu(self, btn, lab):
-        """The ring for one message: what to do with this line."""
-        text = lab.get_label().strip()
-        if not text or self._ring is not None:
+    def _open_actions(self, text):
+        """A level of what to do with *text*, and the model's opinion of
+        it when that arrives."""
+        if not text or self.ring.depth:
             return
-        ok, b = btn.compute_bounds(self)
-        x = b.origin.x if ok else self.get_width() / 2
-        y = b.origin.y if ok else self.get_height() / 2
-        self._open_ring(self._ring_items(text, self._picks_for(text)), x, y,
-                        "Close")
+        self._acting_on = text
+        self.ring.push(self._ring_items(text, self._picks_for(text)),
+                       Hub("starred-symbolic", "What to do with this"))
         threading.Thread(target=self._refresh_ring, args=(text,),
                          daemon=True).start()
 
+    def on_msg_menu(self, _btn, lab):
+        """The level for one message: what to do with this line."""
+        self._open_actions(lab.get_label().strip())
+
+    def open_suggest(self):
+        """The level for the conversation: what to do with the answer."""
+        self._open_actions(self.history[-1]["content"] if self.history else "")
+
     def _picks_for(self, text):
         """What the model last suggested for this text, or the staples
-        until it answers: a ring must open now, not in two seconds."""
+        until it answers: a level must open now, not in two seconds."""
         cached = self._picks.get(text)
         if cached:
             return cached
@@ -468,24 +669,42 @@ class Chat(Gtk.ApplicationWindow):
             GLib.idle_add(self._swap_ring, text, picks)
 
     def _swap_ring(self, text, picks):
-        if self._ring is not None:
-            self._ring.swap(self._ring_items(text, picks),
-                            hub_icon="window-close-symbolic",
-                            hub_tooltip="Close  [Esc]")
+        if self.ring.depth and self._acting_on == text:
+            self.ring.update(self._ring_items(text, picks))
         return False
 
-    def on_suggest_ring(self, btn):
-        """The ring for the conversation: what to do next, off the hub."""
-        answer = self.history[-1]["content"] if self.history else ""
-        if not answer or self._ring is not None:
-            return
-        ok, b = btn.compute_bounds(self)
-        x = b.origin.x + (b.size.width / 2 if ok else 0)
-        y = b.origin.y if ok else self.get_height() / 2
-        self._open_ring(self._ring_items(answer, self._picks_for(answer)),
-                        x, y - 40, "Close")
-        threading.Thread(target=self._refresh_ring, args=(answer,),
-                         daemon=True).start()
+    # --- the settings level -------------------------------------------
+    # Live switches. attr on settings.llm, the config key it is stored
+    # under, icon, label.
+    SETTINGS_RING = (
+        ("details", "chat_details", "view-list-symbolic",
+         "Show the chat's working"),
+        ("speak", "speak_answers", "audio-speakers-symbolic",
+         "Speak answers aloud"),
+        ("recall", "recall", "document-open-recent-symbolic",
+         "Recall from the archive"),
+    )
+
+    def _settings_items(self):
+        return [Bubble(icon, f"{label}: {'on' if on else 'off'}",
+                       self._toggle(attr, key, label),
+                       css=("on",) if on else (), key=key)
+                for attr, key, icon, label in self.SETTINGS_RING
+                for on in (bool(getattr(settings.llm, attr)),)]
+
+    def _toggle(self, attr, key, label):
+        def run():
+            on = not bool(getattr(settings.llm, attr))
+            write_config({key: on})   # the next chat opens the same way
+            self.set_status(f"{label.lower()}: {'on' if on else 'off'}")
+            # Same keys, so the ring repaints one bubble green instead of
+            # spiralling every bubble out and back to say so.
+            self.ring.update(self._settings_items())
+        return run
+
+    def open_settings(self):
+        self.ring.push(self._settings_items(),
+                       Hub("emblem-system-symbolic", "Chat settings"))
 
     def run_action(self, pick, text):
         """Run a catalogue action and show it as a turn, command and all,
@@ -515,17 +734,30 @@ class Chat(Gtk.ApplicationWindow):
         GLib.idle_add(self._show_answer, out)
         GLib.idle_add(self._turn_done)
 
-    def on_back(self, _btn):
-        subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
-        self.close()
+    def on_back(self):
+        handoff.leave(self, self.ring, [str(REPO / "bin" / "dictate-menu")])
 
-    def on_mic(self, _btn):
+    def on_mic(self):
+        """Stop listening and send, or start listening again.
+
+        The card listens on its own, so this is a commit far more often
+        than it is a start; without the status line it looked like a
+        button that did nothing, because ending an utterance early looks
+        exactly like the VAD ending it for you."""
         if self.phase == "listening":
+            self.set_status("sending…")
             self._commit_now()
         elif self.phase == "idle":
             self.start_turn()
 
     def on_key(self, _c, keyval, _code, _state):
+        # The ring gets the keys first: its bubbles are numbered and its
+        # levels answer to Escape, both of which were lies while Escape
+        # closed the whole conversation instead. The controller is on
+        # the bubble phase, so a focused entry still eats digits before
+        # any of this sees them.
+        if self.ring.handle_key(keyval):
+            return True
         if keyval == Gdk.KEY_Escape:
             self.close()
             return True
@@ -606,13 +838,11 @@ class Chat(Gtk.ApplicationWindow):
 
     def _turn_failed(self, msg):
         self.phase = "idle"
-        self.mic_btn.remove_css_class("rec")
         self.drop_bubble(self.live_label)
         self.live_label = None
         self.set_status(msg + " — tap the mic to retry", error=True)
 
     def _got_text(self, text, pcm):
-        self.mic_btn.remove_css_class("rec")
         self.entry.set_text("")
         if self._closing or self._discard or not text.strip():
             self.drop_bubble(self.live_label)
@@ -637,21 +867,9 @@ class Chat(Gtk.ApplicationWindow):
         asyncio.run_coroutine_threadsafe(self._answer(text, pcm), self.aio)
 
     async def _answer(self, text, pcm):
-        context = []
-        if settings.llm.recall and settings.storage.enabled:
-            with contextlib.suppress(OSError):
-                context = await asyncio.to_thread(recall.search, text)
-        try:
-            shot, self.shot = self.shot, None   # asked about once
-            answer = await asyncio.to_thread(
-                llm.chat, text, context, list(self.history), shot)
-        except OSError as e:
-            GLib.idle_add(self._answer_failed, str(e))
-            return
-        self.history += [{"role": "user", "content": text},
-                         {"role": "assistant", "content": answer}]
-        GLib.idle_add(self._show_answer, answer)
-
+        # Archive first: a spoken question is worth keeping even when the
+        # answer never arrives, and llm.chat is the part that fails.
+        record = None
         if settings.storage.enabled and pcm:
             with contextlib.suppress(OSError, ValueError):
                 record = save_recording(
@@ -659,9 +877,35 @@ class Chat(Gtk.ApplicationWindow):
                     storage_base=Path(settings.storage.base).expanduser(),
                     whisper_model=settings.whisper.model,
                     meta={"mode": "ask"})
-                if settings.llm.concepts:
-                    with contextlib.suppress(Exception):
-                        await asyncio.to_thread(concepts.annotate, record)
+        # What the model was given and what it did with it. Collected
+        # whether or not the card is showing it: the trace is the only
+        # record of why an answer came out the way it did, and deciding
+        # to look afterwards is too late if it was never kept.
+        steps: list[dict] = []
+
+        def step(kind, detail):
+            steps.append({"kind": kind, "detail": detail})
+
+        context = []
+        if settings.llm.recall and settings.storage.enabled:
+            with contextlib.suppress(OSError):
+                context = await asyncio.to_thread(recall.search, text)
+            if not context:
+                step("recall", "nothing relevant in the archive")
+        try:
+            shot, self.shot = self.shot, None   # asked about once
+            answer = await asyncio.to_thread(
+                llm.chat, text, context, list(self.history), shot, step)
+        except OSError as e:
+            GLib.idle_add(self._answer_failed, str(e))
+            return
+        self.history += [{"role": "user", "content": text},
+                         {"role": "assistant", "content": answer}]
+        GLib.idle_add(self._show_answer, answer, steps)
+
+        if record is not None and settings.llm.concepts:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(concepts.annotate, record)
         if settings.llm.speak and not self._closing:
             GLib.idle_add(self.set_status, "speaking…")
             await asyncio.to_thread(llm.speak, answer)
@@ -673,12 +917,14 @@ class Chat(Gtk.ApplicationWindow):
         self.think_label = None
         self.set_status(f"LLM unreachable — {msg}", error=True)
 
-    def _show_answer(self, answer):
-        self.log.turn("assistant", answer)
+    def _show_answer(self, answer, steps=None):
+        self.log.turn("assistant", answer, trace=steps or None)
         subprocess.run(["wl-copy"], input=answer.encode(), check=False)
         if self.think_label is not None:
-            self.think_label.set_label(answer)
+            self._grow_into(self.think_label, answer)
             self.think_label = None
+        if steps and settings.llm.details:
+            self.trace_bubble(steps)
         self._scroll_down()
         threading.Thread(target=self._fetch_follow_ups, args=(answer,),
                          daemon=True).start()
@@ -698,7 +944,7 @@ class Chat(Gtk.ApplicationWindow):
         answer = self.history[-1]["content"] if self.history else ""
         if answer:
             self._picks[answer] = picks
-            self.suggest_btn.set_visible(True)
+            self.ring.set_item_shown("suggest", True)
         return False
 
 
