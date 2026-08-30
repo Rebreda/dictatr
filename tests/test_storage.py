@@ -40,3 +40,27 @@ def test_patch_manifest_record(tmp_path):
     assert row["raw_transcription"] == "note"  # untouched fields survive
 
     assert not patch_manifest_record(manifest, "nope", {"categories": []})
+
+
+def test_legacy_archive_notice(tmp_path, monkeypatch):
+    """The nudge to move out of listenr's directory fires only when
+    there is something to move and nowhere it has already gone."""
+    from dictatr import settings as st
+
+    legacy = tmp_path / "listenr" / "dictation"
+    legacy.mkdir(parents=True)
+    here = tmp_path / "share" / "dictatr" / "archive"
+    monkeypatch.setattr(st, "LEGACY_ARCHIVE", legacy)
+    monkeypatch.setattr(st, "DATA_HOME", tmp_path / "share" / "dictatr")
+    monkeypatch.setattr(st, "_cfg", {})
+
+    assert not st.legacy_archive_pending()          # no manifest yet
+    (legacy / "manifest.jsonl").write_text("{}\n")
+    assert st.legacy_archive_pending()
+
+    here.mkdir(parents=True)
+    (here / "manifest.jsonl").write_text("{}\n")
+    assert not st.legacy_archive_pending()          # already moved
+
+    monkeypatch.setattr(st, "_cfg", {"archive": str(legacy)})
+    assert not st.legacy_archive_pending()          # chosen deliberately

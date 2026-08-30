@@ -245,6 +245,22 @@ def cmd_file(path: str) -> int:
     return 0
 
 
+def _legacy_archive_note() -> None:
+    """Said once per command, until the recordings are moved.
+
+    Early versions archived into ~/.listenr/dictation, which is not
+    dictatr's to write to. Moving is a one-time script rather than
+    something the app does on its own: it is the user's data, tens of
+    megabytes of it, and quietly relocating it while they are dictating
+    is not an improvement worth making behind their back."""
+    from .settings import legacy_archive_pending
+    if not legacy_archive_pending():
+        return
+    tool = Path(__file__).resolve().parents[2] / "tools" / "archive-migrate"
+    print(f"dictatr: recordings are still in ~/.listenr/dictation. "
+          f"Move them with:\n    {tool} --go", file=sys.stderr)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="dictatr", description=__doc__)
     sub = p.add_subparsers(dest="cmd")
@@ -283,6 +299,7 @@ def main() -> None:
     g.add_argument("--restore", metavar="UID",
                    help="move a quarantined clip back into the archive")
     args = p.parse_args()
+    _legacy_archive_note()
 
     if args.cmd in (None, "toggle"):
         clip = getattr(args, "clip", False)

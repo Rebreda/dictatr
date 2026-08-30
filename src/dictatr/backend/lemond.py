@@ -19,6 +19,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from ..settings import DATA_HOME
+
 # Pinned embeddable release, and the only copy of the pin. The packages
 # do not vendor the binary (a prebuilt x86-64 ELF cannot ride inside an
 # arch-independent package, and bundling one bars it from Debian and
@@ -31,8 +33,7 @@ TARBALL_URL = (
     f"v{PINNED_VERSION}/lemonade-embeddable-{PINNED_VERSION}-ubuntu-x64.tar.gz"
 )
 
-DATA = Path(os.environ.get("XDG_DATA_HOME",
-                           Path.home() / ".local" / "share")) / "dictatr"
+DATA = DATA_HOME  # archive included; see settings.DATA_HOME
 VENDORED = Path("/usr/lib/dictatr/lemond/lemond")  # if a distro ships one
 DOWNLOADED = DATA / "lemond" / "lemond"            # source installs
 STATE = DATA / "lemonade"  # lemond working dir: config.json, engines, log

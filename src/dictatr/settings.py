@@ -125,6 +125,20 @@ def write_config(updates: dict) -> None:
     _cfg.update(merged)
 
 
+def legacy_archive_pending() -> bool:
+    """True when recordings are still sitting in listenr's directory.
+
+    Only worth saying when the old place has data and the configured one
+    does not: anyone who has already moved, or who points the archive
+    somewhere deliberately, hears nothing."""
+    if "archive" in _cfg or not LEGACY_ARCHIVE.exists():
+        return False
+    if not (LEGACY_ARCHIVE / "manifest.jsonl").exists():
+        return False
+    here = DATA_HOME / "archive"
+    return not here.exists() or not any(here.iterdir())
+
+
 def setup_seen() -> bool:
     """True once the wizard has run to an end (finished or dismissed).
     The tray only offers first-run setup while this is False."""
@@ -153,11 +167,23 @@ class VADSettings:
     idle_s = Setting("DICTATE_IDLE_S", "idle_s", 3.0, float)
 
 
+# Everything dictatr keeps: the archive below, and the managed engine
+# and its working directory (see backend/lemond.py). One definition,
+# because the two would silently share a directory otherwise.
+DATA_HOME = (Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local"
+                  / "share") / "dictatr")
+
+# Where the archive used to live, back when it was written into
+# listenr's directory. Nothing depends on listenr, so the recordings
+# belong under dictatr's own name; tools/archive-migrate moves an old one.
+LEGACY_ARCHIVE = Path.home() / ".listenr" / "dictation"
+
+
 class StorageSettings:
-    # listenr-format archive: audio/YYYY-MM-DD/clip_*.wav + manifest.jsonl.
-    # "off" disables archiving.
-    base = Setting("DICTATE_ARCHIVE", "archive",
-                   str(Path.home() / ".listenr" / "dictation"))
+    # audio/YYYY-MM-DD/clip_*.wav + an append-only manifest.jsonl, in
+    # listenr's on-disk format so the tree can be handed to listenr by
+    # copying it. "off" disables archiving.
+    base = Setting("DICTATE_ARCHIVE", "archive", str(DATA_HOME / "archive"))
 
     @property
     def enabled(self) -> bool:

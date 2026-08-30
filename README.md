@@ -5,11 +5,12 @@ Hotkey voice dictation for Linux desktops, backed by a local
 and the transcript is typed at your cursor (or copied to the clipboard).
 Recording stops by itself when you stop talking. Nothing leaves your machine.
 
-Every accepted dictation is archived in
+Every accepted dictation is archived under `~/.local/share/dictatr/archive` in
 [listenr](https://github.com/Rebreda/listenr)'s on-disk format
 (`audio/YYYY-MM-DD/clip_*.wav` plus append-only `manifest.jsonl`), so daily
-dictation doubles as ASR fine-tuning data. listenr itself is not required;
-dictatr just writes a listenr-compatible archive.
+dictation doubles as ASR fine-tuning data. listenr itself is not required
+and nothing is written outside dictatr's own directory; the format just
+means handing the archive to listenr is a copy.
 
 <p align="center">
   <img src="docs/assets/hero.gif" width="800" alt="Demo: Ctrl+Alt+D in an editor, a Listening notification appears, and the spoken sentence lands at the cursor in real time; recording stops by itself">

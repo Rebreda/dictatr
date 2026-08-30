@@ -37,6 +37,10 @@ stage_tree src/dictatr 644 -name '*.py'
 stage_tree ui 644 \( -name '*.py' -o -name '*.png' -o -name '*.svg' \
                      -o -name '*.js' \)
 stage_tree bin 755
+# One-time maintenance scripts. Not surfaces and not on $PATH: the only
+# one so far moves an archive out of ~/.listenr, which a fresh install
+# never has to do and an upgraded one does exactly once.
+stage_tree tools 755
 
 # Anything carrying a #! is executed, not imported, and shipping it 644
 # is an rpmlint error (non-executable-script). Decided by the file

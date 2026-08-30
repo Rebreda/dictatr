@@ -36,7 +36,8 @@ DICTATE = str(REPO / "bin" / "dictate")
 sys.path.insert(0, str(REPO / "src"))
 from dictatr import actions, context as dictatr_context  # noqa: E402
 from dictatr import deliver, runstate  # noqa: E402
-from dictatr.settings import CONFIG_PATH, settings, write_config  # noqa: E402
+from dictatr.settings import (CONFIG_PATH, REGISTRY, settings,  # noqa: E402
+                              write_config)
 
 sys.path.insert(0, str(REPO / "ui"))
 import radial  # noqa: E402
@@ -315,7 +316,7 @@ class SettingsWindow(Gtk.Window):
         self.archive_dir = Gtk.Entry()
         self.archive_dir.set_text(
             settings.storage.base if settings.storage.enabled
-            else str(Path.home() / ".listenr" / "dictation"))
+            else REGISTRY["archive"].default)
         row(6, "Archive folder", self.archive_dir)
 
         self.notify_checks = {}

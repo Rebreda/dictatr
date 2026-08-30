@@ -188,10 +188,10 @@ gesture returns to near where it began (end displacement under a third
 of the distance drawn), which excludes dragging; a circle bends gently
 at every step and is as wide as it is tall, which excludes a shake,
 whose half-turn at each end sums to the same total turning while
-looking nothing like a circle. `gesture_debug = true` logs every judged
+looking nothing like a circle. `debug = "gesture"` logs every judged
 trace with its measurements, which is how those numbers were chosen.
 
-## What dictatr knows about where you are## What dictatr knows about where you are
+## What dictatr knows about where you are
 
 Wayland gives an app no way to ask which window has focus, so the
 knowledge comes from the compositor: on KDE the tray loads a small KWin
@@ -206,6 +206,25 @@ merely score alike, so questions asked in an editor lean toward what you
 said while editing. Ask mode is also told which app you are in, and told
 not to mention it unless you ask. Off KDE none of this exists and
 everything behaves as before.
+
+## Where the recordings live
+
+`~/.local/share/dictatr/archive` (`XDG_DATA_HOME` if set), alongside the
+managed engine. `DICTATE_ARCHIVE` moves it; `off` disables archiving.
+
+The layout is listenr's format and stays that way: `audio/YYYY-MM-DD/`
+holds the clips, `manifest.jsonl` is an append-only row per recording,
+`chats/` holds conversations, `cache/` the embeddings. Nothing depends
+on listenr, so handing the tree over is a copy rather than a coupling:
+
+```bash
+cp -r ~/.local/share/dictatr/archive ~/.listenr/dictation
+```
+
+Early versions wrote into `~/.listenr/dictation` directly. If yours did,
+`tools/archive-migrate` shows what it would move and `--go` moves it,
+updating the config as it goes. dictatr says so once on any command
+until you do.
 
 ## Always-on capture
 
@@ -350,7 +369,7 @@ environment.
 | `OPENAI_BASE_URL` | unset | default base URL for the custom provider |
 | `OPENAI_API_KEY` | unset | default API key for the custom provider |
 | `DICTATE_MODEL` | `Moonshine-Medium-Streaming` | ASR model (a streaming model; drives all mic paths) |
-| `DICTATE_ARCHIVE` | `~/.listenr/dictation` | listenr-format archive dir, `off` to disable |
+| `DICTATE_ARCHIVE` | `~/.local/share/dictatr/archive` | listenr-format archive dir, `off` to disable |
 | `DICTATE_VAD_THRESHOLD` | `0.02` | speech trigger floor (matches listenr tuning) |
 | `DICTATE_VAD_SILENCE_MS` | `1200` | pause that ends the utterance |
 | `DICTATE_VAD_PREFIX_MS` | `250` | pre-roll kept before the first word |
@@ -368,11 +387,38 @@ environment.
 | `DICTATE_GESTURE_SHAKE_H` | unset | what a left-and-right shake does |
 | `DICTATE_GESTURE_CIRCLE_CW` | unset | what a clockwise circle does |
 | `DICTATE_GESTURE_CIRCLE_CCW` | unset | what an anticlockwise circle does |
-| `DICTATE_GESTURE_DEBUG` | `false` | log every judged trace with its measurements |
+| `DICTATE_DEBUG` | unset | diagnostics to log: comma-separated topics, or `all` (see below) |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |
 | `DICTATE_GC_PURGE_DAYS` | `30` | gc: quarantined trash older than this is deleted |
+
+## Diagnostics
+
+`debug` names the diagnostics to log: a comma-separated list of topics,
+or `all`. It is empty by default and has no place in the settings
+window -- these are firehoses for tuning and for bug reports, not
+preferences.
+
+| topic | what it logs |
+| --- | --- |
+| `gesture` | every trace the compositor hands over, with the measurements behind the verdict |
+
+```toml
+debug = "gesture"
+```
+
+The output goes to the tray's own log: `./dev logs` in a checkout,
+`journalctl --user -t dictatr-tray -f` for an installed one. Like every
+other setting it is read live, so a topic takes effect without
+restarting anything.
+
+The gesture thresholds in `src/dictatr/gestures.py` are fractions of the
+screen height rather than pixels, so they should travel between
+displays -- but they were chosen against one person's hand. If a gesture
+of yours never fires, or fires when you did not mean it, this is the
+topic to turn on: the logged measurements are what a useful bug report
+needs.
 
 ## Project layout
 

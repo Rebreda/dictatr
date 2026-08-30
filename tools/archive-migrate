@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Move the archive out of listenr's directory into dictatr's own.
+
+Early versions wrote into ~/.listenr/dictation, from when the two were
+meant to merge. Nothing depends on listenr, so the recordings belong
+under dictatr's name. The on-disk layout is unchanged and still
+listenr's format, so handing the tree to listenr later is a copy:
+
+    cp -r ~/.local/share/dictatr ~/.listenr/dictation
+
+Run with no arguments to see what would happen; --go performs it.
+"""
+
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from dictatr.settings import (CONFIG_PATH, DATA_HOME,  # noqa: E402
+                              LEGACY_ARCHIVE, settings, write_config)
+
+
+def main(argv):
+    go = "--go" in argv
+    src = LEGACY_ARCHIVE
+    dest = Path(settings.storage.base).expanduser()
+    if str(dest) == str(src):
+        # The config still names the old place: move to where a fresh
+        # install would have put it, and rewrite the key to match.
+        dest = DATA_HOME / "archive"
+
+    if not src.exists():
+        print(f"nothing to move: {src} does not exist")
+        return 0
+    if dest.exists() and any(dest.iterdir()):
+        print(f"{dest} already has data; move or remove it first")
+        return 1
+
+    rows = 0
+    manifest = src / "manifest.jsonl"
+    if manifest.exists():
+        rows = sum(1 for line in manifest.read_text().splitlines() if line)
+    size = sum(f.stat().st_size for f in src.rglob("*") if f.is_file())
+
+    print(f"  from: {src}")
+    print(f"    to: {dest}")
+    print(f"  what: {rows} recordings, {size / 1e6:.0f} MB")
+    print(f"config: archive = \"{dest}\" in {CONFIG_PATH}")
+    if not go:
+        print("\nnothing done. Pass --go to move it.")
+        return 0
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+    write_config({"archive": str(dest)})
+    print(f"\nmoved. {src} is gone; {dest} holds the archive.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
