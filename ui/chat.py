@@ -52,46 +52,6 @@ STACK_H = 620   # spacer + pills + status + hub; hub sits at the bottom
 # transparent overlay, twirling out of a hub.
 CSS = f"""
 window {{ background: transparent; }}
-.hubbtn {{
-  border-radius: 9999px;
-  border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha({CHARCOAL}, 0.93);
-  min-width: 58px; min-height: 58px;
-  transition: background 150ms ease, border-color 150ms ease;
-}}
-.hubbtn image {{ color: {BLUE}; }}
-.hubbtn.rec {{ background: alpha({GREEN}, 0.25); border-color: alpha({GREEN}, 0.6); }}
-.hubbtn.rec image {{ color: {GREEN}; }}
-.hubbtn:hover {{ border-color: alpha(#ffffff, 0.35); }}
-.satbtn {{
-  border-radius: 9999px;
-  border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha({CHARCOAL}, 0.93);
-  min-width: 36px; min-height: 36px;
-}}
-.satbtn image {{ color: {INK}; }}
-.satbtn:hover {{ background: alpha({RED}, 0.25); border-color: alpha({RED}, 0.6); }}
-.satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
-.msg {{
-  border-radius: 20px; padding: 9px 14px;
-  background: alpha({CHARCOAL}, 0.93);
-  border: 1px solid alpha(#ffffff, 0.10);
-  color: {INK};
-  transition: border-color 150ms ease;
-}}
-.msg-user {{ border-color: alpha({GREEN}, 0.45); }}
-.msg-user.live {{ border-color: alpha({GREEN}, 0.85); }}
-.msg-ai {{ border-color: alpha({BLUE}, 0.35); }}
-.status-pill {{
-  background: alpha({CHARCOAL}, 0.85);
-  border: 1px solid alpha(#ffffff, 0.08);
-  border-radius: 9999px; padding: 3px 12px;
-  color: alpha({INK}, 0.6); font-size: 11px;
-}}
-.status-pill.error {{ color: {RED}; }}
-/* A GTK entry paints its own frame and background on an inner text
-   node, so styling the widget alone leaves a pale rectangle inside the
-   pill. Both nodes are flattened, then the pill is drawn once. */
 .chat-entry, .chat-entry > text, .chat-entry > text > selection {{
   background: none;
   background-image: none;
@@ -122,7 +82,6 @@ window {{ background: transparent; }}
   transition: opacity 120ms ease, border-color 120ms ease;
 }}
 .msgdot image {{ color: alpha({INK}, 0.75); -gtk-icon-size: 12px; }}
-.msg-wrap:hover .msgdot {{ opacity: 0.85; }}
 .msgdot:hover {{ opacity: 1; border-color: alpha({BLUE}, 0.6); }}
 """.encode()
 

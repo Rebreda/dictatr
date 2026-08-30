@@ -69,16 +69,6 @@ STACK_H = 640   # pills + choices + status + hub; the hub sits at the bottom
 # whose meaning only appears on hover is a choice nobody reads.
 SETUP_CSS = f"""
 window {{ background: transparent; }}
-.msg {{
-  border-radius: 20px; padding: 9px 14px;
-  background: alpha(#1c1d22, 0.93);
-  border: 1px solid alpha(#ffffff, 0.10);
-  color: {INK};
-}}
-.msg-ai {{ border-color: alpha({BLUE}, 0.35); }}
-.msg-user {{ border-color: alpha({GREEN}, 0.45); }}
-.msg .title {{ font-size: 15px; font-weight: 700; color: {INK}; }}
-.msg .body {{ color: alpha({INK}, 0.80); }}
 .step-pill {{
   background: alpha(#1c1d22, 0.85);
   border: 1px solid alpha(#ffffff, 0.08);
@@ -102,34 +92,6 @@ window {{ background: transparent; }}
 .choice image {{ color: alpha({INK}, 0.7); }}
 .choice.primary {{ border-color: alpha({BLUE}, 0.5); }}
 .choice.primary image {{ color: {BLUE}; }}
-.status-pill {{
-  background: alpha(#1c1d22, 0.85);
-  border: 1px solid alpha(#ffffff, 0.08);
-  border-radius: 16px; padding: 5px 14px;
-  color: alpha({INK}, 0.62); font-size: 12px;
-}}
-.status-pill.good {{ color: {GREEN}; border-color: alpha({GREEN}, 0.45); }}
-.status-pill.bad {{ color: #f28b82; border-color: alpha(#f28b82, 0.45); }}
-.hubbtn {{
-  border-radius: 9999px;
-  border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
-  min-width: 58px; min-height: 58px;
-}}
-.hubbtn image {{ color: {BLUE}; }}
-.hubbtn:hover {{ border-color: alpha(#ffffff, 0.35); }}
-.satbtn {{
-  border-radius: 9999px;
-  border: 1px solid alpha(#ffffff, 0.10);
-  background: alpha(#1c1d22, 0.93);
-  min-width: 36px; min-height: 36px;
-}}
-.satbtn image {{ color: {INK}; }}
-.satbtn:hover {{ background: alpha(#f28b82, 0.25); border-color: alpha(#f28b82, 0.6); }}
-.satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
-/* Scoped to the progress bar: bare `trough`/`progress` selectors also
-   match the scrollbar inside the transcript, which then reports a
-   negative slider size to GTK. */
 .setup progressbar trough {{
   min-height: 5px; border-radius: 9999px;
   background: alpha(#ffffff, 0.10);

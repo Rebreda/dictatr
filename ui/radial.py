@@ -92,6 +92,55 @@ window {{ background: transparent; }}
 .bubble.on {{ background: alpha({GREEN}, 0.25); border-color: alpha({GREEN}, 0.6); }}
 .bubble.on image {{ color: {GREEN}; }}
 .hub:hover {{ background: alpha({RED}, 0.25); }}
+
+/* The vocabulary the surfaces share. A card of message pills with a hub
+   and satellites under it is what the chat, the wizard and any later
+   surface all are, and each used to re-declare these with small drifts
+   (the same status pill was 11px and round in one file, 12px and boxy
+   in another). Anything genuinely local to one surface still lives
+   there; this is only what more than one of them needs. */
+.hubbtn {{
+  border-radius: 9999px;
+  border: 1px solid alpha(#ffffff, 0.10);
+  background: alpha({CHARCOAL}, 0.93);
+  min-width: 58px; min-height: 58px;
+  transition: background 150ms ease, border-color 150ms ease;
+}}
+.hubbtn image {{ color: {BLUE}; }}
+.hubbtn:hover {{ border-color: alpha(#ffffff, 0.35); }}
+.hubbtn.rec {{ background: alpha({GREEN}, 0.25); border-color: alpha({GREEN}, 0.6); }}
+.hubbtn.rec image {{ color: {GREEN}; }}
+.satbtn {{
+  border-radius: 9999px;
+  border: 1px solid alpha(#ffffff, 0.10);
+  background: alpha({CHARCOAL}, 0.93);
+  min-width: 36px; min-height: 36px;
+}}
+.satbtn image {{ color: {INK}; }}
+.satbtn:hover {{ background: alpha({RED}, 0.25); border-color: alpha({RED}, 0.6); }}
+.satbtn.back:hover {{ background: alpha({BLUE}, 0.25); border-color: alpha({BLUE}, 0.6); }}
+.msg {{
+  border-radius: 20px; padding: 9px 14px;
+  background: alpha({CHARCOAL}, 0.93);
+  border: 1px solid alpha(#ffffff, 0.10);
+  color: {INK};
+  transition: border-color 150ms ease;
+}}
+.msg-user {{ border-color: alpha({GREEN}, 0.45); }}
+.msg-user.live {{ border-color: alpha({GREEN}, 0.85); }}
+.msg-ai {{ border-color: alpha({BLUE}, 0.35); }}
+.msg .title {{ font-size: 15px; font-weight: 700; color: {INK}; }}
+.msg .body {{ color: alpha({INK}, 0.80); }}
+.status-pill {{
+  background: alpha({CHARCOAL}, 0.85);
+  border: 1px solid alpha(#ffffff, 0.08);
+  border-radius: 9999px; padding: 4px 13px;
+  color: alpha({INK}, 0.62); font-size: 11px;
+}}
+.status-pill.error, .status-pill.bad {{
+  color: {RED}; border-color: alpha({RED}, 0.45);
+}}
+.status-pill.good {{ color: {GREEN}; border-color: alpha({GREEN}, 0.45); }}
 /* Going back is not a destructive act, so it does not wear the
    danger colour the closing hub does. */
 .hub.back:hover {{ background: alpha({BLUE}, 0.25); }}
