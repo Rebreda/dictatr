@@ -155,6 +155,13 @@ class Chat(Gtk.ApplicationWindow):
         self.entry.add_css_class("chat-entry")
         self.entry.set_size_request(WIDTH - 90, -1)
         self.entry.connect("activate", self.on_entry)
+        # Digits belong to the ring while the field is empty, and to the
+        # field once it is not. Capture phase because the entry would
+        # otherwise consume them before anything else is offered them.
+        entry_keys = Gtk.EventControllerKey()
+        entry_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        entry_keys.connect("key-pressed", self._entry_key)
+        self.entry.add_controller(entry_keys)
         entry_row = Gtk.Box(halign=Gtk.Align.CENTER)
         entry_row.append(self.entry)
         stack.append(entry_row)
@@ -297,6 +304,13 @@ class Chat(Gtk.ApplicationWindow):
             if v["bloom"] > 0.5 and not bloomed[0]:
                 bloomed[0] = True
                 self._open_ring()
+                # Typing needs no click. Layer-shell keyboard mode is
+                # ON_DEMAND, so the compositor hands this surface the
+                # keyboard only once something inside it holds focus,
+                # and nothing ever did: the field looked ready, showed
+                # no caret, and swallowed everything typed at it. The
+                # numbered bubbles survive it -- see _entry_key.
+                self.entry.grab_focus()
 
         radial.play(self, arrival, apply)
 
@@ -749,6 +763,18 @@ class Chat(Gtk.ApplicationWindow):
             self._commit_now()
         elif self.phase == "idle":
             self.start_turn()
+
+    def _entry_key(self, _c, keyval, _code, _state):
+        """Let the ring have a key the empty field has no use for.
+
+        The card focuses its entry as it opens, which is what makes it
+        typeable; without this the numbered bubbles would be unreachable
+        for as long as the card was up. An empty field loses nothing to
+        a digit. Once there is text, a digit is text.
+        """
+        if self.entry.get_text():
+            return False
+        return self.ring.handle_key(keyval)
 
     def on_key(self, _c, keyval, _code, _state):
         # The ring gets the keys first: its bubbles are numbered and its
