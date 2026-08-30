@@ -190,6 +190,23 @@ class StorageSettings:
         return self.base not in ("", "off")
 
 
+class ShotSettings:
+    """Which program takes the screenshot behind Ctrl+Alt+G.
+
+    "auto" prefers a desktop editor that selects and annotates in one
+    pass (Spectacle on KDE, satty or swappy on wlroots), then falls back
+    to the Screenshot portal feeding dictatr's own editor, and finally
+    to the bare portal capture on a machine with no GTK.
+
+    "dictatr" always uses ours, which is the one that looks and behaves
+    the same everywhere. "portal" takes the bare capture and does no
+    editing. Anything else is a command line with {path} where the
+    output file goes -- the picker is a matter of taste and muscle
+    memory, and somebody else's is not worth arguing with."""
+
+    tool = Setting("DICTATE_SCREENSHOT", "screenshot", "auto")
+
+
 class LLMSettings:
     # Ask mode: chat model and spoken answers (Kokoro TTS).
     model = Setting("DICTATE_LLM_MODEL", "llm_model", "Qwen3.5-4B-GGUF")
@@ -276,6 +293,7 @@ class Settings:
         self.llm = LLMSettings()
         self.vad = VADSettings()
         self.storage = StorageSettings()
+        self.shot = ShotSettings()
         self.listen = ListenSettings()
         self.gc = GCSettings()
         self.notify = NotifySettings()
