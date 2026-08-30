@@ -100,16 +100,6 @@ class Chat(Gtk.ApplicationWindow):
         # appear at the pointer. Unlike the menu, the input region is
         # clipped to the card, so the rest of the desktop stays clickable
         # while the conversation floats.
-        self.overlay = False
-        ls = radial.layer_shell()
-        if ls is not None:
-            self.overlay = True
-            ls.init_for_window(self)
-            ls.set_layer(self, ls.Layer.TOP)
-            ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
-            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
-                         ls.Edge.RIGHT):
-                ls.set_anchor(self, edge, True)
 
         # A column that grows upward from the hub: spacer, message pills,
         # status pill, then the hub row (mic bubble + close satellite) —
@@ -175,31 +165,24 @@ class Chat(Gtk.ApplicationWindow):
 
         self.stack = stack
         self._hit_widgets = (self.scroll, status_row, entry_row, hub_row)
+        # Clicks land only where the card is painted; the rest of the
+        # desktop stays live under it. The hub sits at the bottom of the
+        # stack, so that is what meets the pointer.
+        self.ov = radial.Overlay(
+            self, stack, (WIDTH, STACK_H),
+            hit_widgets=lambda: (*self._hit_widgets,
+                                 *( [self._ring] if self._ring else [] )),
+            on_place=self._enter_from, clamp=12)
+        stack.set_opacity(0.0)   # invisible until placed at the pointer
+        self.overlay = self.ov.start()
         if self.overlay:
-            self.canvas = Gtk.Fixed()
-            self.canvas.put(stack, 0, 0)
-            stack.set_opacity(0.0)  # invisible until placed at the pointer
-            self.placed = False
-            self.set_child(self.canvas)
-            motion = Gtk.EventControllerMotion()
-            motion.connect("enter", self.on_pointer)
-            motion.connect("motion", self.on_pointer)
-            self.add_controller(motion)
-            self._polls = 0
-            GLib.timeout_add(50, self.poll_pointer)
-            GLib.timeout_add(250, self._update_input_region)
-
-            # Drag the mic hub to move the conversation; small movements
-            # still count as clicks (claim only past a threshold).
-            self._pos = (0, 0)
-            self._drag_from = None
-            drag = Gtk.GestureDrag()
-            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            drag.connect("drag-begin", self.on_drag_begin)
-            drag.connect("drag-update", self.on_drag_update)
-            drag.connect("drag-end", self.on_drag_end)
-            self.canvas.add_controller(drag)
+            self.canvas = self.ov.canvas
+            self.ov.enable_drag(self._draggable_at)
         else:
+            # No layer-shell: an ordinary window, and no canvas to put
+            # rings on, so the per-message rings stay closed.
+            self.canvas = None
+            stack.set_opacity(1.0)
             outer = Gtk.Box(margin_top=8, margin_bottom=8, margin_start=8,
                             margin_end=8)
             outer.append(stack)
@@ -239,79 +222,33 @@ class Chat(Gtk.ApplicationWindow):
         self.connect("close-request", self.on_close)
         self.start_turn()
 
-    # --- overlay placement (menu-style, card at the pointer) ----------
-    def on_pointer(self, _c, x, y):
-        self.place_at(x, y)
-
-    def poll_pointer(self):
-        if self.placed or not self.overlay:
-            return False
-        surface = self.get_surface()
-        if surface is not None and self.get_width() > 0:
-            seat = Gdk.Display.get_default().get_default_seat()
-            ok, x, y, _m = surface.get_device_position(seat.get_pointer())
-            if ok and (x or y):
-                self.place_at(x, y)
-                return False
-        self._polls += 1
-        if self._polls > 20 and self.get_width() > 0:
-            # No pointer position to be had: settle low-center — the hub
-            # anchors the column's bottom, so the conversation needs its
-            # room *above* the fallback point, not below.
-            self.place_at(self.get_width() / 2, self.get_height() * 0.62)
-            return False
-        return True
-
-    def place_at(self, x, y):
-        if self.placed or not self.overlay:
-            return
-        self.placed = True
-        w = self.get_width() or 1920
-        h = self.get_height() or 1080
-        # The hub (bottom of the stack) lands at the pointer, like the
-        # menu's center bubble; pills grow upward from there.
-        cx = min(max(x - WIDTH / 2, 12), max(w - WIDTH - 12, 12))
-        cy = min(max(y - STACK_H + 34, 12 - STACK_H + 120),
-                 max(h - STACK_H - 12, 12))
-        self._pos = (cx, cy)
-        self.canvas.move(self.stack, cx, cy)
-        self._enter_from(cx, cy)
-
-    ENTER_S = 0.22
-
+    # --- overlay -------------------------------------------------------
     def _enter_from(self, cx, cy):
         """Rise into place: the ring that opened this spiralled into its
         hub, and a card that simply blinks on breaks that thread."""
         start = self.get_frame_clock().get_frame_time() / 1e6
 
         def tick(_w, clock):
-            p = min(1.0, (clock.get_frame_time() / 1e6 - start) / self.ENTER_S)
+            p = min(1.0, (clock.get_frame_time() / 1e6 - start) / 0.22)
             e = 1 - (1 - p) ** 3
             self.stack.set_opacity(e)
-            self.canvas.move(self.stack, cx, cy + (1 - e) * 26)
+            self.ov.canvas.move(self.stack, cx, cy + (1 - e) * 26)
             return p < 1.0
 
-        self.stack.set_opacity(0.0)
         self.add_tick_callback(tick)
 
-    def _update_input_region(self):
-        """Clip input to the visible pieces (pills, status, hub): clicks
-        anywhere else fall through to whatever is underneath, so the
-        overlay never blocks the desktop."""
-        if self._closing:
-            return False
-        surface = self.get_surface()
-        if surface is None or not self.placed:
-            return True
-        region = cairo.Region()
-        for widget in self._hit_widgets:
-            ok, b = widget.compute_bounds(self)
-            if ok and b.size.width > 0:
-                region.union(cairo.RectangleInt(
-                    int(b.origin.x) - 4, int(b.origin.y) - 4,
-                    int(b.size.width) + 8, int(b.size.height) + 8))
-        surface.set_input_region(region)
-        return True
+    def _draggable_at(self, x, y):
+        """Anywhere on the card that is not a control moves it: the hub
+        alone was a 58px target for repositioning a conversation."""
+        target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        on_card = False
+        while target is not None:
+            if isinstance(target, (Gtk.Button, Gtk.Entry)):
+                return False
+            if target is self.stack:
+                on_card = True
+            target = target.get_parent()
+        return on_card
 
     # --- animation & status -------------------------------------------
     def _animate(self):
@@ -430,22 +367,6 @@ class Chat(Gtk.ApplicationWindow):
                 on_card = True
             target = target.get_parent()
         return on_card
-
-    def on_drag_begin(self, _g, x, y):
-        self._drag_from = self._pos if self._draggable_at(x, y) else None
-
-    def on_drag_update(self, g, dx, dy):
-        if self._drag_from is None:
-            return
-        if abs(dx) > 8 or abs(dy) > 8:
-            g.set_state(Gtk.EventSequenceState.CLAIMED)
-        self.canvas.move(self.stack,
-                         self._drag_from[0] + dx, self._drag_from[1] + dy)
-
-    def on_drag_end(self, _g, dx, dy):
-        if self._drag_from is not None:
-            self._pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
-            self._drag_from = None
 
     def on_entry(self, entry):
         text = entry.get_text().strip()

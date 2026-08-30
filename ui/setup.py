@@ -91,6 +91,12 @@ window {{ background: transparent; }}
 }}
 .choice image {{ color: alpha({INK}, 0.7); }}
 .choice.primary {{ border-color: alpha({BLUE}, 0.5); }}
+/* The number that picks this from the keyboard: present enough to be
+   learned, quiet enough not to compete with the words. */
+.choice-key {{
+  color: alpha({INK}, 0.30); font-size: 11px;
+  padding-left: 6px;
+}}
 .choice.primary image {{ color: {BLUE}; }}
 .setup progressbar trough {{
   min-height: 5px; border-radius: 9999px;
@@ -699,6 +705,15 @@ class Wizard(Gtk.ApplicationWindow):
         stack.set_size_request(WIDTH, STACK_H)
         stack.append(Gtk.Box(vexpand=True))   # pushes the column down
 
+        # Where you are in the wizard. The ring that used to stand here
+        # wore this on its hub as an arc; dropping the ring dropped the
+        # only thing that said how much of setup was left.
+        self.step_label = Gtk.Label(label="")
+        self.step_label.add_css_class("step-pill")
+        step_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        step_row.append(self.step_label)
+        stack.append(step_row)
+
         self.msgs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -758,8 +773,8 @@ class Wizard(Gtk.ApplicationWindow):
         stack.append(hub_row)
 
         self.column = stack
-        self._hit = (self.scroll, self.extra, self.choices, status_row,
-                     bar_row, hub_row)
+        self._hit = (step_row, self.scroll, self.extra, self.choices,
+                     status_row, bar_row, hub_row)
 
         ls = radial.layer_shell()
         self.overlay = ls is not None
@@ -793,24 +808,10 @@ class Wizard(Gtk.ApplicationWindow):
         return False
 
     def _update_input_region(self):
-        """Clip input to the column: clicks anywhere else fall through,
-        so the overlay never blocks the desktop like a modal dialog."""
         if self._closing:
             return False
-        surface = self.get_surface()
-        if surface is None:
-            return True
-        region = cairo.Region()
-        for widget in self._hit:
-            ok, b = widget.compute_bounds(self)
-            if ok and b.size.width > 0 and widget.get_visible():
-                region.union(cairo.RectangleInt(
-                    int(b.origin.x) - 4, int(b.origin.y) - 4,
-                    int(b.size.width) + 8, int(b.size.height) + 8))
-        surface.set_input_region(region)
-        return True
+        return radial.clip_input_region(self, self._hit)
 
-    # --- the transcript ---------------------------------------------------
     def say(self, text, role="ai", title=None):
         """Add a pill. The wizard's own lines carry the step title; the
         line you chose comes back as your side of the exchange."""
@@ -924,7 +925,10 @@ class Wizard(Gtk.ApplicationWindow):
                 btn.add_css_class("primary")
             row = Gtk.Box(spacing=9)
             row.append(Gtk.Image(icon_name=b.icon))
-            row.append(Gtk.Label(label=b.tooltip))
+            row.append(Gtk.Label(label=b.tooltip, hexpand=True, xalign=0.0))
+            key = Gtk.Label(label=str(i + 1))
+            key.add_css_class("choice-key")
+            row.append(key)
             btn.set_child(row)
             # A focused button fires on space or Return, so a stray
             # keypress used to activate whatever held focus.
@@ -972,11 +976,34 @@ class Wizard(Gtk.ApplicationWindow):
         self.busy(False)
         self.hub.set_icon_name(step.icon)
         self.back_btn.set_tooltip_text("Back" if index else "Close")
+        self.step_label.set_label(
+            f"Step {index + 1} of {len(self.steps)}")
         step.enter()
+
+    def _choice_buttons(self):
+        out, child = [], self.choices.get_first_child()
+        while child is not None:
+            out.append(child)
+            child = child.get_next_sibling()
+        return out
 
     def _on_key(self, _c, keyval, _code, _state):
         if keyval == Gdk.KEY_Escape:
             self.on_hub()
+            return True
+        # Number keys pick, Return takes the first: the same vocabulary
+        # radial.Ring.handle_key answers. Nothing in the column is
+        # focusable (a focused button fires on space, which used to
+        # activate whatever a stray keypress landed on), so without this
+        # there is no way through setup that is not a mouse.
+        buttons = self._choice_buttons()
+        if not buttons:
+            return False
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            buttons[0].emit("clicked")
+            return True
+        if Gdk.KEY_1 <= keyval <= Gdk.KEY_0 + len(buttons):
+            buttons[keyval - Gdk.KEY_1].emit("clicked")
             return True
         return False
 

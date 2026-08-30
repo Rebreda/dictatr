@@ -582,6 +582,181 @@ class Ring(Gtk.Fixed):
         return False
 
 
+def clip_input_region(window, widgets) -> bool:
+    """Take input only where something is painted.
+
+    A fullscreen overlay that accepted clicks everywhere would hold the
+    desktop hostage while it floats over it. Used by every overlay that
+    is meant to be see-through: the wizard centres its card and the chat
+    follows the pointer, but both want the same thing everywhere they
+    are not drawn. Always returns True, to be a GLib timeout directly.
+    """
+    surface = window.get_surface()
+    if surface is None:
+        return True
+    region = cairo.Region()
+    for widget in widgets:
+        ok, b = widget.compute_bounds(window)
+        if ok and b.size.width > 0 and widget.get_visible():
+            region.union(cairo.RectangleInt(
+                int(b.origin.x) - 4, int(b.origin.y) - 4,
+                int(b.size.width) + 8, int(b.size.height) + 8))
+    surface.set_input_region(region)
+    return True
+
+
+class Overlay:
+    """A surface that floats where the pointer is.
+
+    The menu, the voice chat and the wizard are all the same object
+    underneath: a fullscreen transparent layer-shell window with one
+    child placed at the cursor, which can be dragged and which may let
+    clicks through everywhere it is not painted. Each carried its own
+    copy of that, and the copies had already drifted.
+
+    The window keeps its own behaviour: what the child is, whether a
+    click outside dismisses it, what counts as a drag handle. This owns
+    only the parts that are the same either way.
+
+        self.ov = Overlay(self, child, (w, h))
+        self.ov.start()          # layer shell, canvas, find the pointer
+
+    *hit_widgets* makes the surface click-through: only those widgets
+    take input and the desktop underneath keeps the rest. Leave it None
+    for a surface that should swallow every click (the menu does, so
+    that clicking away dismisses it).
+    """
+
+    CLAMP = 0        # keep the child this far from the screen edge
+    DRAG_SLOP = 8    # movement below this is still a click
+
+    def __init__(self, window, child, size, hit_widgets=None,
+                 on_place=None, clamp=0):
+        self.win = window
+        self.child = child
+        self.w, self.h = size
+        self.hit_widgets = hit_widgets
+        self.on_place = on_place
+        self.clamp = clamp
+        self.canvas = None
+        self.placed = False
+        self.pos = (0, 0)
+        self._drag_from = None
+        self._drag_test = None
+        self._polls = 0
+        self._ticks = 0
+
+    # --- setup ---------------------------------------------------------
+    def start(self):
+        """Make the window an overlay. False when layer-shell is absent,
+        and the caller should fall back to an ordinary window."""
+        ls = layer_shell()
+        if ls is None:
+            return False
+        ls.init_for_window(self.win)
+        ls.set_layer(self.win, ls.Layer.OVERLAY)
+        ls.set_keyboard_mode(self.win, ls.KeyboardMode.ON_DEMAND)
+        for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT, ls.Edge.RIGHT):
+            ls.set_anchor(self.win, edge, True)
+
+        self.canvas = Gtk.Fixed()
+        self.canvas.put(self.child, 0, 0)
+        self.win.set_child(self.canvas)
+
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda _c, x, y: self.place_at(x, y))
+        motion.connect("motion", lambda _c, x, y: self.place_at(x, y))
+        self.win.add_controller(motion)
+        # KWin does not send pointer-enter until the mouse moves, so ask
+        # the surface where the pointer is. wlroots answers only after a
+        # pointer event, which cannot happen before the first frame is up,
+        # so the give-up countdown waits for paint.
+        self.win.add_tick_callback(self._painted)
+        GLib.timeout_add(50, self._poll_pointer)
+        if self.hit_widgets is not None:
+            GLib.timeout_add(250, self.update_input_region)
+        return True
+
+    def enable_drag(self, handle_test):
+        """Let a press that *handle_test(x, y)* accepts move the child."""
+        self._drag_test = handle_test
+        drag = Gtk.GestureDrag()
+        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drag.connect("drag-begin", self._drag_begin)
+        drag.connect("drag-update", self._drag_update)
+        drag.connect("drag-end", self._drag_end)
+        self.canvas.add_controller(drag)
+
+    # --- placement -----------------------------------------------------
+    def _painted(self, _w, _clock):
+        self._ticks += 1
+        return self._ticks < 2
+
+    def _poll_pointer(self):
+        if self.placed or self.canvas is None:
+            return False
+        surface = self.win.get_surface()
+        if surface is not None and self.win.get_width() > 0:
+            seat = Gdk.Display.get_default().get_default_seat()
+            ok, x, y, _mask = surface.get_device_position(seat.get_pointer())
+            if ok and (x or y):
+                self.place_at(x, y)
+                return False
+            if self._ticks >= 2:
+                self._polls += 1
+        if self._polls > 40 and self.win.get_width() > 0:
+            # Pointer is on another output, or the query is unsupported.
+            self.place_at(self.win.get_width() / 2,
+                          self.win.get_height() / 2)
+            return False
+        return True
+
+    def place_at(self, x, y, anchor=None):
+        """Put the child where the pointer is, once, clamped on screen.
+
+        *anchor* is the child point that lands under the pointer, as a
+        fraction of its size: (0.5, 0.5) centres it, which is what a
+        ring wants; a card that grows upward anchors near its bottom.
+        """
+        if self.placed or self.canvas is None:
+            return
+        self.placed = True
+        ax, ay = anchor or (0.5, 0.5)
+        sw = self.win.get_width() or self.w
+        sh = self.win.get_height() or self.h
+        c = self.clamp
+        px = min(max(x - self.w * ax, c), max(sw - self.w - c, c))
+        py = min(max(y - self.h * ay, c), max(sh - self.h - c, c))
+        self.move(px, py)
+        if self.on_place is not None:
+            self.on_place(px, py)
+
+    def move(self, x, y):
+        self.pos = (x, y)
+        self.canvas.move(self.child, x, y)
+
+    # --- dragging ------------------------------------------------------
+    def _drag_begin(self, _g, x, y):
+        self._drag_from = self.pos if self._drag_test(x, y) else None
+
+    def _drag_update(self, gesture, dx, dy):
+        if self._drag_from is None:
+            return
+        if abs(dx) > self.DRAG_SLOP or abs(dy) > self.DRAG_SLOP:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.canvas.move(self.child, self._drag_from[0] + dx,
+                         self._drag_from[1] + dy)
+
+    def _drag_end(self, _g, dx, dy):
+        if self._drag_from is not None:
+            self.pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
+            self._drag_from = None
+
+    # --- click-through --------------------------------------------------
+    def update_input_region(self):
+        return clip_input_region(self.win, self.hit_widgets())
+
+
 class ProgressBubble(Gtk.Overlay):
     """A bubble wearing a progress arc: blue ring fills 0..1 clockwise
     from the top, or spins when indeterminate. For onboarding and model

@@ -61,48 +61,18 @@ class Radial(Gtk.ApplicationWindow):
 
         self.circle = (self._build_suggest_ring() if mode == "suggest"
                        else self._build_ring())
-        self.placed = False
         self._dismissing = False
 
-        ls = radial.layer_shell()
-        if ls is not None:
-            ls.init_for_window(self)
-            ls.set_layer(self, ls.Layer.OVERLAY)
-            ls.set_keyboard_mode(self, ls.KeyboardMode.ON_DEMAND)
-            for edge in (ls.Edge.TOP, ls.Edge.BOTTOM, ls.Edge.LEFT,
-                         ls.Edge.RIGHT):
-                ls.set_anchor(self, edge, True)
-            self.canvas = Gtk.Fixed()
-            self.set_child(self.canvas)
-
-            motion = Gtk.EventControllerMotion()
-            motion.connect("enter", self.on_pointer)
-            motion.connect("motion", self.on_pointer)
-            self.add_controller(motion)
-            # KWin doesn't send pointer-enter until the mouse moves, so ask
-            # the surface for the pointer position once we're mapped.
-            # wlroots compositors answer only after a pointer event, which
-            # can't happen before the first frame is on screen — so the
-            # give-up countdown must not start until then.
-            self._polls = 0
-            self._ticks = 0
-            self.add_tick_callback(self._mark_painted)
-            GLib.timeout_add(50, self.poll_pointer)
-
+        # No hit widgets: the menu swallows clicks on purpose, so that
+        # clicking away from it dismisses it.
+        self.ov = radial.Overlay(self, self.circle, (SIZE, SIZE),
+                                 on_place=lambda *_: self.circle.open())
+        if self.ov.start():
+            self.canvas = self.ov.canvas
             outside = Gtk.GestureClick()
             outside.connect("pressed", self.on_outside_click)
             self.canvas.add_controller(outside)
-
-            # Drag the hub to move the whole circle; small movements
-            # still count as clicks (claim only past a threshold).
-            self._pos = (0, 0)
-            self._drag_from = None
-            drag = Gtk.GestureDrag()
-            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            drag.connect("drag-begin", self.on_drag_begin)
-            drag.connect("drag-update", self.on_drag_update)
-            drag.connect("drag-end", self.on_drag_end)
-            self.canvas.add_controller(drag)
+            self.ov.enable_drag(self._hub_at)
         else:
             self.set_default_size(SIZE, SIZE)
             self.canvas = None
@@ -211,47 +181,7 @@ class Radial(Gtk.ApplicationWindow):
             deliver.deliver(out)
         GLib.idle_add(self.close)
 
-    # --- overlay-mode placement ---------------------------------------
-    def place_at(self, x, y):
-        if self.placed or self.canvas is None:
-            return
-        self.placed = True
-        w = self.get_width() or SIZE
-        h = self.get_height() or SIZE
-        x = min(max(x - SIZE / 2, 0), max(w - SIZE, 0))
-        y = min(max(y - SIZE / 2, 0), max(h - SIZE, 0))
-        self._pos = (x, y)
-        self.canvas.put(self.circle, x, y)
-        self.circle.open()
-
-    def on_pointer(self, _c, x, y):
-        self.place_at(x, y)
-
-    def _mark_painted(self, _w, _clock):
-        # The first tick starts the first frame; only the second proves a
-        # frame is actually on screen (the first paint of a 4K surface can
-        # take a second on a software renderer).
-        self._ticks += 1
-        return self._ticks < 2
-
-    def poll_pointer(self):
-        if self.placed:
-            return False
-        surface = self.get_surface()
-        if surface is not None and self.get_width() > 0:
-            seat = Gdk.Display.get_default().get_default_seat()
-            ok, x, y, _mask = surface.get_device_position(seat.get_pointer())
-            if ok and (x or y):
-                self.place_at(x, y)
-                return False
-            if self._ticks >= 2:
-                self._polls += 1
-        if self._polls > 40 and self.get_width() > 0:
-            # Pointer is on another output (or query unsupported): center.
-            self.place_at(self.get_width() / 2, self.get_height() / 2)
-            return False
-        return True
-
+    # --- overlay ------------------------------------------------------
     def _hub_at(self, x, y):
         target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
         while target is not None:
@@ -259,22 +189,6 @@ class Radial(Gtk.ApplicationWindow):
                 return True
             target = target.get_parent()
         return False
-
-    def on_drag_begin(self, _g, x, y):
-        self._drag_from = self._pos if self._hub_at(x, y) else None
-
-    def on_drag_update(self, g, dx, dy):
-        if self._drag_from is None:
-            return
-        if abs(dx) > 8 or abs(dy) > 8:
-            g.set_state(Gtk.EventSequenceState.CLAIMED)
-        self.canvas.move(self.circle,
-                         self._drag_from[0] + dx, self._drag_from[1] + dy)
-
-    def on_drag_end(self, _g, dx, dy):
-        if self._drag_from is not None:
-            self._pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
-            self._drag_from = None
 
     def on_outside_click(self, _g, _n, x, y):
         # A press outside the circle's buttons dismisses the menu.
@@ -288,7 +202,7 @@ class Radial(Gtk.ApplicationWindow):
     def dismiss(self):
         """Twirl the bubbles back into the hub, then close. A second
         request (hotkey mashing) closes immediately."""
-        if self._dismissing or (self.canvas is not None and not self.placed):
+        if self._dismissing or (self.canvas is not None and not self.ov.placed):
             self.close()
             return
         self._dismissing = True
