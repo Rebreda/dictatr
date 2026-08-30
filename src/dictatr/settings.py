@@ -47,6 +47,10 @@ _EXTRA_KEYS = frozenset(
 
 _TRUE = ("1", "true", "yes", "on")
 
+# Keys already complained about, so a bad value is reported once rather
+# than on every read of a setting that is resolved on every read.
+_COMPLAINED: set[str] = set()
+
 
 class Setting:
     """One setting, resolved on every read: environment first (it is the
@@ -74,15 +78,31 @@ class Setting:
         return self.coerce(raw)
 
     def coerce(self, raw):
+        """*raw* as this setting's type, falling back to the default.
+
+        A number that will not parse is a wrong value, not a reason for
+        a surface to fail to start: settings are resolved on every read,
+        so `max_sec = "ninety"` in the config -- or a stray
+        DICTATE_MAX_SEC in a shell -- would otherwise raise from
+        whichever line happened to ask next, mid-dictation as easily as
+        at startup. Said once per process so it is visible in the log
+        without filling it.
+        """
         if raw is None:
             return None
         if self.kind is bool:
             return raw if isinstance(raw, bool) else str(raw).lower() in _TRUE
-        if self.kind is int:
-            return int(raw)
-        if self.kind is float:
-            return float(raw)
-        return str(raw)
+        if self.kind is str:
+            return str(raw)
+        try:
+            return self.kind(raw)
+        except (TypeError, ValueError):
+            if self.key not in _COMPLAINED:
+                _COMPLAINED.add(self.key)
+                print(f"dictatr: {self.key}={raw!r} is not a "
+                      f"{self.kind.__name__}; using {self.default!r}",
+                      file=sys.stderr)
+            return self.kind(self.default)
 
 
 def raw_config() -> dict:
