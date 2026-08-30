@@ -104,7 +104,9 @@ SNI_XML = """<node>
 CONTROL_XML = """<node>
  <interface name="io.github.rebreda.dictatr.Shortcuts">
   <method name="Rebind"/>
-  <method name="ActiveApp"><arg type="s" direction="in"/></method>
+  <method name="ActiveApp">
+   <arg type="s" direction="in"/><arg type="s" direction="in"/>
+  </method>
  </interface>
 </node>"""
 
@@ -354,6 +356,20 @@ def _kwin(bus, method, sig, args):
                       Gio.DBusCallFlags.NONE, 3000, None)
         return True
     except GLib.Error:
+        return False
+
+
+def _is_ours(pid: str) -> bool:
+    """Whether a window belongs to dictatr itself.
+
+    Focusing the menu or the chat must not overwrite the app you were
+    working in: that app is the whole point of the answer. Our surfaces
+    are layer-shell, so they have no app id to recognise them by and all
+    report as the interpreter; the pid is what tells them apart."""
+    try:
+        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+            return b"dictatr" in f.read()
+    except (OSError, ValueError):
         return False
 
 
@@ -644,7 +660,9 @@ def main():
         if method == "Rebind" and shortcuts is not None:
             shortcuts.rebind()
         elif method == "ActiveApp":
-            runstate.write_app(params.unpack()[0])
+            app, pid = params.unpack()
+            if not _is_ours(pid):
+                runstate.write_app(app)
         inv.return_value(None)
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]

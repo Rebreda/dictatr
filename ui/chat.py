@@ -32,7 +32,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-from dictatr import concepts, llm, mic, recall, runstate  # noqa: E402
+from dictatr import actions, concepts, llm, mic, recall, runstate  # noqa: E402
 from dictatr.engine import dictate_once, ensure_asr_loaded  # noqa: E402
 from dictatr.settings import settings  # noqa: E402
 from dictatr.storage import save_recording  # noqa: E402
@@ -130,6 +130,11 @@ class Chat(Gtk.ApplicationWindow):
         self.scroll.set_child(self.msgs)
         stack.append(self.scroll)
 
+        self.follow = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
+        self.follow.set_visible(False)
+        self._follow_row = []
+        stack.append(self.follow)
+
         self.status = Gtk.Label(label="")
         self.status.set_ellipsize(Pango.EllipsizeMode.END)
         self.status.add_css_class("status-pill")
@@ -169,8 +174,8 @@ class Chat(Gtk.ApplicationWindow):
         stack.append(hub_row)
 
         self.stack = stack
-        self._hit_widgets = (self.scroll, status_row, entry_row,
-                             hub_row)
+        self._hit_widgets = (self.scroll, self.follow, status_row,
+                             entry_row, hub_row)
         if self.overlay:
             self.canvas = Gtk.Fixed()
             self.canvas.put(stack, 0, 0)
@@ -505,11 +510,13 @@ class Chat(Gtk.ApplicationWindow):
         GLib.idle_add(self._got_text, text or "", pcm)
 
     def _on_partial(self, text):
-        if self.live_label is None:
-            self.live_label = self.bubble("user")
-            self.live_label._inner.add_css_class("live")
-        self.live_label.set_label(text)
-        self._scroll_down()
+        """Show the words in the input as they are recognised.
+
+        The same place typed words would go, so speaking and typing feed
+        one field instead of two competing displays, and a wrong word is
+        visible before it is sent."""
+        self.entry.set_text(text)
+        self.entry.set_position(-1)
 
     def _turn_failed(self, msg):
         self.phase = "idle"
@@ -520,6 +527,7 @@ class Chat(Gtk.ApplicationWindow):
 
     def _got_text(self, text, pcm):
         self.mic_btn.remove_css_class("rec")
+        self.entry.set_text("")
         if self._closing or self._discard or not text.strip():
             self.drop_bubble(self.live_label)
             self.live_label = None
@@ -583,6 +591,58 @@ class Chat(Gtk.ApplicationWindow):
             self.think_label.set_label(answer)
             self.think_label = None
         self._scroll_down()
+        threading.Thread(target=self._fetch_follow_ups, args=(answer,),
+                         daemon=True).start()
+
+    def _fetch_follow_ups(self, answer):
+        try:
+            picks = actions.suggest(answer)
+        except Exception:
+            picks = []
+        GLib.idle_add(self._show_follow_ups, picks)
+
+    def _show_follow_ups(self, picks):
+        """What to do with the answer, as a row of small round buttons.
+
+        The same catalogue the selection ring offers, pointed at what the
+        model just said: an answer is usually a step, not an ending."""
+        for child in list(self._follow_row):
+            self.follow.remove(child)
+        self._follow_row.clear()
+        if self._closing or not picks:
+            self.follow.set_visible(False)
+            return False
+        for p in picks[:3]:
+            b = Gtk.Button(icon_name=p["icon"], tooltip_text=p["label"])
+            b.add_css_class("satbtn")
+            b.connect("clicked", self.on_follow_up, p)
+            self.follow.append(b)
+            self._follow_row.append(b)
+        self.follow.set_visible(True)
+        return False
+
+    def on_follow_up(self, _btn, pick):
+        """Run a catalogue action on the answer and show it as a turn."""
+        answer = self.history[-1]["content"] if self.history else ""
+        if not answer:
+            return
+        self.follow.set_visible(False)
+        self.phase = "thinking"
+        self.set_status(f"{pick['label'].lower()}…")
+        self.think_label = self.bubble("ai")
+        asyncio.run_coroutine_threadsafe(
+            self._run_follow_up(pick, answer), self.aio)
+
+    async def _run_follow_up(self, pick, answer):
+        try:
+            out = await asyncio.to_thread(actions.run, pick["id"], answer,
+                                          pick["arg"])
+        except Exception as e:
+            GLib.idle_add(self._answer_failed, str(e))
+            return
+        self.history.append({"role": "assistant", "content": out})
+        GLib.idle_add(self._show_answer, out)
+        GLib.idle_add(self._turn_done)
 
     def _turn_done(self):
         self.phase = "idle"

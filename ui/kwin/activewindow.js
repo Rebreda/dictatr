@@ -18,12 +18,20 @@ function report(window) {
     if (!window || window.specialWindow) {
         return;
     }
+    // A permission prompt or a save dialog is not where you are working;
+    // it borrows focus for a moment and its parent is the real answer.
+    if (window.dialog || window.transient || window.popupWindow) {
+        return;
+    }
     if (IGNORE.test(String(window.resourceClass || ""))) {
         return;
     }
+    // The pid travels too: dictatr's own surfaces are layer-shell and
+    // carry no app id, so they all report as the interpreter. The tray
+    // recognises its own and keeps the app you were actually in.
     callDBus("io.github.rebreda.dictatr.tray", "/Shortcuts",
              "io.github.rebreda.dictatr.Shortcuts", "ActiveApp",
-             String(window.resourceClass || ""));
+             String(window.resourceClass || ""), String(window.pid || 0));
 }
 
 workspace.windowActivated.connect(report);
