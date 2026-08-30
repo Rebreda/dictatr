@@ -23,8 +23,10 @@ hands over to the other.
 """
 
 import math
+from dataclasses import dataclass
 
 EPS = 1e-9
+TAU = 2 * math.pi
 
 
 def clamp(p, lo=0.0, hi=1.0):
@@ -137,6 +139,120 @@ def stagger(n, total, per=0.05, min_span=0.12):
     if n <= 1 or total <= min_span:
         return total, 0.0
     return total, min(per, (total - min_span) / (n - 1))
+
+
+# --- physics ------------------------------------------------------------
+# A fixed-duration curve restarts from nothing when it is interrupted,
+# which is what makes an interface feel mechanical: catch a bubble
+# mid-flight and it forgets it was moving. A spring does not have a
+# duration, it has a state, so a new target picks up the velocity the old
+# one had. That is the whole difference, and it is why anything you can
+# grab moves on one of these and anything you cannot (a fade, a staged
+# reveal) stays on a Track.
+#
+# Solved analytically rather than stepped: exact at any timestep, so a
+# dropped frame cannot change where it lands, and testable without a
+# display. Written here rather than taken from libadwaita's
+# SpringAnimation because that would make libadwaita a runtime dependency
+# of a project whose packages currently only Recommend gtk4.
+
+@dataclass(frozen=True)
+class Spring:
+    """A damped harmonic oscillator, sampled at a time.
+
+    *damping* is the ratio: below 1 overshoots and comes back, 1 is the
+    fastest approach without overshoot, above 1 crawls in. *response* is
+    roughly how long it takes to get there, in seconds — the useful knob,
+    because stiffness alone means nothing without the mass.
+    """
+
+    response: float = 0.32
+    damping: float = 0.78
+    epsilon: float = 0.001
+
+    @property
+    def omega(self):
+        return TAU / max(self.response, EPS)
+
+    def at(self, frm, to, velocity, t):
+        """(value, velocity) at time *t* into the flight."""
+        w, z = self.omega, self.damping
+        d = frm - to                    # displacement from the target
+        if t <= 0.0:
+            return frm, velocity
+        if abs(z - 1.0) < 1e-6:                       # critical
+            decay = math.exp(-w * t)
+            c = velocity + w * d
+            return to + (d + c * t) * decay, (c - w * (d + c * t)) * decay
+        if z < 1.0:                                   # under: overshoots
+            wd = w * math.sqrt(1.0 - z * z)
+            decay = math.exp(-z * w * t)
+            a = d
+            b = (velocity + z * w * d) / wd
+            sin, cos = math.sin(wd * t), math.cos(wd * t)
+            value = to + decay * (a * cos + b * sin)
+            speed = decay * ((b * wd - z * w * a) * cos
+                             - (a * wd + z * w * b) * sin)
+            return value, speed
+        # over: two real roots, no overshoot at all
+        root = w * math.sqrt(z * z - 1.0)
+        r1, r2 = -z * w + root, -z * w - root
+        b = (velocity - r1 * d) / (r2 - r1)
+        a = d - b
+        e1, e2 = math.exp(r1 * t), math.exp(r2 * t)
+        return to + a * e1 + b * e2, a * r1 * e1 + b * r2 * e2
+
+    def settled(self, value, to, velocity):
+        """Arrived, and stopped. Both, or a spring sitting exactly on its
+        target at full speed would count as done."""
+        return (abs(value - to) < self.epsilon
+                and abs(velocity) < self.epsilon * self.omega)
+
+    def duration(self, frm, to, velocity=0.0, cap=4.0):
+        """How long until it has arrived, for a driver that wants an end.
+
+        Solved from the decay envelope rather than searched for. The
+        envelope is not just exp(-damping * omega * t): the underdamped
+        branch carries an amplitude from both the displacement and the
+        velocity, and the critical branch carries a factor of t, so a
+        naive bound stops the animation visibly short of its target.
+        """
+        w, z = self.omega, self.damping
+        d = frm - to
+        # Solve for well inside the tolerance rather than exactly on it:
+        # landing on the boundary means the driver stops at the moment
+        # `settled` is still, by a hair, False.
+        eps = self.epsilon * 0.25
+        if abs(d) < eps and abs(velocity) < eps * w:
+            return 0.0
+
+        if abs(z - 1.0) < 1e-6:
+            # |d + c t| e^(-wt) <= eps. No closed form, but the fixed
+            # point converges in a couple of passes.
+            c = abs(velocity + w * d)
+            t = math.log(max(abs(d) + c / w, eps) / eps) / w
+            for _ in range(4):
+                t = math.log(max(abs(d) + c * t, eps) / eps) / w
+            return min(cap, t)
+
+        if z < 1.0:
+            wd = w * math.sqrt(1.0 - z * z)
+            amplitude = math.hypot(d, (velocity + z * w * d) / wd)
+            return min(cap, math.log(max(amplitude, eps) / eps) / (z * w))
+
+        # Overdamped: the slower of the two roots is what is still moving.
+        root = w * math.sqrt(z * z - 1.0)
+        r1, r2 = -z * w + root, -z * w - root
+        b = (velocity - r1 * d) / (r2 - r1)
+        amplitude = abs(d - b) + abs(b)
+        return min(cap, math.log(max(amplitude, eps) / eps) / abs(r1))
+
+
+# Named springs, so surfaces reach for a feel rather than for numbers.
+SNAPPY = Spring(response=0.24, damping=0.82)    # a bubble giving under a press
+GLIDE = Spring(response=0.42, damping=1.0)      # a level arriving, no overshoot
+FLING = Spring(response=0.55, damping=0.72)     # a released drag, settling
+ZOOM = Spring(response=0.50, damping=0.90)      # the camera between depths
 
 
 # --- the tether ---------------------------------------------------------
