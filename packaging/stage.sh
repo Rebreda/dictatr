@@ -60,7 +60,7 @@ fi
 # --- /usr/bin -------------------------------------------------------
 install -dm755 "$DESTDIR/usr/bin"
 for cmd in dictate dictate-menu dictate-tray dictate-chat dictate-setup \
-           dictate-hotkeys dictate-suggest; do
+           dictate-hotkeys dictate-suggest dictate-shot; do
     ln -sf ../lib/dictatr/bin/$cmd "$DESTDIR/usr/bin/$cmd"
 done
 

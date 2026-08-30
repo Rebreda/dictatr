@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Drag a region, then ask the AI about it.
+#
+# The capture has to happen before the chat exists: a region selection is
+# a fullscreen grab, and it would otherwise photograph our own window.
+set -u
+here=$(dirname "$(dirname "$(readlink -f "$0")")")
+shot=${XDG_RUNTIME_DIR:-/tmp}/dictatr/shot-$$.png
+mkdir -p "$(dirname "$shot")"
+
+if command -v spectacle >/dev/null; then
+    spectacle -b -n -r -o "$shot" >/dev/null 2>&1
+elif command -v grim >/dev/null && command -v slurp >/dev/null; then
+    grim -g "$(slurp)" "$shot" >/dev/null 2>&1
+else
+    notify-send -a Dictate "Dictate" "No region screenshot tool (spectacle or grim+slurp)"
+    exit 1
+fi
+
+# A cancelled selection writes nothing; say nothing back.
+[[ -s $shot ]] || exit 0
+
+# Old shots are throwaway context, not an archive.
+find "$(dirname "$shot")" -name 'shot-*.png' -mmin +60 -delete 2>/dev/null
+
+export DICTATE_SHOT=$shot
+exec "$here/bin/dictate-chat"

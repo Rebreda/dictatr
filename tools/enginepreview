@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Watch the built-in engine's first-run UI without downloading anything.
+
+The wizard only offers to install its own engine when nothing else
+answers, so on a machine with a Lemonade already running (the usual
+development machine) the engine step shows "Found a Lemonade server"
+and the whole download-and-pull path is unreachable. This stubs the
+probe and the four lemond calls behind it, so the real EngineStep runs
+its real code against fake progress:
+
+    tools/enginepreview                # binary download, then the 1 GB pull
+    tools/enginepreview --cached       # binary already there: pull only
+    tools/enginepreview --fail         # the failure branch, mid-pull
+    tools/enginepreview --speed 12     # slower, for looking properly
+
+Config and data go to a scratch XDG home that is thrown away, so a run
+cannot write backend="managed" into the real config or leave a port and
+key behind. Nothing touches the network.
+"""
+
+import argparse
+import importlib.util
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+# GTK's wayland connection has to be made with the layer-shell library
+# already preloaded, and the interpreter has to be one with PyGObject
+# (a checkout's venv shadows python3 and does not have it). Both are
+# decided before any import, so settle them by re-exec.
+if not os.environ.get("DICTATR_ENGINEPREVIEW"):
+    env = {**os.environ, "DICTATR_ENGINEPREVIEW": "1"}
+    for lib in ("/usr/lib64/libgtk4-layer-shell.so.0",
+                "/usr/lib/libgtk4-layer-shell.so.0"):
+        if os.path.exists(lib):
+            env["LD_PRELOAD"] = ":".join(
+                filter(None, (lib, env.get("LD_PRELOAD"))))
+            break
+    scratch = tempfile.mkdtemp(prefix="dictatr-enginepreview-")
+    env["XDG_CONFIG_HOME"] = f"{scratch}/config"
+    env["XDG_DATA_HOME"] = f"{scratch}/data"
+    env["DICTATR_SETUP_STEP"] = "0"          # open on the engine step
+    py = sys.executable or "python3"
+    try:
+        import gi  # noqa: F401
+    except ImportError:
+        py = "/usr/bin/python3"
+    print(f"scratch XDG home: {scratch}", file=sys.stderr)
+    os.execve(py, [py, __file__, *sys.argv[1:]], env)
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--speed", type=float, default=6.0,
+                help="seconds the model pull takes (default 6)")
+ap.add_argument("--cached", action="store_true",
+                help="pretend the engine binary is already installed")
+ap.add_argument("--fail", action="store_true",
+                help="fail partway through the pull")
+ap.add_argument("--auto", action="store_true",
+                help="start the install without a click (for capture)")
+args = ap.parse_args()
+sys.argv = sys.argv[:1]                      # SetupApp.run() sees no flags
+
+sys.path.insert(0, str(REPO / "src"))
+from dictatr.backend import detect, lemond    # noqa: E402
+
+FAKE_BASE = "http://127.0.0.1:41234/api/v1"
+
+
+def _ramp(seconds, on_progress, steps=60):
+    for i in range(steps + 1):
+        if on_progress:
+            on_progress(i * 100 / steps)
+        time.sleep(seconds / steps)
+
+
+# --- the stubs: everything EngineStep reaches for -------------------
+detect.detect = lambda *a, **k: None
+lemond.alive = lambda *a, **k: False
+lemond.api_base = lambda: FAKE_BASE
+lemond.status = lambda: {
+    "running": False, "api_base": None,
+    "binary": str(lemond.DOWNLOADED) if args.cached else None,
+    "version": lemond.PINNED_VERSION, "state_dir": str(lemond.STATE),
+}
+
+
+def fake_download(on_progress=None):
+    if args.cached:                          # the real one returns early too
+        return lemond.DOWNLOADED
+    _ramp(args.speed / 4, on_progress)
+    return lemond.DOWNLOADED
+
+
+def fake_start(wait_s=30.0):
+    time.sleep(min(1.5, args.speed / 4))
+    return FAKE_BASE
+
+
+def fake_pull(model, on_progress=None, base=None, key=None):
+    def tick(pct):
+        if args.fail and pct > 40:
+            raise RuntimeError("connection reset while downloading "
+                               f"{model} (this is --fail)")
+        if on_progress:
+            on_progress({"file": model, "percent": pct})
+    _ramp(args.speed, tick)
+    return {"file": model, "percent": 100}
+
+
+lemond.ensure_binary = lambda on_progress=None: fake_download(on_progress)
+lemond.download_lemond = fake_download
+lemond.start = fake_start
+lemond.pull = fake_pull
+lemond.pin = lambda *a, **k: None
+
+spec = importlib.util.spec_from_file_location("setup", REPO / "ui" / "setup.py")
+setup = importlib.util.module_from_spec(spec)
+sys.modules["setup"] = setup
+spec.loader.exec_module(setup)
+
+if args.auto:
+    from gi.repository import GLib
+    _probed = setup.EngineStep._probed
+
+    def probed(self, found, managed):
+        _probed(self, found, managed)
+        GLib.timeout_add(700, lambda: (self._install(), False)[1])
+
+    setup.EngineStep._probed = probed
+
+setup.main()

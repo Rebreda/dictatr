@@ -4,11 +4,13 @@ Mirrors listenr's llm_processor shape (Lemonade OpenAI-compatible HTTP) so a
 future `listenr dictate` merge can swap these for listenr's own client.
 """
 
+import base64
 import json
 import shutil
 import subprocess
 import tempfile
 import urllib.request
+from pathlib import Path
 
 from . import context as desktop
 from . import runstate
@@ -85,23 +87,41 @@ def _system_prompt(context: list[dict] | None) -> str:
     return system
 
 
+def _image_part(path: str) -> dict | None:
+    """An image as the chat API wants it: a data URL content part."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    b64 = base64.b64encode(data).decode()
+    return {"type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{b64}"}}
+
+
 def chat(question: str, context: list[dict] | None = None,
-         history: list[dict] | None = None) -> str:
+         history: list[dict] | None = None, image: str | None = None) -> str:
     """Tool-calling conversation loop: the model may consult local tools
     (time, file search, calendar, remember) before answering. *history*
     is prior turns as {"role", "content"} dicts (the chat window's
-    running conversation)."""
+    running conversation). *image* is a path the question is about; the
+    tools are dropped for that turn, since a model reading a picture has
+    what it needs and the two rarely combine well."""
     schemas, executors = toolbox.registry()
+    content = question
+    part = _image_part(image) if image else None
+    if part is not None:
+        content = [{"type": "text", "text": question}, part]
+        schemas = []
     messages = [
         {"role": "system", "content": _system_prompt(context)},
         *(history or []),
-        {"role": "user", "content": question},
+        {"role": "user", "content": content},
     ]
     for _ in range(4):
         msg = _post_chat({
             "model": backend.get_backend().cap("chat").model,
             "messages": messages,
-            "tools": schemas,
+            **({"tools": schemas} if schemas else {}),
             "max_tokens": 2048,
             "chat_template_kwargs": {"enable_thinking": False},
         })
