@@ -245,7 +245,15 @@ def cmd_setup() -> int:
 
 
 def cmd_file(path: str) -> int:
-    text = transcribe_file(path)
+    try:
+        text = transcribe_file(path)
+    except (ConnectionError, OSError) as e:
+        # The engine being busy or absent is an ordinary outcome here,
+        # not a defect: say what happened in a line, the way every other
+        # command does, rather than unwinding the stack at the user.
+        print(f"dictatr: {e}", file=sys.stderr)
+        dlv.notify(f"Could not transcribe {Path(path).name}")
+        return 1
     if not text:
         dlv.notify(f"No speech detected in {path}")
         return 1
