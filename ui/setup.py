@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """First-run setup wizard for dictatr, shaped like the voice chat.
 
 Three steps, each a probe plus a few choices: the inference engine, the

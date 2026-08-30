@@ -1,0 +1,11 @@
+# rpmlint configuration for dictatr.
+#
+# rpmlint spell-checks the description and counts an unknown word as an
+# error. Ours are names -- the sister project (listenr), Lemonade, a
+# systemd command -- and every future release note brings more. Prose
+# spelling is not a packaging standard, and a gate that fails on it
+# teaches people to ignore the gate. Everything else still fails.
+#
+#   rpmlint -r packaging/dictatr.rpmlintrc dist/noarch/*.rpm
+
+addFilter("spelling-error")

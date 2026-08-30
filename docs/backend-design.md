@@ -50,10 +50,12 @@ One provider abstraction behind the existing single seam (every server
 call already flows through `settings.whisper.api_base`). Three provider
 kinds, selected in config with auto-detection:
 
-- **managed** (default): dictatr's own `lemond`, vendored in the
-  package (`/usr/lib/dictatr/lemond/`, +7 MB) and downloaded on demand
-  for source installs (sha256-pinned release asset into
-  `~/.local/share/dictatr/lemond/`). Private instance: own state dir
+- **managed** (default): dictatr's own `lemond`, downloaded on demand
+  (sha256-pinned release asset into `~/.local/share/dictatr/lemond/`).
+  The packages do not vendor it: a prebuilt x86-64 binary cannot ride
+  inside an arch-independent package, and bundling one bars the package
+  from Debian and Fedora. `/usr/lib/dictatr/lemond/lemond` is still
+  preferred when a distro provides it. Private instance: own state dir
   (`~/.local/share/dictatr/lemonade/`), own port, `--no-broadcast`,
   API key generated per install. Models go to the standard HF cache
   (`models_dir: auto`) so they are shared with other local-AI apps.

@@ -37,29 +37,33 @@ stage_tree src/dictatr 644 -name '*.py'
 stage_tree ui 644 \( -name '*.py' -o -name '*.png' -o -name '*.svg' \
                      -o -name '*.js' \)
 stage_tree bin 755
+
+# Anything carrying a #! is executed, not imported, and shipping it 644
+# is an rpmlint error (non-executable-script). Decided by the file
+# itself so a new surface does not have to be added to a list.
+# `case` rather than `[ ... ] && chmod`: under set -e a loop whose last
+# file has no shebang would end non-zero and kill the build.
+find "$lib/ui" "$lib/src" -name '*.py' -type f | while IFS= read -r f; do
+    case "$(head -c2 "$f")" in "#!") chmod 755 "$f" ;; esac
+done
+# ...and the reverse under bin/: a helper meant to be sourced has no
+# shebang, and shipping it executable is a lintian warning
+# (executable-not-elf-or-script).
+find "$lib/bin" -type f | while IFS= read -r f; do
+    case "$(head -c2 "$f")" in "#!") ;; *) chmod 644 "$f" ;; esac
+done
 install -Dpm644 "$repo/docs/assets/logo.svg" "$lib/docs/assets/logo.svg"
 install -Dpm644 "$repo/docs/assets/logo.png" "$lib/docs/assets/logo.png"
 
-# --- managed lemond (optional vendoring) ----------------------------
-# DICTATR_LEMOND_TARBALL: the pinned embeddable tarball (version and
-# sha256 in packaging/lemond-version.env; CI downloads and verifies).
-# Without it the dir still exists with a README placeholder so package
-# file lists are identical either way.
-install -dm755 "$lib/lemond"
-if [ -n "${DICTATR_LEMOND_TARBALL:-}" ]; then
-    tar -xzf "$DICTATR_LEMOND_TARBALL" -C "$lib/lemond" \
-        --strip-components=1
-    chmod 755 "$lib/lemond/lemond"
-    if [ -f "$lib/lemond/lemonade" ]; then
-        chmod 755 "$lib/lemond/lemonade"
-    fi
-else
-    cat >"$lib/lemond/README" <<EOF
-No vendored lemond in this build. dictatr downloads the pinned release
-(see packaging/lemond-version.env) to ~/.local/share/dictatr/lemond on
-first use of the managed backend.
-EOF
-fi
+# The inference engine is NOT packaged. It is a prebuilt x86-64 binary,
+# which both Debian and Fedora forbid bundling, and which made an
+# "Architecture: all" package ship an ELF (lintian and rpmlint both
+# error on it). dictatr fetches the pinned release to
+# ~/.local/share/dictatr/lemond on first use of the managed backend,
+# checksummed, and the model it needs is a gigabyte over the network
+# anyway -- so vendoring 13 MB bought nothing and cost the package its
+# architecture. A distro that packages lemond itself can drop it at
+# /usr/lib/dictatr/lemond/lemond and dictatr will prefer it.
 
 # --- /usr/bin -------------------------------------------------------
 install -dm755 "$DESTDIR/usr/bin"
@@ -132,6 +136,22 @@ for unit in dictatr-listen.service dictatr-gc.service dictatr-gc.timer; do
     sed 's|@REPO@/.venv/bin/dictatr|/usr/bin/dictate|' \
         "$repo/systemd/$unit" >"$units/$unit"
 done
+# --- man pages -------------------------------------------------------
+# One real page; the other launchers are .so stubs pointing at it, which
+# is the standard way to document a suite of related commands without
+# maintaining eight copies (lintian/rpmlint: no-manual-page).
+man=$DESTDIR/usr/share/man/man1
+install -dm755 "$man"
+gzip -9nc "$here/dictate.1" >"$man/dictate.1.gz"
+for cmd in dictate-menu dictate-tray dictate-chat dictate-setup \
+           dictate-hotkeys dictate-suggest dictate-shot; do
+    # The .so target names the uncompressed page; man resolves it to the
+    # .gz itself. Pages must ship compressed (lintian:
+    # uncompressed-manual-page); rpm would have compressed them anyway.
+    printf '.so man1/dictate.1\n' | gzip -9nc >"$man/$cmd.1.gz"
+done
+chmod 644 "$man"/*.gz
+
 # --- icon ------------------------------------------------------------
 install -Dpm644 "$repo/docs/assets/logo.svg" \
     "$DESTDIR/usr/share/icons/hicolor/scalable/apps/dictatr.svg"

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Type text at the cursor via the RemoteDesktop portal.
 
 The privileged tier of the delivery ladder (src/dictatr/deliver.py):

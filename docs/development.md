@@ -195,7 +195,7 @@ and the ring, so clicks elsewhere fall through to the desktop.
 | `ui/portal_typed.py` | RemoteDesktop portal typing helper |
 | `bin/` | the launcher shims |
 | `dev` | the workflow script above |
-| `packaging/` | `stage.sh` plus the rpm and deb builders |
+| `packaging/` | `stage.sh`, the two builders, and `check.sh` (build + lint + install in a container) |
 | `docs/demo/` | the capture harness (see its own README) |
 
 Anything that draws should paint with `ui/radial.py`: import the palette
@@ -205,13 +205,19 @@ and geometry rather than restating hex codes or pixel sizes, and call
 ## Packages
 
 ```bash
+packaging/check.sh fedora:latest # build + lint + install + smoke, in a container
 packaging/stage.sh /tmp/tree     # exactly what a package installs
 packaging/build-deb.sh           # -> dist/
 packaging/build-rpm.sh           # builds from a git archive of HEAD
 ```
 
+`check.sh` is what CI runs, one job per distro, so "it passed for me" and
+"it passed in CI" mean the same thing. Reach for it before tagging.
+
 `stage.sh` is the single source of truth for both builders, so a new file
-that must ship gets added there once. More in
+that must ship gets added there once. It copies whole trees rather than
+globbing one directory deep, which is how 0.3.0 shipped without
+`src/dictatr/backend/` and would not import at all. More in
 [packaging.md](packaging.md).
 
 ## Demo assets

@@ -1,0 +1,67 @@
+.TH DICTATE 1 "August 2026" "dictatr" "User Commands"
+.SH NAME
+dictate \- hotkey voice dictation for Wayland desktops
+.SH SYNOPSIS
+.B dictate
+.RI [ command ]
+.br
+.B dictate-menu
+| \fBdictate-tray\fR | \fBdictate-chat\fR | \fBdictate-setup\fR
+.SH DESCRIPTION
+.B dictatr
+transcribes speech on the local machine through a Lemonade inference
+server and types the result at the cursor, or copies it to the
+clipboard when the desktop will not grant typing. Recording stops by
+itself when you stop talking. Nothing is sent off the machine.
+.SH COMMANDS
+.TP
+.B dictate type
+Start listening; run again to stop and commit. The default.
+.TP
+.B dictate clip
+As above, but the transcript goes to the clipboard.
+.TP
+.B dictate cancel
+Abort the current recording without transcribing.
+.TP
+.B dictate file \fIPATH\fR
+Transcribe an audio file.
+.TP
+.B dictate setup
+Run the setup wizard: inference engine, typing permission, hotkeys.
+.TP
+.B dictate backend \fISUBCOMMAND\fR
+Inspect or drive the inference backend:
+.BR status ,
+.BR start ,
+.BR stop ,
+.BR models ,
+.BI "pull " MODEL .
+.SH OTHER PROGRAMS
+.TP
+.B dictate-tray
+The resident tray icon: owns the hotkeys and offers first-run setup.
+.TP
+.B dictate-menu
+A floating radial menu of dictatr's actions.
+.TP
+.B dictate-chat
+Voice conversation with a local model, with recall over past dictations.
+.TP
+.B dictate-setup
+The setup wizard, same as \fBdictate setup\fR.
+.SH FILES
+.TP
+.I ~/.config/dictatr/config.toml
+Settings. Every key can also be given as an environment variable.
+.TP
+.I ~/.local/share/dictatr/
+The managed inference engine and its state.
+.SH ENVIRONMENT
+.TP
+.B LEMONADE_URL
+Use exactly this server, skipping all backend detection.
+.SH SEE ALSO
+Full documentation at
+.UR https://github.com/Rebreda/dictatr
+.UE

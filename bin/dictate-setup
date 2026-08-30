@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Setup wizard: an overlay like the menu and the chat where layer-shell
 # exists, a plain centered window where it does not.
 . "$(dirname "$(readlink -f "$0")")/_common.sh"

@@ -1,22 +1,27 @@
-# The optionally vendored lemond (/usr/lib/dictatr/lemond, an x64 ELF
-# fetched by CI per packaging/lemond-version.env) rides inside this
-# otherwise-noarch package; keep noarch and silence the arch check.
-%global _binaries_in_noarch_packages_terminate_build 0
-
 Name:           dictatr
 Version:        0.4.0
 Release:        1%{?dist}
-Summary:        Hotkey voice dictation for Linux desktops, backed by a local Lemonade Whisper server
+Summary:        Hotkey voice dictation for Wayland desktops
 License:        MIT
 URL:            https://github.com/Rebreda/dictatr
-Source0:        %{name}-%{version}.tar.gz
+# A full URL, as the guidelines require: COPR and Fedora both fetch the
+# source rather than being handed one.
+Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildArch:      noarch
+
+# stage.sh generates the desktop entries with python3 and compresses the
+# man page; everything else it needs is in the minimal buildroot.
+BuildRequires:  python3
+BuildRequires:  gzip
 
 Requires:       python3 >= 3.11
 Requires:       python3-websockets
-Requires:       pipewire-utils
-Requires:       wl-clipboard
-Requires:       libnotify
+# File dependencies on the commands actually run, rather than naming the
+# library packages that happen to carry them today (rpmlint:
+# explicit-lib-dependency).
+Requires:       /usr/bin/pw-record
+Requires:       /usr/bin/wl-copy
+Requires:       /usr/bin/notify-send
 Recommends:     gtk4
 Recommends:     python3-gobject
 Recommends:     gtk4-layer-shell
@@ -30,8 +35,8 @@ recording state, always-on capture into a listenr-compatible archive,
 and ask mode (local LLM answers with recall over past dictations).
 
 Setup runs itself: the tray offers a short wizard the first time it
-starts, which picks an inference engine (its own bundled one, an
-existing Lemonade, or any OpenAI-compatible endpoint), asks the desktop
+starts, which picks an inference engine (one it downloads and
+manages, an existing Lemonade, or any OpenAI-compatible endpoint), asks
 for typing permission and hotkeys, and ends with a test dictation. Run
 it again any time with `dictate-setup`.
 
@@ -66,6 +71,7 @@ bash packaging/stage.sh %{buildroot}
 /usr/lib/systemd/user/dictatr-gc.service
 /usr/lib/systemd/user/dictatr-gc.timer
 /usr/share/icons/hicolor/scalable/apps/dictatr.svg
+%{_mandir}/man1/dictate*.1*
 
 %changelog
 * Sat Aug 29 2026 Rebreda - 0.4.0-1

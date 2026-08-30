@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Hotkey shim: maps the historical dictate CLI onto the dictatr package.
 #   dictate [type] | clip | cancel | file PATH
 set -u

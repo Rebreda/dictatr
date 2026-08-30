@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Floating radial menu for dictatr — round action bubbles that twirl out
 from the cursor point, in the spirit of Android's floating assistant ball.
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Floating voice chat for dictatr — the ask bubble grown into a sleek
 conversation card.
 

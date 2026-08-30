@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Drag a region, then ask the AI about it.
 #
 # The capture has to happen before the chat exists: a region selection is

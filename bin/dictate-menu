@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Hotkey shim: launch (or toggle) the floating radial menu.
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 preload_layer_shell

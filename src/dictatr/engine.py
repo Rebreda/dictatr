@@ -10,6 +10,7 @@ The server does the VAD. This module has no energy thresholds of its own.
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
 
@@ -36,10 +37,25 @@ def _asr():
     return b, b.cap("asr")
 
 
+def _headers_kw(connect=None) -> str:
+    """Which keyword this websockets speaks for per-connection headers.
+
+    Renamed in 14.0. Ubuntu 24.04 LTS still packages 10.4, where the new
+    name is a TypeError and every dictation dies -- so ask the installed
+    library instead of demanding a version the current LTS does not have.
+    """
+    params = inspect.signature(connect or websockets.connect).parameters
+    return ("additional_headers" if "additional_headers" in params
+            else "extra_headers")
+
+
+_HEADERS_KW = _headers_kw()
+
+
 async def _connect(url):
     _, cap = _asr()
     return await websockets.connect(url, max_size=10 * 1024 * 1024,
-                                    additional_headers=cap.headers() or None)
+                                    **{_HEADERS_KW: cap.headers() or None})
 
 
 def ensure_asr_loaded(on_load=None) -> None:

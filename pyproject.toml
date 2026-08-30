@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "websockets>=12",
+    "websockets>=10",
 ]
 
 [project.scripts]

@@ -19,9 +19,10 @@ import time
 import urllib.request
 from pathlib import Path
 
-# Pinned embeddable release. Must match packaging/lemond-version.env
-# (CI vendors the same tarball into the packages); tests/test_backend.py
-# asserts the two pins agree.
+# Pinned embeddable release, and the only copy of the pin. The packages
+# do not vendor the binary (a prebuilt x86-64 ELF cannot ride inside an
+# arch-independent package, and bundling one bars it from Debian and
+# Fedora), so this is fetched on first use of the managed backend.
 PINNED_VERSION = "11.8.0"
 PINNED_SHA256 = \
     "3cb13e93b0496c583e4cb4dda6aef58c39fc71fbb058fb171d62ac18f4cd72fc"
@@ -32,7 +33,7 @@ TARBALL_URL = (
 
 DATA = Path(os.environ.get("XDG_DATA_HOME",
                            Path.home() / ".local" / "share")) / "dictatr"
-VENDORED = Path("/usr/lib/dictatr/lemond/lemond")  # shipped by packages
+VENDORED = Path("/usr/lib/dictatr/lemond/lemond")  # if a distro ships one
 DOWNLOADED = DATA / "lemond" / "lemond"            # source installs
 STATE = DATA / "lemonade"  # lemond working dir: config.json, engines, log
 PORT_FILE = STATE / "dictatr.port"

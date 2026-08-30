@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Fallback: bind the default KDE global shortcuts via kglobalshortcutsrc.
 # On Plasma 6 / GNOME 48+ the tray binds these itself through the
 # GlobalShortcuts desktop portal at startup, and removes any entries this

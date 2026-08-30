@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Tray icon (StatusNotifierItem); single-instance via its DBus name.
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 exec "$py" "$repo/ui/tray.py"

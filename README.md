@@ -38,6 +38,21 @@ It walks four pages:
 Nothing here needs root and nothing is written outside your home
 directory. Package details are in [docs/packaging.md](docs/packaging.md).
 
+### What it runs on
+
+Wayland only, and the floating surfaces need the layer-shell protocol.
+
+| | Status |
+| --- | --- |
+| KDE Plasma, wlroots (Sway, Hyprland) | full: floating menu, chat and wizard, portal hotkeys and typing |
+| GNOME 48+ | works, but every surface is an ordinary window (Mutter has no layer shell), and the tray needs the AppIndicator extension |
+| X11 sessions | no: capture, clipboard and typing are all Wayland/portal paths |
+| Fedora 41+, Debian 13+, Ubuntu 25.04+ | packaged and tested |
+| Ubuntu 24.04 LTS | installs and runs; no `libgtk4-layer-shell0` in the archive, so surfaces are plain windows |
+| Ubuntu 22.04 LTS | no: Python is 3.10, and GTK 4.6 predates what the surfaces use |
+| aarch64 | the CLI works against a `system` or `custom` backend; the managed engine is x86-64 only |
+| macOS, Windows | no, and not planned: PipeWire, wl-clipboard, xdg portals and layer shell have no equivalents there |
+
 **From source** (Fedora names; adapt for your distro):
 
 ```bash

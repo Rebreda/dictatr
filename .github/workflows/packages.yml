@@ -20,79 +20,60 @@ jobs:
       - run: pip install -e . pytest
       - run: pytest -q
 
-  deb:
+  # One job per distro, all running the same script a developer runs:
+  # packaging/check.sh builds the right format for the image, lints it
+  # with that distro's official linter, installs it, and proves the
+  # realtime connect() call is well formed against whatever websockets
+  # that distro ships. Adding a distro is one line here.
+  packages:
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:stable, ubuntu:24.04, ubuntu:25.04, fedora:latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch pinned lemond for vendoring
-        run: |
-          . packaging/lemond-version.env
-          curl -sSL -o /tmp/lemond.tar.gz \
-            "https://github.com/lemonade-sdk/lemonade/releases/download/v${LEMOND_VERSION}/lemonade-embeddable-${LEMOND_VERSION}-ubuntu-x64.tar.gz"
-          echo "${LEMOND_SHA256}  /tmp/lemond.tar.gz" | sha256sum -c -
-          echo "DICTATR_LEMOND_TARBALL=/tmp/lemond.tar.gz" >> "$GITHUB_ENV"
-      - name: Build deb
+      - name: Build, lint, install and run on ${{ matrix.image }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export VERSION="${GITHUB_REF_NAME#v}"
           fi
-          bash packaging/build-deb.sh
-      - name: Sanity-check contents
-        run: dpkg-deb --contents dist/*.deb
-      - name: Install it and run it
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ./dist/*.deb
-          dictate backend status
+          CONTAINER=docker packaging/check.sh "${{ matrix.image }}"
+      # The packages are format-specific, not distro-specific: one deb
+      # and one rpm are what ship, built on the canonical image for each.
       - uses: actions/upload-artifact@v4
+        if: matrix.image == 'debian:stable' || matrix.image == 'fedora:latest'
         with:
-          name: deb
-          path: dist/*.deb
-
-  rpm:
-    needs: test
-    runs-on: ubuntu-latest
-    container: fedora:latest
-    steps:
-      - name: Install build tools
-        run: dnf install -y rpm-build git-core python3 awk
-      - uses: actions/checkout@v4
-      - name: Fetch pinned lemond for vendoring
-        run: |
-          . packaging/lemond-version.env
-          curl -sSL -o /tmp/lemond.tar.gz \
-            "https://github.com/lemonade-sdk/lemonade/releases/download/v${LEMOND_VERSION}/lemonade-embeddable-${LEMOND_VERSION}-ubuntu-x64.tar.gz"
-          echo "${LEMOND_SHA256}  /tmp/lemond.tar.gz" | sha256sum -c -
-          echo "DICTATR_LEMOND_TARBALL=/tmp/lemond.tar.gz" >> "$GITHUB_ENV"
-      - name: Build rpm
-        run: |
-          git config --global --add safe.directory "$PWD"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            export VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          bash packaging/build-rpm.sh
-      - name: Sanity-check contents
-        run: rpm -qlp dist/noarch/*.rpm
-      - name: Install it and run it
-        run: |
-          dnf install -y dist/noarch/*.rpm
-          dictate backend status
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rpm
-          path: dist/noarch/*.rpm
+          name: pkg-${{ strategy.job-index }}
+          path: |
+            dist/*.deb
+            dist/noarch/*.rpm
+          if-no-files-found: ignore
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, rpm]
+    needs: packages
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # The release page gets the same history the packages carry, from
+      # the same source: the spec's %changelog. A hand-written note and
+      # an auto-generated commit list are both worse than the one the
+      # release was already described by.
+      - name: Release notes from the changelog
+        run: |
+          python3 packaging/spec2changelog.py packaging/dictatr.spec \
+            --markdown --version "${GITHUB_REF_NAME#v}" > notes.md
+          cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: notes.md
           files: dist/*
+          # Appends the commit/PR list under our notes, rather than
+          # instead of them.
           generate_release_notes: true
