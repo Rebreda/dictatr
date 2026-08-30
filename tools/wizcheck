@@ -61,7 +61,7 @@ def check():
                 c = c.get_next_sibling()
         print(f"step label : {w.step_label.get_label()!r}")
         print(f"choices    : {labels}")
-        if w.step_label.get_label() != "Step 1 of 3":
+        if w.step_label.get_label() != "1 of 3":
             fails.append("step label wrong")
         if len(labels) < 2:
             fails.append(f"expected >=2 choices, got {labels}")
@@ -86,7 +86,7 @@ def check():
         # step 2 of 3 after advancing
         w._enter(1)
         print(f"after advance: {w.step_label.get_label()!r}")
-        if w.step_label.get_label() != "Step 2 of 3":
+        if w.step_label.get_label() != "2 of 3":
             fails.append("step label did not advance")
 
         print("\nFAILURES:" if fails else "\nall checks passed")

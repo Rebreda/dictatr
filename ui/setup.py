@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""First-run setup wizard for dictatr, shaped like the voice chat.
+"""First-run setup wizard for dictatr: one card, one step at a time.
 
 Three steps, each a probe plus a few choices: the inference engine, the
 hotkeys, and a real dictation that also asks for the typing permission
@@ -13,14 +13,14 @@ mark_complete, close -- and it is what keeps the wizard editable:
 adding a step is writing one class over there, and how it looks is not
 that class's business.
 
-It is a conversation, in the same visual family as the chat: pills grow
-upward from a hub row on a transparent layer-shell overlay, the wizard's
-lines on the left, the choice you made on the right. Choices are
-labelled pills, because the ring this replaced put every action behind
-an unlabelled icon and a hover, spent its single line of prose on an
-ellipsis, and had nowhere to print a number on a download that runs for
-minutes. The input region is clipped to the column, so the desktop
-underneath stays clickable.
+A card on a transparent layer-shell overlay: title and step counter,
+the prose, a status line, the choices as a list of labelled rows, and
+Back and Close. One column, one alignment, no history. Choices carry
+their words because the ring this began as put every action behind an
+unlabelled icon and a hover; they are a plain list because the
+conversation it became grew a transcript nobody could act on. The input
+region is clipped to the card, so the desktop underneath stays
+clickable.
 
 Nothing blocks the GTK loop: every probe, download and portal dance runs
 on a worker thread and reports back through GLib.idle_add.
@@ -47,32 +47,39 @@ sys.path.insert(0, str(REPO / "ui"))
 import handoff  # noqa: E402
 import motion  # noqa: E402
 import radial  # noqa: E402
-from radial import BLUE, INK, Bubble  # noqa: E402
+from radial import BLUE, GREEN, INK, RED, Bubble  # noqa: E402
 from setup_steps import STEPS, Step  # noqa: E402
 
 WIDTH = 420
-STACK_H = 640   # pills + choices + status + hub; the hub sits at the bottom
+CARD_H = 420    # the card's own height, for placing it at the pointer
 
-# The same visual vocabulary as the voice chat, because this is the same
-# kind of conversation: the wizard says something, you answer by picking
-# one of a few readable pills, and what you picked stays in the
-# transcript above. No card, no ring of unlabelled icons — a choice
-# whose meaning only appears on hover is a choice nobody reads.
+# One card per step. The wizard is not a conversation -- there is
+# nothing to scroll back to and nothing to say -- so it stopped being
+# shaped like one: a title, a paragraph, the choices, and the two ways
+# out. Everything left-aligned in one column, because an eye that has to
+# travel left, right and centre on every step is doing work the layout
+# should have done.
 SETUP_CSS = f"""
 window {{ background: transparent; }}
-.step-pill {{
-  background: alpha(#1c1d22, 0.85);
-  border: 1px solid alpha(#ffffff, 0.08);
-  border-radius: 9999px; padding: 2px 11px;
-  color: alpha({INK}, 0.5); font-size: 11px;
+.setup .card {{
+  background: alpha(#1c1d22, 0.96);
+  border: 1px solid alpha(#ffffff, 0.10);
+  border-radius: 18px;
+  padding: 20px 22px;
 }}
-/* A choice is a labelled pill, not an icon on an orbit. The icon is
-   decoration; the words are the affordance. */
+.setup .title {{ font-size: 16px; font-weight: 700; color: {INK}; }}
+.setup .counter {{ font-size: 12px; color: alpha({INK}, 0.42); }}
+.setup .body {{ color: alpha({INK}, 0.80); }}
+.setup .status {{ font-size: 12px; color: alpha({INK}, 0.55); }}
+.setup .status.good {{ color: {GREEN}; }}
+.setup .status.bad {{ color: {RED}; }}
+/* A choice is a labelled row, full width, so the list reads as a list
+   and the words are the affordance rather than an icon on an orbit. */
 .choice {{
-  border-radius: 9999px;
-  padding: 8px 16px;
-  background: alpha(#1c1d22, 0.93);
-  border: 1px solid alpha(#ffffff, 0.12);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: alpha(#ffffff, 0.05);
+  border: 1px solid alpha(#ffffff, 0.10);
   color: {INK};
   transition: border-color 120ms ease, background 120ms ease;
 }}
@@ -82,13 +89,20 @@ window {{ background: transparent; }}
 }}
 .choice image {{ color: alpha({INK}, 0.7); }}
 .choice.primary {{ border-color: alpha({BLUE}, 0.5); }}
+.choice.primary image {{ color: {BLUE}; }}
 /* The number that picks this from the keyboard: present enough to be
    learned, quiet enough not to compete with the words. */
 .choice-key {{
   color: alpha({INK}, 0.30); font-size: 11px;
   padding-left: 6px;
 }}
-.choice.primary image {{ color: {BLUE}; }}
+/* The two ways out: words, not orbiting icons, and quiet until wanted. */
+.nav {{
+  background: none; border: none; box-shadow: none;
+  padding: 2px 6px; min-height: 0;
+  color: alpha({INK}, 0.5); font-size: 13px;
+}}
+.nav:hover {{ color: {INK}; background: alpha(#ffffff, 0.07); }}
 .setup progressbar trough {{
   min-height: 5px; border-radius: 9999px;
   background: alpha(#ffffff, 0.10);
@@ -112,15 +126,19 @@ window {{ background: transparent; }}
 
 
 class Wizard(Gtk.ApplicationWindow):
-    """The surface: a conversation, in the same shape as the voice chat.
+    """The surface: one card, one step at a time.
 
-    Pills grow upward from a hub row — what the wizard said, what you
-    picked — above the step's choices, a status line and a progress bar.
-    It replaced a card with a ring of unlabelled satellites: the ring
-    made every choice a hover away from being readable, spent its one
-    text line on an ellipsis, and had no room for a number on a download
-    that takes minutes. The overlay's input region is still clipped to
-    what is visible, so the desktop underneath stays clickable.
+    A title, the prose, a status line, the choices, and the two ways
+    out. It has been three things now — a ring of unlabelled satellites
+    where every choice was a hover away from being readable, then a
+    conversation with a transcript of pills. The transcript was the
+    mistake the ring was not: a three-step wizard has no history worth
+    keeping, so it was chrome that grew under the sentence you were
+    still reading, in a fourth alignment, while a step badge, a status
+    pill and a hub ring each claimed a region of their own.
+
+    Everything is in the card and left-aligned. The overlay's input
+    region is clipped to it, so the desktop underneath stays clickable.
     """
 
     def __init__(self, app):
@@ -133,96 +151,81 @@ class Wizard(Gtk.ApplicationWindow):
         self.index = 0
         self.completed = False
         self._closing = False
-        self._pills = []
-        self._body = None      # this step's opening pill, so it can be edited
 
-        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        stack.set_size_request(WIDTH, STACK_H)
-        stack.append(Gtk.Box(vexpand=True))   # pushes the column down
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("card")
+        card.set_size_request(WIDTH, -1)
 
-        # Where you are in the wizard. The ring that used to stand here
-        # wore this on its hub as an arc; dropping the ring dropped the
-        # only thing that said how much of setup was left.
-        self.step_label = Gtk.Label(label="")
-        self.step_label.add_css_class("step-pill")
-        step_row = Gtk.Box(halign=Gtk.Align.CENTER)
-        step_row.append(self.step_label)
-        stack.append(step_row)
+        # Header: what this step is, and how much is left.
+        self.title_label = Gtk.Label(xalign=0.0, hexpand=True)
+        self.title_label.add_css_class("title")
+        self.step_label = Gtk.Label(xalign=1.0)
+        self.step_label.add_css_class("counter")
+        head = Gtk.Box()
+        head.append(self.title_label)
+        head.append(self.step_label)
+        card.append(head)
 
-        self.msgs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.scroll = Gtk.ScrolledWindow(
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-            propagate_natural_height=True, max_content_height=380,
-            valign=Gtk.Align.END)
-        self.scroll.set_child(self.msgs)
-        stack.append(self.scroll)
+        self.body = Gtk.Label(xalign=0.0, wrap=True)
+        self.body.set_max_width_chars(46)
+        self.body.add_css_class("body")
+        card.append(self.body)
 
-        # Order matters here: what is true now, then what you can do
-        # about it. The status carries the reason the choices exist —
-        # how big the download is, what was refused — so it reads
-        # before them, not after.
-        # Wrapping, not ellipsized: the line that says how big the
-        # download is has to survive being read.
-        self.status = Gtk.Label(label="", wrap=True,
-                                justify=Gtk.Justification.CENTER)
-        self.status.set_max_width_chars(44)
-        self.status.add_css_class("status-pill")
-        status_row = Gtk.Box(halign=Gtk.Align.CENTER)
-        status_row.append(self.status)
-        stack.append(status_row)
+        # The status is a line of this card, not a pill of its own
+        # floating under it: it says something about the step you are
+        # reading, so it belongs where you are reading.
+        self.status = Gtk.Label(xalign=0.0, wrap=True)
+        self.status.set_max_width_chars(46)
+        self.status.add_css_class("status")
+        self.status.set_visible(False)
+        card.append(self.status)
 
-        self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             halign=Gtk.Align.CENTER)
-        stack.append(self.extra)
+        self.extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.append(self.extra)
 
         self.choices = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                               spacing=7, halign=Gtk.Align.CENTER)
-        stack.append(self.choices)
+                               spacing=6)
+        card.append(self.choices)
 
-        self.bar = Gtk.ProgressBar(halign=Gtk.Align.CENTER, visible=False)
-        self.bar.set_size_request(WIDTH - 140, -1)
-        bar_row = Gtk.Box(halign=Gtk.Align.CENTER)
-        bar_row.append(self.bar)
-        stack.append(bar_row)
+        self.bar = Gtk.ProgressBar(visible=False)
+        card.append(self.bar)
+        # Back and Close as two quiet buttons in the card's own footer.
+        # They were a ring orbiting a badge, which is chrome the menu
+        # and the chat need (they are rings) and this is not: a wizard
+        # page has exactly two ways out and they read better as words.
+        self.back_btn = Gtk.Button(label="\u2039  Back")
+        self.back_btn.add_css_class("nav")
+        self.back_btn.set_focusable(False)
+        self.back_btn.connect("clicked", lambda *_: self.back())
+        close_btn = Gtk.Button(label="Close")
+        close_btn.add_css_class("nav")
+        close_btn.set_focusable(False)
+        close_btn.set_tooltip_text("Close  [Esc]")
+        close_btn.connect("clicked", lambda *_: self.close())
+        foot = Gtk.Box()
+        self.back_btn.set_hexpand(True)
+        self.back_btn.set_halign(Gtk.Align.START)
+        close_btn.set_halign(Gtk.Align.END)
+        foot.append(self.back_btn)
+        foot.append(close_btn)
+        card.append(foot)
 
-        # The wizard's chrome is the same ring the menu and the chat use,
-        # in the card style: an emblem for a hub — this one is a badge
-        # for the step, not a control — with Back and Close orbiting it.
-        # It was a row of three buttons, which meant hiding Back on the
-        # first step slid Close sideways.
-        self.hub = Gtk.Button(icon_name=self.steps[0].icon)
-        self.hub.add_css_class("hubbtn")
-        self.hub.set_focusable(False)
-        self.hub.set_sensitive(False)
-        self.ring = radial.Ring(
-            [radial.Bubble("go-previous-symbolic", "Back", self.back,
-                           css=("back",), key="back", group="nav",
-                           shown=False),
-             radial.Bubble("window-close-symbolic", "Close  [Esc]",
-                           self.close, css=("danger",), key="close",
-                           group="nav")],
-            hub=radial.Hub(self.steps[0].icon, widget=self.hub,
-                           sensitive=False, keep=True),
-            style=radial.STYLE_CARD)
-        ring_row = Gtk.Box(halign=Gtk.Align.CENTER)
-        ring_row.append(self.ring)
-        stack.append(ring_row)
+        stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        stack.append(card)
+        self.card = card
 
         self.column = stack
-        self._hit = (step_row, self.scroll, self.extra, self.choices,
-                     status_row, bar_row)
+        self._hit = (card,)
 
         # The overlay is the kit's, not a second copy of it: this window
         # had its own transcription of layer-shell setup and input-region
         # polling, and the two had already drifted apart.
-        # The hub goes under the pointer, like the menu's and the
-        # chat's. Without an anchor the column was centred on the
-        # cursor, which put its hub some 300px below it.
-        hub_y = STACK_H - self.ring.size / 2
-        self.ov = radial.Overlay(self, stack, (WIDTH, STACK_H),
+        # The card arrives under the pointer, centred on it: with one
+        # region there is no hub to line up with any more.
+        self.ov = radial.Overlay(self, stack, (WIDTH, CARD_H),
                                  hit_widgets=self._hits, clamp=12,
                                  on_place=self._enter_from,
-                                 anchor=(0.5, hub_y / STACK_H))
+                                 anchor=(0.5, 0.5))
         # Invisible until it is placed. Without this the whole column
         # painted, fully opaque, in the screen's top-left corner and
         # then teleported to the pointer — for up to two seconds, if the
@@ -236,7 +239,7 @@ class Wizard(Gtk.ApplicationWindow):
             outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
             outer.append(stack)
             self.set_child(outer)
-            GLib.timeout_add(120, self._open_ring)
+            GLib.timeout_add(120, self._arrive)
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
@@ -256,9 +259,9 @@ class Wizard(Gtk.ApplicationWindow):
         return False
 
     def _hits(self):
-        """Where the overlay takes clicks: the column, plus the ring's
-        bubbles one at a time rather than the square they are drawn in."""
-        return (*self._hit, *self.ring.hit_widgets())
+        """Where the overlay takes clicks: the card, and nothing else.
+        Everything the wizard offers is inside it now."""
+        return self._hit
 
     def _enter_from(self, cx, cy):
         """Rise into place, then bloom — the chat card's arrival, on the
@@ -274,13 +277,13 @@ class Wizard(Gtk.ApplicationWindow):
             self.ov.move(cx, cy + v["lift"])
             if v["bloom"] > 0.5 and not bloomed[0]:
                 bloomed[0] = True
-                self._open_ring()
+                self._arrive()
 
         radial.play(self, arrival, apply)
 
-    def _open_ring(self):
-        self.ring.open()
-        handoff.arrive(self, self.ov.canvas, self.ring.hub)
+    def _arrive(self):
+        """Draw the tether back to whatever opened us, to the card."""
+        handoff.arrive(self, self.ov.canvas, self.card)
         return False
 
     def _draggable_at(self, x, y):
@@ -290,81 +293,15 @@ class Wizard(Gtk.ApplicationWindow):
         while target is not None:
             if isinstance(target, (Gtk.Button, Gtk.Entry)):
                 return False
-            if target is self.column or target is self.ring:
+            if target is self.column or target is self.card:
                 on_card = True
             target = target.get_parent()
         return on_card
 
-    def say(self, text, role="ai", title=None):
-        """Add a pill. The wizard's own lines carry the step title; the
-        line you chose comes back as your side of the exchange."""
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        inner.add_css_class("msg")
-        inner.add_css_class(f"msg-{role}")
-        if title:
-            head = Gtk.Label(label=title, xalign=0.0)
-            head.add_css_class("title")
-            inner.append(head)
-        # Not selectable: with no entry on most steps, a selectable
-        # label takes the initial focus and opens with its own text
-        # highlighted, which reads as a mistake.
-        lab = Gtk.Label(label=text, wrap=True, xalign=0.0)
-        lab.set_max_width_chars(40)
-        lab.add_css_class("body")
-        inner.append(lab)
-
-        wrap = Gtk.Box(halign=Gtk.Align.END if role == "user"
-                       else Gtk.Align.START)
-        wrap.append(inner)
-        rev = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.CROSSFADE,
-            transition_duration=200, child=wrap)
-        self.msgs.append(rev)
-        self._pills.append(rev)
-        GLib.idle_add(rev.set_reveal_child, True)
-        self._refade()
-        GLib.idle_add(self._scroll_down)
-        lab._rev = rev
-        return lab
-
-    def _refade(self):
-        """Older pills dim stepwise, so the live exchange reads first."""
-        n = len(self._pills)
-        for i, rev in enumerate(self._pills):
-            age = n - 1 - i
-            want = 1.0 if age < 2 else max(0.35, 1.0 - 0.16 * age)
-            if abs(rev.get_opacity() - want) > 0.01:
-                radial.fade(rev, want, 0.25)
-
-    def _scroll_down(self):
-        adj = self.scroll.get_vadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
-        return False
-
-    def _trim_to(self, count):
-        """Rewind the transcript, one pill at a time.
-
-        Walking back used to remove several at once, in one frame, so
-        the column collapsed instead of unwinding.
-        """
-        going = []
-        while len(self._pills) > count:
-            going.append(self._pills.pop())
-
-        def gone(pill):
-            if pill.get_parent() is self.msgs:
-                self.msgs.remove(pill)
-            self._refade()
-
-        for i, pill in enumerate(reversed(going)):
-            radial.fade_out_then(pill, lambda p=pill: gone(p),
-                                 duration=0.16, delay=i * 0.04)
-
     # --- what the steps call ---------------------------------------------
     def set_body(self, text):
-        """The step's opening line, as the wizard's own pill."""
-        step = self.steps[self.index]
-        self._body = self.say(text, "ai", title=step.title)
+        """The step's prose. One paragraph, in the card."""
+        self.body.set_label(text)
 
     def set_status(self, text, tone=""):
         """Crossfade the status line; the pill itself fades in and out.
@@ -505,8 +442,10 @@ class Wizard(Gtk.ApplicationWindow):
                                  duration=0.14, delay=i * 0.03)
 
     def _chose(self, _btn, bubble):
-        """Picking is a turn: it lands in the transcript, then runs."""
-        self.say(bubble.tooltip, "user")
+        """Picking clears the list and runs the action. What you chose
+        used to be echoed back as a pill above; in a three-step wizard
+        that was a transcript of things you could not act on, growing
+        under prose you were still reading."""
         self.set_items([])
         if bubble.action is not None:
             bubble.action()
@@ -531,24 +470,17 @@ class Wizard(Gtk.ApplicationWindow):
 
     def _enter(self, index, back=False):
         step = self.steps[index]
-        if back:
-            # Walking back rewinds the transcript to where that step
-            # began, so its pills are not said twice.
-            self._trim_to(getattr(step, "_mark", 0))
         self.index = index
-        step._mark = len(self._pills)
         self.set_extra(None)
         self.set_items([])
         self.set_status("")
         self.set_progress(None)
         self.busy(False)
-        self.ring.set_hub(icon=step.icon)
-        # On the first step there is nothing to go back to, and the ring
-        # already carries a close button; two controls that both close
-        # is one too many. Its slot closes up rather than sitting empty.
-        self.ring.set_item_shown("back", index > 0)
-        self.step_label.set_label(
-            f"Step {index + 1} of {len(self.steps)}")
+        self.title_label.set_label(step.title)
+        self.step_label.set_label(f"{index + 1} of {len(self.steps)}")
+        # Nothing to go back to on the first step, and Close is right
+        # there: a disabled Back would only be a thing to try.
+        self.back_btn.set_visible(index > 0)
         step.enter()
 
     def _choice_buttons(self):

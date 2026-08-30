@@ -124,14 +124,18 @@ lemond.start = fake_start
 lemond.pull = fake_pull
 lemond.pin = lambda *a, **k: None
 
+# ui/ is on sys.path so setup.py's own `import setup_steps` resolves.
+sys.path.insert(0, str(REPO / "ui"))
 spec = importlib.util.spec_from_file_location("setup", REPO / "ui" / "setup.py")
 setup = importlib.util.module_from_spec(spec)
 sys.modules["setup"] = setup
 spec.loader.exec_module(setup)
+# The steps moved to their own module; the window is what setup.py is.
+import setup_steps  # noqa: E402
 
 if args.auto:
     from gi.repository import GLib
-    _probed = setup.EngineStep._probed
+    _probed = setup_steps.EngineStep._probed
 
     def probed(self, found, managed):
         _probed(self, found, managed)
@@ -147,6 +151,6 @@ if args.auto:
 
         GLib.timeout_add(700, click)
 
-    setup.EngineStep._probed = probed
+    setup_steps.EngineStep._probed = probed
 
 setup.main()
