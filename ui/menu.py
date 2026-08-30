@@ -39,11 +39,14 @@ from dictatr.settings import CONFIG_PATH, settings, write_config  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
 import radial  # noqa: E402
-from radial import SIZE, Bubble, Ring  # noqa: E402
+from radial import CHARCOAL, INK, SIZE, Bubble, Ring  # noqa: E402
 
-MENU_CSS = b"""
-.settings-box { padding: 18px; }
-"""
+MENU_CSS = f"""
+/* The kit makes every window transparent for the overlays; a normal
+   window like this one has to paint its own background. */
+.settings-window {{ background: {CHARCOAL}; color: {INK}; }}
+.settings-box {{ padding: 18px; }}
+""".encode()
 
 
 class Radial(Gtk.ApplicationWindow):
@@ -286,6 +289,8 @@ class SettingsWindow(Gtk.Window):
     def __init__(self, app):
         super().__init__(application=app, title="Dictate settings",
                          default_width=380, resizable=False)
+        radial.apply_css(MENU_CSS)
+        self.add_css_class("settings-window")
 
         grid = Gtk.Grid(row_spacing=12, column_spacing=12)
         grid.add_css_class("settings-box")
