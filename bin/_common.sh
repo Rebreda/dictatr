@@ -14,11 +14,21 @@ py=python3
 "$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
 
 # Call before exec'ing a surface that floats above other windows.
+#
+# The `if` is load-bearing. Written as `[ -e "$lib" ] && export ...` the
+# last iteration decides the function's status, and only one of these
+# paths exists on any given machine -- so under `set -e` the launcher
+# exited, silently and before doing anything, on every 64-bit distro
+# that keeps the library in /usr/lib64. That is what "the hotkey does
+# nothing" looked like from the outside.
 preload_layer_shell() {
     for lib in /usr/lib64/libgtk4-layer-shell.so.0 \
                /usr/lib/libgtk4-layer-shell.so.0; do
-        [ -e "$lib" ] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+        if [ -e "$lib" ]; then
+            export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
+        fi
     done
+    return 0
 }
 
 # Run a module from the dictatr package. The package is stdlib-only, so
