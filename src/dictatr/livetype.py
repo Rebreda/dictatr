@@ -14,9 +14,21 @@ so the interesting part is testable without a compositor.
 
 import json
 import subprocess
+import time
 from pathlib import Path
 
+from . import runstate
+
 HELPER = Path(__file__).resolve().parents[2] / "ui" / "portal_typed.py"
+
+# How long after the hotkey fires before the first revision may be typed.
+# The chord that started the dictation is still physically down for a
+# moment, and a letter injected under Ctrl+Alt is not a letter — it is a
+# global shortcut. Where the tray bound the hotkey through the portal we
+# know when it is released and do not have to guess; where it came from
+# kglobalshortcutsrc nothing reports it, so a short wait stands in.
+# Nothing is lost by waiting: the next partial types the difference.
+SETTLE_S = 0.35
 
 
 def edit_to(typed: str, target: str) -> tuple[int, str]:
@@ -40,6 +52,7 @@ class LiveTyper:
     def __init__(self, gi_python: str):
         self.typed = ""
         self.failed = False
+        self.started = time.monotonic()
         try:
             self.proc = subprocess.Popen(
                 [gi_python, str(HELPER), "--stream"],
@@ -61,8 +74,26 @@ class LiveTyper:
         except (OSError, ValueError):
             self.failed = True
 
+    def holding(self) -> bool:
+        """Whether it is unsafe to type at the cursor right now.
+
+        True while the hotkey chord is down, and for a moment after the
+        dictation starts. Both are the same hazard: Ctrl+Alt+D starts a
+        dictation and Ctrl+Alt+<letter> is a command, so a revision typed
+        under either opens windows instead of writing words.
+        """
+        return (time.monotonic() - self.started < SETTLE_S
+                or runstate.chord_held())
+
     def update(self, text: str) -> None:
-        """Bring the cursor in line with *text*."""
+        """Bring the cursor in line with *text*.
+
+        Skipped entirely while a chord is down. That costs nothing at
+        all, because this is a reconciliation and not an append: whatever
+        is skipped now, the next partial types the difference of.
+        """
+        if self.holding():
+            return
         back, tail = edit_to(self.typed, text)
         if not back and not tail:
             return
@@ -88,6 +119,10 @@ class LiveTyper:
         """Erase everything typed so far: a cancelled dictation must not
         leave half a sentence in the document."""
         if not self.failed and self.typed:
+            # Cancel is a chord too (Ctrl+Alt+C), and erasing under it
+            # is Ctrl+Alt+BackSpace repeated.
+            from .deliver import wait_for_chord
+            wait_for_chord()
             self._send(len(self.typed), "")
             self.typed = ""
         self.close()

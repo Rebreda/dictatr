@@ -51,6 +51,15 @@ KEY_DELAY_MS = 12
 # so anything still down when this process exits stays down for the rest
 # of the session: a stuck Shift turns every mouse wheel into a sideways
 # scroll, which reads as "scrolling broke" rather than "dictation broke".
+# The subset that turns a letter into a shortcut. Shift is not one of
+# them — Shift+a is "A", not a command — and it is managed explicitly by
+# type_text, so releasing it here would fight that.
+SHORTCUT_KEYSYMS = (
+    0xffe3, 0xffe4,   # Control_L, Control_R
+    0xffe9, 0xffea,   # Alt_L, Alt_R
+    0xffeb, 0xffec,   # Super_L, Super_R
+    0xffe7, 0xffe8,   # Meta_L, Meta_R
+)
 MODIFIER_KEYSYMS = (
     0xffe1, 0xffe2,   # Shift_L, Shift_R
     0xffe3, 0xffe4,   # Control_L, Control_R
@@ -173,6 +182,28 @@ class RemoteDesktop:
         self._call(RD_IFACE, "NotifyKeyboardKeysym", "(oa{sv}iu)",
                    (session, {}, keysym, 1 if pressed else 0))
 
+    def clear_shortcut_modifiers(self, session):
+        """Tell the compositor no command modifier is down.
+
+        Dictation is bound to Ctrl+Alt+D, and typing at the cursor
+        begins while that chord may still be physically held — at the
+        start, and again on the press that ends the utterance. A letter
+        injected then is not a letter, it is Ctrl+Alt+letter, which on
+        a desktop full of global shortcuts opens windows and switches
+        desktops. It reads as the app going haywire.
+
+        dictatr.livetype holds off while it knows the chord is down, but
+        it only knows when the hotkey came through the portal; a binding
+        in kglobalshortcutsrc never reports one. So the injector says so
+        itself. Releasing a key that is not held is harmless, and when
+        the user does let go the compositor simply sees another release.
+        """
+        for ks in SHORTCUT_KEYSYMS:
+            try:
+                self._key(session, ks, False)
+            except Exception:
+                pass
+
     def type_text(self, session, text):
         """Type *text*, holding Shift ourselves for the characters that
         need it.
@@ -184,6 +215,7 @@ class RemoteDesktop:
         too. With Shift already down when the keysym lands there is
         nothing for it to synthesise, and the release is ours to make.
         """
+        self.clear_shortcut_modifiers(session)
         last = None
         shifted = False
         try:
@@ -205,6 +237,9 @@ class RemoteDesktop:
             self.release_all(session, last)
 
     def erase(self, session, count):
+        # Ctrl+Alt+BackSpace is a bound key on more than one desktop, so
+        # a revision arriving under the chord is as dangerous as a letter.
+        self.clear_shortcut_modifiers(session)
         for _ in range(count):
             self._key(session, BACKSPACE, True)
             self._key(session, BACKSPACE, False)
