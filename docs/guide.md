@@ -173,6 +173,14 @@ afterwards. Ordinary pointing reverses direction constantly but in small
 steps; dragging a scrollbar is long but slow; requiring both distance
 and speed excludes each. `gesture_shake = false` turns it off.
 
+To see whether it is firing, follow the tray's own output: `./dev logs`
+in a checkout, `journalctl --user -t dictatr-tray -f` for an installed
+one. A gesture logs one line. Set `gesture_debug = true` and every
+counted sweep is logged too, with how far it travelled and how many of
+the four it is, which is what tuning SWING and WINDOW against your own
+hand needs. The setting is read live, so it takes effect without
+restarting the tray.
+
 ## What dictatr knows about where you are
 
 Wayland gives an app no way to ask which window has focus, so the
@@ -346,6 +354,7 @@ environment.
 | `DICTATE_LIVE_TYPING` | `true` | type words as they are transcribed; `false` inserts once at the end |
 | `DICTATE_ASK_CONTEXT` | `selection` | what ask mode may read: `selection`, `clipboard`, both (comma-separated), or empty |
 | `DICTATE_GESTURE_SHAKE` | `true` | shake the pointer up and down to open the voice chat (KDE) |
+| `DICTATE_GESTURE_DEBUG` | `false` | log every counted sweep, for tuning the shake thresholds |
 | `DICTATE_LISTEN_TAG` | `false` | concept-tag rows archived by `listen` (keeps the LLM warm) |
 | `DICTATE_GC_MIN_SEC` | `1.0` | gc: listen clips shorter than this and under min words are junk |
 | `DICTATE_GC_MIN_WORDS` | `2` | gc: word floor paired with the duration floor |

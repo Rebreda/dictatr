@@ -33,11 +33,25 @@ CHORD = RUN / "chord"
 APP = RUN / "app"
 
 
+def _zombie(pid: int) -> bool:
+    """A process that has exited but whose parent has not reaped it.
+
+    It still answers kill(pid, 0), so a session that died while its
+    launcher lived would look live forever: the always-on listener would
+    stay paused waiting for it and the tray would sit on "recording"."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            # comm can contain spaces and brackets; state follows it.
+            return f.read().rpartition(b")")[2].split()[0] == b"Z"
+    except OSError:
+        return False
+
+
 def live_pid(pidfile: Path) -> int | None:
     try:
         pid = int(pidfile.read_text())
         os.kill(pid, 0)
-        return pid
+        return None if _zombie(pid) else pid
     except (FileNotFoundError, ValueError, ProcessLookupError,
             PermissionError):
         return None

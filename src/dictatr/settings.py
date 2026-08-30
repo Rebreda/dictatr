@@ -225,6 +225,9 @@ class GestureSettings:
     # ui/kwin/activewindow.js). Shake the pointer up and down to open
     # the voice chat, for when a hotkey is not where your hand is.
     shake: bool = Setting("DICTATE_GESTURE_SHAKE", "gesture_shake", True, bool)
+    # Print every counted sweep to the tray's log, for tuning the
+    # thresholds against how you actually move.
+    debug: bool = Setting("DICTATE_GESTURE_DEBUG", "gesture_debug", False, bool)
 
 
 class Settings:

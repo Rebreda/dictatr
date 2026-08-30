@@ -80,6 +80,12 @@ function shake() {
             while (sweeps.length && t - sweeps[0] > WINDOW) {
                 sweeps.shift();
             }
+            // Every sweep is reported, not just the fourth: tuning
+            // this by feel needs to show near misses, and the tray
+            // stays quiet about them unless asked (gesture_debug).
+            callDBus(TRAY, OBJ, IFACE, "Gesture",
+                     "sweep " + sweeps.length + "/" + NEEDED +
+                     " travel=" + Math.round(Math.abs(travel)));
             if (sweeps.length >= NEEDED && t - lastFired > COOLDOWN) {
                 lastFired = t;
                 sweeps = [];

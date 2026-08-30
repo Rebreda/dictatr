@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import gi
@@ -205,6 +206,11 @@ class Tray:
                  None, Gio.DBusCallFlags.NONE, -1, None, None)
 
     def _poll(self):
+        # Reap whatever we spawned. The tray outlives its children, and
+        # an unreaped one stays in the process table as a zombie that
+        # still answers kill(pid, 0), which is indistinguishable from a
+        # live session to anything watching the pidfiles.
+        reap()
         state = self._state()
         if state != self.state:
             self.state = state
@@ -248,11 +254,11 @@ class Tray:
         if method == "Activate":
             if self.state.startswith("rec"):
                 # Click the red icon = stop & deliver, like the hotkey.
-                subprocess.Popen([DICTATE, "type"])
+                spawn([DICTATE, "type"])
             else:
-                subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
+                spawn([str(REPO / "bin" / "dictate-menu")])
         elif method == "SecondaryActivate":
-            subprocess.Popen([DICTATE, "listen", "--toggle"])
+            spawn([DICTATE, "listen", "--toggle"])
         inv.return_value(None)
 
     # --- com.canonical.dbusmenu ----------------------------------------
@@ -303,12 +309,12 @@ class Tray:
         if action == "quit":
             self.loop.quit()
         elif action == "chat":
-            subprocess.Popen([str(REPO / "bin" / "dictate-chat")])
+            spawn([str(REPO / "bin" / "dictate-chat")])
         elif action == "settings":
-            subprocess.Popen([str(REPO / "bin" / "dictate-menu"),
+            spawn([str(REPO / "bin" / "dictate-menu"),
                               "--settings"])
         elif action == "setup":
-            subprocess.Popen([str(REPO / "bin" / "dictate-setup")])
+            spawn([str(REPO / "bin" / "dictate-setup")])
         elif action == "gc":
             def run():
                 r = subprocess.run([DICTATE, "gc"], capture_output=True,
@@ -317,7 +323,7 @@ class Tray:
                                category="toggles")
             GLib.Thread.new("gc", run)
         elif isinstance(action, list):
-            subprocess.Popen([DICTATE, *action])
+            spawn([DICTATE, *action])
 
 
 def _name_taken(bus) -> bool:
@@ -344,7 +350,7 @@ def first_run() -> None:
         # A moment behind the tray so the icon is already in the bar when
         # the window appears, and the session is done starting up.
         GLib.timeout_add_seconds(
-            3, lambda: (subprocess.Popen(
+            3, lambda: (spawn(
                 [str(REPO / "bin" / "dictate-setup")]), False)[1])
     except Exception as e:
         print(f"dictatr tray: could not offer setup: {e}", file=sys.stderr)
@@ -367,12 +373,44 @@ GESTURES = {"shake": [str(REPO / "bin" / "dictate-chat")]}
 
 
 def on_gesture(name: str) -> None:
-    """Act on a pointer gesture the compositor spotted for us."""
+    """Act on a pointer gesture the compositor spotted for us.
+
+    Sweeps are the near misses on the way to a gesture; they are only
+    worth printing while someone is tuning the thresholds, so they wait
+    on gesture_debug. Settings are read live, so turning that on in the
+    settings file takes effect without restarting anything."""
+    if name.startswith("sweep"):
+        if settings.gestures.debug:
+            _log(f"gesture: {name}")
+        return
     if not settings.gestures.shake:
         return
     cmd = GESTURES.get(name)
     if cmd:
-        subprocess.Popen(cmd, start_new_session=True)
+        _log(f"gesture: {name} -> {Path(cmd[0]).name}")
+        spawn(cmd, start_new_session=True)
+
+
+# Everything the tray launches, kept until it is reaped. The tray
+# outlives its children by design, so nothing else will.
+_CHILDREN = []
+
+
+def spawn(cmd, **kw):
+    """Launch something and remember it, so it can be reaped."""
+    proc = subprocess.Popen(cmd, **kw)
+    _CHILDREN.append(proc)
+    return proc
+
+
+def reap() -> None:
+    _CHILDREN[:] = [p for p in _CHILDREN if p.poll() is None]
+
+
+def _log(msg: str) -> None:
+    """One line to the tray's own output: `./dev logs` in a checkout,
+    `journalctl --user -t dictatr-tray` for an installed one."""
+    print(f"{datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
 
 def _is_ours(pid: str) -> bool:
@@ -568,7 +606,7 @@ class Shortcuts:
         runstate.chord_down(True)
         for wanted, _desc, _trig, cmd in PORTAL_SHORTCUTS:
             if wanted == sid:
-                subprocess.Popen(cmd)
+                spawn(cmd)
                 return
 
     def _retire_legacy(self):

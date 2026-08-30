@@ -92,3 +92,23 @@ def test_cooldown_stops_a_repeat():
             d.motion(y, clock)
             clock += 70
     assert d.fired == 1
+
+
+def test_a_zombie_is_not_a_live_session(tmp_path, monkeypatch):
+    """A child killed while its launcher lives stays in the process
+    table answering kill(pid, 0). Treating that as a live dictation
+    pauses the always-on listener forever and pins the tray on
+    "recording", so live_pid has to look past it."""
+    import os
+    from dictatr import runstate
+
+    pidfile = tmp_path / "pid"
+    pidfile.write_text(str(os.getpid()))
+    assert runstate.live_pid(pidfile) == os.getpid()
+
+    monkeypatch.setattr(runstate, "_zombie", lambda pid: True)
+    assert runstate.live_pid(pidfile) is None
+
+    pidfile.write_text("999999999")          # nothing is there at all
+    monkeypatch.undo()
+    assert runstate.live_pid(pidfile) is None
