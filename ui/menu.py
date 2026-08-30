@@ -34,7 +34,8 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
 sys.path.insert(0, str(REPO / "src"))
-from dictatr import runstate  # noqa: E402
+from dictatr import actions, context as dictatr_context  # noqa: E402
+from dictatr import deliver, runstate  # noqa: E402
 from dictatr.settings import CONFIG_PATH, settings, write_config  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
@@ -50,14 +51,16 @@ MENU_CSS = f"""
 
 
 class Radial(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, mode="menu"):
+        self.mode = mode
         # NB: resizable must stay True — a non-resizable window rejects the
         # compositor's fullscreen configure, breaking the layer-shell overlay.
         super().__init__(application=app, decorated=False)
 
         radial.apply_css(MENU_CSS)
 
-        self.circle = self._build_ring()
+        self.circle = (self._build_suggest_ring() if mode == "suggest"
+                       else self._build_ring())
         self.placed = False
         self._dismissing = False
 
@@ -137,6 +140,77 @@ class Radial(Gtk.ApplicationWindow):
         ]
         return Ring(items, hub_icon="audio-input-microphone-symbolic",
                     hub_tooltip="Close", on_root_hub=self.dismiss)
+
+    # --- suggest mode --------------------------------------------------
+    def _build_suggest_ring(self):
+        """What to do with the text in front of you.
+
+        Opens on the catalogue immediately: a ring that waited for a
+        model would be a ring that arrives after you have given up. The
+        model's shortlist replaces it in place when it lands, a second
+        or three later, and if it never lands this is already useful."""
+        self._suggest_text = ""
+        for _label, text in dictatr_context.gather(["selection", "clipboard"]):
+            self._suggest_text = text
+            break
+        items = [Bubble(a.icon, a.label, self.act(a.id))
+                 for a in actions.CATALOGUE[:5]]
+        items.append(Bubble("user-available-symbolic", "Ask about this",
+                            self.chat))
+        if self._suggest_text:
+            threading.Thread(target=self._fetch_suggestions,
+                             daemon=True).start()
+        return Ring(items, hub_icon="starred-symbolic",
+                    hub_tooltip="Nothing selected" if not self._suggest_text
+                    else "Thinking…", on_root_hub=self.dismiss)
+
+    def _fetch_suggestions(self):
+        try:
+            picks = actions.suggest(self._suggest_text)
+        except Exception:
+            picks = []
+        GLib.idle_add(self._show_suggestions, picks)
+
+    def _show_suggestions(self, picks):
+        if self._dismissing or not picks:
+            self.circle.set_hub(tooltip="What to do with this")
+            return False
+        items = [Bubble(p["icon"], p["label"], self.act(p["id"], p["arg"]))
+                 for p in picks]
+        items.append(Bubble("user-available-symbolic", "Ask about this",
+                            self.chat))
+        items.append(Bubble("view-more-symbolic", "Everything else", children=[
+            Bubble(a.icon, a.label, self.act(a.id))
+            for a in actions.CATALOGUE]))
+        self.circle.swap(items, hub_icon="starred-symbolic",
+                         hub_tooltip="Suggested for this text")
+        return False
+
+    def act(self, action_id, arg=""):
+        """Run a catalogue action on the selection and deliver the result
+        where the words came from: typing replaces a live selection."""
+        def action():
+            text = self._suggest_text
+            if not text:
+                subprocess.run(["notify-send", "-a", "Dictate", "Dictate",
+                                "Select some text first"], check=False)
+                self.close()
+                return
+            self.circle.set_hub(tooltip="Working…")
+            threading.Thread(target=self._run_action, daemon=True,
+                             args=(action_id, text, arg)).start()
+        return action
+
+    def _run_action(self, action_id, text, arg):
+        try:
+            out = actions.run(action_id, text, arg)
+        except Exception as e:
+            out = ""
+            subprocess.run(["notify-send", "-a", "Dictate", "Dictate",
+                            f"Could not do that: {e}"], check=False)
+        if out:
+            deliver.deliver(out)
+        GLib.idle_add(self.close)
 
     # --- overlay-mode placement ---------------------------------------
     def place_at(self, x, y):
@@ -423,13 +497,17 @@ class SettingsWindow(Gtk.Window):
 
 
 class MenuApp(Gtk.Application):
-    def __init__(self, settings_only=False):
-        super().__init__(application_id="io.github.rebreda.dictatr.menu")
+    def __init__(self, mode="menu"):
+        # Suggest is its own instance: it is a different surface with a
+        # different lifetime, and toggling one must not close the other.
+        super().__init__(
+            application_id=f"io.github.rebreda.dictatr.{mode}"
+            if mode != "menu" else "io.github.rebreda.dictatr.menu")
         self.win = None
-        self.settings_only = settings_only
+        self.mode = mode
 
     def do_activate(self):
-        if self.settings_only:
+        if self.mode == "settings":
             SettingsWindow(self).present()
             return
         # Single instance + toggle: a second hotkey press lands here in the
@@ -437,7 +515,7 @@ class MenuApp(Gtk.Application):
         if self.win is not None:
             self.win.dismiss()
             return
-        self.win = Radial(self)
+        self.win = Radial(self, self.mode)
         self.win.connect("close-request", self._closed)
         self.win.present()
 
@@ -447,9 +525,9 @@ class MenuApp(Gtk.Application):
 
 
 def main():
-    settings_only = "--settings" in sys.argv
-    sys.exit(MenuApp(settings_only).run(
-        [a for a in sys.argv if a != "--settings"]))
+    flags = {"--settings": "settings", "--suggest": "suggest"}
+    mode = next((m for f, m in flags.items() if f in sys.argv), "menu")
+    sys.exit(MenuApp(mode).run([a for a in sys.argv if a not in flags]))
 
 
 if __name__ == "__main__":

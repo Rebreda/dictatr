@@ -26,6 +26,11 @@ DONE = RUN / "done"
 # stuck. Dictation is a toggle, so the second press is still held when
 # the transcript is ready.
 CHORD = RUN / "chord"
+# The focused application's class, kept current by the tray (a KWin
+# script reports it; see ui/kwin/activewindow.js). Dictations record it
+# so recall can prefer what you said while in the same app, and ask mode
+# can say "the user is in code" without guessing.
+APP = RUN / "app"
 
 
 def live_pid(pidfile: Path) -> int | None:
@@ -85,3 +90,17 @@ def chord_held(stale_after: float = 5.0) -> bool:
     except OSError:
         return False
     return age < stale_after
+
+
+def write_app(app: str) -> None:
+    RUN.mkdir(parents=True, exist_ok=True)
+    APP.write_text(app)
+
+
+def read_app() -> str | None:
+    """The focused app's class, or None when nothing is tracking it
+    (no tray, no KWin, another desktop)."""
+    try:
+        return APP.read_text().strip() or None
+    except OSError:
+        return None

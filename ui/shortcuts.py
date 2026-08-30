@@ -20,6 +20,8 @@ SHORTCUTS = [
      [str(BIN / "dictate-menu")]),
     ("chat", "Ask the AI (voice chat)", "CTRL+ALT+q",
      [str(BIN / "dictate-chat")]),
+    ("suggest", "What to do with the selection", "CTRL+ALT+s",
+     [str(BIN / "dictate-suggest")]),
     ("cancel", "Cancel dictation", "CTRL+ALT+c", [DICTATE, "cancel"]),
     ("listen", "Toggle always-on capture", "CTRL+ALT+a",
      [DICTATE, "listen", "--toggle"]),

@@ -11,6 +11,7 @@ import tempfile
 import urllib.request
 
 from . import context as desktop
+from . import runstate
 from . import tools as toolbox
 from .backend import client as backend
 from .settings import settings
@@ -61,7 +62,13 @@ def _post_chat(payload: dict, timeout: float = 180.0) -> dict:
 
 def _desktop_context() -> str:
     names = [n.strip() for n in settings.llm.context.split(",") if n.strip()]
-    return desktop.prompt_section(desktop.gather(names)) if names else ""
+    section = desktop.prompt_section(desktop.gather(names)) if names else ""
+    app = runstate.read_app()
+    if app:
+        section += (f"\nThe user is working in {app} right now. Let it "
+                    "colour how you answer (a question asked in an editor "
+                    "is usually about code); never mention it unasked.")
+    return section
 
 
 def _system_prompt(context: list[dict] | None) -> str:

@@ -14,6 +14,7 @@ ln -sf "$here/bin/dictate" ~/.local/bin/dictate
 ln -sf "$here/bin/dictate-menu" ~/.local/bin/dictate-menu
 ln -sf "$here/bin/dictate-tray" ~/.local/bin/dictate-tray
 ln -sf "$here/bin/dictate-chat" ~/.local/bin/dictate-chat
+ln -sf "$here/bin/dictate-suggest" ~/.local/bin/dictate-suggest
 ln -sf "$here/bin/dictate-setup" ~/.local/bin/dictate-setup
 ln -sf "$here/bin/dictate-hotkeys" ~/.local/bin/dictate-hotkeys
 

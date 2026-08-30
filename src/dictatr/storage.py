@@ -19,6 +19,8 @@ import wave
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import runstate
+
 
 def save_recording(
     pcm_bytes: bytes,
@@ -63,6 +65,9 @@ def save_recording(
         "meta": {
             "os": platform.platform(terse=True),
             "host": socket.gethostname(),
+            # Which application had focus, so recall can prefer what was
+            # said in the same place. None off KDE (see ui/kwin/).
+            "app": runstate.read_app(),
             **(meta or {}),
         },
     }

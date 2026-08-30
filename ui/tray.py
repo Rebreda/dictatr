@@ -104,8 +104,12 @@ SNI_XML = """<node>
 CONTROL_XML = """<node>
  <interface name="io.github.rebreda.dictatr.Shortcuts">
   <method name="Rebind"/>
+  <method name="ActiveApp"><arg type="s" direction="in"/></method>
  </interface>
 </node>"""
+
+KWIN_SCRIPT = REPO / "ui" / "kwin" / "activewindow.js"
+KWIN_PLUGIN = "dictatr-activewindow"
 
 MENU_XML = """<node>
  <interface name="com.canonical.dbusmenu">
@@ -342,6 +346,36 @@ def first_run() -> None:
         print(f"dictatr tray: could not offer setup: {e}", file=sys.stderr)
 
 
+def _kwin(bus, method, sig, args):
+    """Call KWin's scripting service; False when this is not KWin."""
+    try:
+        bus.call_sync("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting",
+                      method, GLib.Variant(sig, args), None,
+                      Gio.DBusCallFlags.NONE, 3000, None)
+        return True
+    except GLib.Error:
+        return False
+
+
+def watch_apps(bus) -> None:
+    """Ask KWin to tell us which application is focused.
+
+    Wayland has no client-side answer, so the knowledge has to come from
+    the compositor: ui/kwin/activewindow.js calls back into this tray on
+    every focus change. Reloaded each startup so a changed script takes
+    effect, and unloaded on exit so nothing of ours outlives the tray."""
+    if not KWIN_SCRIPT.exists():
+        return
+    _kwin(bus, "unloadScript", "(s)", (KWIN_PLUGIN,))
+    if _kwin(bus, "loadScript", "(ss)", (str(KWIN_SCRIPT), KWIN_PLUGIN)):
+        _kwin(bus, "start", "()", ())
+
+
+def unwatch_apps(bus) -> None:
+    _kwin(bus, "unloadScript", "(s)", (KWIN_PLUGIN,))
+    runstate.APP.unlink(missing_ok=True)
+
+
 def portal_bus() -> Gio.DBusConnection:
     """A private session-bus connection for portal work.
 
@@ -498,24 +532,26 @@ class Shortcuts:
             return
         triggers = {sid: (meta.get("trigger_description") or "")
                     for sid, meta in results.get("shortcuts", [])}
-        if any(triggers.values()):
-            self._retire_legacy()
-            return
-        # Accepted, but with no key on any action. KDE does this when
-        # something already holds the combinations - including the legacy
-        # entries about to be retired - and it does not revisit them once
-        # they are free. Free them, then assign the triggers directly.
+        # Anything the portal accepted without putting a key on. KDE does
+        # that when something already holds the combination (including
+        # legacy entries about to be retired), and for a shortcut added
+        # to a component it already knows; either way it never revisits
+        # them once they are free, so assign those directly.
+        unbound = [sid for sid, _d, _t, _c in PORTAL_SHORTCUTS
+                   if not triggers.get(sid)]
         self._retire_legacy()
-        if not self._assign_kde():
+        if unbound and not self._assign_kde(unbound):
             self._fail("the portal bound no keys")
 
-    def _assign_kde(self) -> bool:
+    def _assign_kde(self, only=None) -> bool:
         """Assign the preferred triggers through kglobalaccel, the same
         call System Settings makes when a user picks a shortcut by hand.
         KDE registers portal shortcuts there but leaves them unbound
         (kglobalshortcutsrc shows `none`) whenever it saw a conflict."""
         done = False
         for sid, desc, trig, _cmd in PORTAL_SHORTCUTS:
+            if only is not None and sid not in only:
+                continue
             keycode = _qt_keycode(trig)
             if keycode is None:
                 continue
@@ -604,17 +640,22 @@ def main():
 
     # Rebind: the setup wizard calls this after its own bind, which would
     # otherwise leave the keys owned by its closed session.
-    def on_call(_bus, _sender, _path, _iface, method, _params, inv):
+    def on_call(_bus, _sender, _path, _iface, method, params, inv):
         if method == "Rebind" and shortcuts is not None:
             shortcuts.rebind()
+        elif method == "ActiveApp":
+            runstate.write_app(params.unpack()[0])
         inv.return_value(None)
 
     iface = Gio.DBusNodeInfo.new_for_xml(CONTROL_XML).interfaces[0]
     bus.register_object("/Shortcuts", iface, on_call, None, None)
 
+    watch_apps(bus)
+
     def shutdown(*_):
         if shortcuts is not None:
             shortcuts.close()
+        unwatch_apps(bus)
         loop.quit()
         return GLib.SOURCE_REMOVE
 

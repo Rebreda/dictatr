@@ -33,7 +33,8 @@ share) with progress on the hub. It will also take a base URL and an
 optional key for any OpenAI-compatible server.
 
 **2. Hotkeys.** Asks the desktop to reserve Ctrl+Alt+D (dictate),
-Ctrl+Alt+Space (menu), Ctrl+Alt+Q (voice chat), Ctrl+Alt+C (cancel)
+Ctrl+Alt+Space (menu), Ctrl+Alt+Q (voice chat), Ctrl+Alt+S
+(act on the selection), Ctrl+Alt+C (cancel)
 and Ctrl+Alt+A (always-on),
 then shows what it actually got, since a desktop may hand back different
 keys if something else holds them.
@@ -80,7 +81,8 @@ level and number keys pick from the visible ring.
 
 The setup wizard binds these, and the tray re-binds them through the
 GlobalShortcuts desktop portal at every startup: Ctrl+Alt+D dictate,
-Ctrl+Alt+Space menu, Ctrl+Alt+Q voice chat, Ctrl+Alt+C cancel,
+Ctrl+Alt+Space menu, Ctrl+Alt+Q voice chat, Ctrl+Alt+S act on the
+selection, Ctrl+Alt+C cancel,
 Ctrl+Alt+A always-on toggle. On Plasma 6 the bindings appear in
 System Settings natively and are remembered; GNOME 48+ asks once with a
 consent dialog. When the portal bind succeeds while old
@@ -131,6 +133,42 @@ seconds in case a release is never seen.
 If a desktop does end up stuck this way, press and release the modifier
 on your real keyboard; that resyncs it. Do not try to fix it by
 injecting release events for keys nobody pressed.
+
+## Acting on what you selected
+
+Highlight text anywhere, press Ctrl+Alt+S, and a ring blooms at the
+cursor holding what dictatr can do with it: summarise, rewrite, draft a
+reply, pull out tasks, explain, translate, fix grammar. The result is
+delivered the ordinary way, and since typing replaces a live selection,
+a rewrite lands where the words came from.
+
+The ring does not wait for the model. It opens on the catalogue
+immediately, and a moment later the model's shortlist for *this* text
+replaces it in place, each bubble labelled with what it will do
+("Tighten", "Extract tasks") and carrying its argument. If the model is
+slow, busy or missing, the catalogue ring is already there and works.
+
+The model only ever picks from [actions.py](../src/dictatr/actions.py):
+it chooses which actions fit, their order, and their arguments. It never
+writes a command, so a suggestion is always something you have seen
+before and nothing it returns is executed as code. "Ask about this"
+hands the same text to the voice chat instead.
+
+## What dictatr knows about where you are
+
+Wayland gives an app no way to ask which window has focus, so the
+knowledge comes from the compositor: on KDE the tray loads a small KWin
+script ([ui/kwin/activewindow.js](../ui/kwin/activewindow.js)) that
+reports the focused application's class on every change, and unloads it
+on exit. Only the class travels (`code`, `org.mozilla.firefox`), never
+the window title, which would carry document names and URLs.
+
+Two things use it. Archived dictations record the app they were spoken
+in, and recall nudges rows from the app you are in now above rows that
+merely score alike, so questions asked in an editor lean toward what you
+said while editing. Ask mode is also told which app you are in, and told
+not to mention it unless you ask. Off KDE none of this exists and
+everything behaves as before.
 
 ## Always-on capture
 

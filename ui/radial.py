@@ -385,6 +385,14 @@ class Ring(Gtk.Fixed):
 
         self._drive(SUB_OUT_S, phase_a, phase_b)
 
+    def set_hub(self, icon=None, tooltip=None):
+        """Relabel the hub in place, for a surface whose state changes
+        without the ring changing (thinking, then working, then done)."""
+        if icon:
+            self.hub.set_icon_name(icon)
+        if tooltip is not None:
+            self.hub.set_tooltip_text(tooltip)
+
     def swap(self, items, hub_icon=None, hub_tooltip=None, forward=True,
              done=None):
         """Replace the visible satellites with a new set, in the submenu
