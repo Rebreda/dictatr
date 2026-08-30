@@ -133,6 +133,15 @@ function watch() {
                    Math.round(trail[i].x) + "," + Math.round(trail[i].y));
     }
     callDBus(TRAY, OBJ, IFACE, "Trace", parts.join(" "));
+
+    // A trace is consumed by being handed over. Without this the trail
+    // survives, and every QUIET_MS the same movement clears the gate
+    // again and is handed over again -- so one shake fired an action
+    // repeatedly for as long as the pointer kept moving, which is what
+    // it looks like to click around during a dictation. The quiet
+    // period only spaced the repeats out; it never stopped them.
+    trail = [];
+    drawn = 0;
 }
 
 workspace.cursorPosChanged.connect(watch);
