@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -182,7 +183,7 @@ class Tray:
         Gio.bus_watch_name_on_connection(
             bus, "org.kde.StatusNotifierWatcher",
             Gio.BusNameWatcherFlags.NONE, self._register, None)
-        GLib.timeout_add(500, self._poll)
+        self._watch_state()
 
     @staticmethod
     def _state() -> str:
@@ -208,12 +209,34 @@ class Tray:
                  GLib.Variant("(s)", (bus.get_unique_name(),)),
                  None, Gio.DBusCallFlags.NONE, -1, None, None)
 
-    def _poll(self):
-        # Reap whatever we spawned. The tray outlives its children, and
-        # an unreaped one stays in the process table as a zombie that
-        # still answers kill(pid, 0), which is indistinguishable from a
-        # live session to anything watching the pidfiles.
-        reap()
+    # --- noticing, rather than asking ----------------------------------
+    #
+    # This used to be a 500ms timer: two wakeups a second for the life of
+    # the session, to catch a handful of transitions a day. Measured, it
+    # was 0.1% of a core and 2.25 wakeups/sec while the machine sat
+    # untouched, and it was the only thing dictatr did when nobody was
+    # using it.
+    #
+    # Everything _state() reads is a file this application writes, so
+    # inotify can say when to look. The one thing a file cannot report is
+    # a process dying without tidying up after itself -- for that, each
+    # live pid gets a pidfd, which becomes readable exactly when it exits.
+    # Between them there is nothing left to poll for.
+
+    def _watch_state(self):
+        runstate.RUN.mkdir(parents=True, exist_ok=True)
+        self._pidfds = {}
+        self._flash = None
+        self._monitor = Gio.File.new_for_path(
+            str(runstate.RUN)).monitor_directory(
+                Gio.FileMonitorFlags.WATCH_MOVES, None)
+        self._monitor.connect("changed", lambda *_: self._restate())
+        self._restate()
+
+    def _restate(self):
+        """Re-read the state and tell the panel if it moved."""
+        self._watch_pids()
+        self._schedule_flash()
         state = self._state()
         if state != self.state:
             self.state = state
@@ -224,7 +247,61 @@ class Tray:
             self.bus.emit_signal(None, "/MenuBar", "com.canonical.dbusmenu",
                                  "LayoutUpdated",
                                  GLib.Variant("(ui)", (self.revision, 0)))
-        return True
+        return False
+
+    def _watch_pids(self):
+        """A pidfd per live session, so a crash is an event too.
+
+        Without this the icon would sit on "recording" until something
+        else touched the run directory, because a session killed outright
+        leaves its pidfile behind and inotify has nothing to say.
+        """
+        want = set()
+        for pidfile in (runstate.DICTATE_PID, runstate.LISTEN_PID):
+            pid = runstate.live_pid(pidfile)
+            if pid is None:
+                continue
+            want.add(pid)
+            if pid in self._pidfds:
+                continue
+            try:
+                fd = os.pidfd_open(pid)
+            except (AttributeError, OSError):
+                continue          # older kernel: inotify alone still works
+            src = GLibUnix.fd_add_full(
+                GLib.PRIORITY_DEFAULT, fd, GLib.IOCondition.IN,
+                lambda _fd, _cond, p=pid: self._died(p))
+            self._pidfds[pid] = (fd, src)
+        for pid in [p for p in self._pidfds if p not in want]:
+            self._drop_pidfd(pid)
+
+    def _drop_pidfd(self, pid):
+        fd, src = self._pidfds.pop(pid, (None, None))
+        if src is not None:
+            GLib.source_remove(src)
+        if fd is not None:
+            os.close(fd)
+
+    def _died(self, pid):
+        self._drop_pidfd(pid)
+        self._restate()
+        return False
+
+    def _schedule_flash(self):
+        """The checkmark is the one transition nothing signals: it ends
+        because time passed. One timer, armed when the marker appears."""
+        if self._flash is not None:
+            return
+        age = runstate.done_age()
+        if age is None or age >= DONE_FLASH_S:
+            return
+        self._flash = GLib.timeout_add(
+            int((DONE_FLASH_S - age) * 1000) + 50, self._flash_over)
+
+    def _flash_over(self):
+        self._flash = None
+        self._restate()
+        return False
 
     # --- properties ----------------------------------------------------
     def on_get_prop(self, _bus, _sender, _path, _iface, name):
@@ -380,6 +457,13 @@ GESTURE_KEYS = {
 }
 
 
+# One gesture is one action. Two seconds is long enough that a shake
+# which keeps going does not fire twice, short enough that a deliberate
+# second gesture is not swallowed.
+GESTURE_COOLDOWN_S = 2.0
+_last_gesture = 0.0
+
+
 def on_trace(blob: str) -> None:
     """Judge a stretch of pointer movement the compositor handed over.
 
@@ -393,10 +477,23 @@ def on_trace(blob: str) -> None:
         _log(f"trace {name or '-'}: {numbers}")
     if name is None:
         return
+
+    # Only this end knows a gesture was actually recognised, so the
+    # cooldown that matters lives here. The compositor's quiet period
+    # paces how often it offers a trace; it cannot tell an accepted
+    # shake from a stretch of mouse movement that judged as nothing.
+    global _last_gesture
+    now = time.monotonic()
+    if now - _last_gesture < GESTURE_COOLDOWN_S:
+        if "gesture" in settings.debug:
+            _log(f"gesture {name} ignored: within cooldown")
+        return
+
     action = getattr(settings.gestures, GESTURE_KEYS[name].replace(
         "gesture_", ""), "")
     if not action:
         return
+    _last_gesture = now
     cmd = next((c for sid, _d, _t, c in PORTAL_SHORTCUTS if sid == action),
                None)
     if cmd:
@@ -408,18 +505,27 @@ def on_trace(blob: str) -> None:
 # outlives its children by design, so nothing else will: an unreaped
 # one lingers as a zombie that still answers kill(pid, 0), which is
 # indistinguishable from a live session to anything watching pidfiles.
-_CHILDREN = []
-
-
 def spawn(cmd, **kw):
-    """Launch something and remember it, so it can be reaped."""
+    """Launch something, and reap it the moment it exits.
+
+    The tray outlives its children by design, so nothing else will: an
+    unreaped one lingers as a zombie that still answers kill(pid, 0),
+    which is indistinguishable from a live session to anything watching
+    the pidfiles. A child watch is SIGCHLD, so this costs nothing while
+    nothing is exiting -- where the sweep it replaces ran twice a second
+    for the life of the process to notice something that happens a
+    handful of times a day.
+    """
     proc = subprocess.Popen(cmd, **kw)
-    _CHILDREN.append(proc)
+
+    def reaped(_pid, status, _proc=proc):
+        # GLib has already waited on it. Tell Popen the answer so it
+        # neither waits again nor complains at collection.
+        _proc.returncode = status
+        return False
+
+    GLib.child_watch_add(GLib.PRIORITY_DEFAULT, proc.pid, reaped)
     return proc
-
-
-def reap() -> None:
-    _CHILDREN[:] = [p for p in _CHILDREN if p.poll() is None]
 
 
 def _log(msg: str) -> None:
@@ -532,10 +638,12 @@ class Shortcuts:
         left pointing at a session nobody owns, so kglobalaccel still
         knows the shortcut but pressing it reaches no one. Reopening our
         session makes this process the owner again."""
+        _log("shortcuts: rebinding, taking the keys back")
         self.close()
         self._open()
 
     def _fail(self, msg: str) -> None:
+        _log(f"shortcuts: unavailable: {msg}")
         print(f"dictatr tray: portal hotkeys unavailable: {msg}; "
               "bind shortcuts in your desktop instead (dictate-hotkeys "
               "on KDE)", file=sys.stderr)
@@ -551,6 +659,7 @@ class Shortcuts:
             self._fail(f"CreateSession refused ({code})")
             return
         self.session = session
+        _log(f"shortcuts: session open ({session})")
         self.bus.signal_subscribe(PORTAL_BUS, self.IFACE, "Activated",
                                   portal.PATH, None,
                                   Gio.DBusSignalFlags.NONE, self._activated)
@@ -578,6 +687,9 @@ class Shortcuts:
         # them once they are free, so assign those directly.
         unbound = [sid for sid, _d, _t, _c in PORTAL_SHORTCUTS
                    if not triggers.get(sid)]
+        _log(f"shortcuts: bound {len(PORTAL_SHORTCUTS) - len(unbound)}"
+             f"/{len(PORTAL_SHORTCUTS)}"
+             + (f", unbound {' '.join(unbound)}" if unbound else ""))
         self._retire_legacy()
         if unbound and not self._assign_kde(unbound):
             self._fail("the portal bound no keys")
