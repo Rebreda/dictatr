@@ -138,8 +138,8 @@ class Radial(Gtk.ApplicationWindow):
             Bubble("process-stop-symbolic", "Cancel recording",
                    self.run(["cancel"])),
         ]
-        return Ring(items, hub_icon="audio-input-microphone-symbolic",
-                    hub_tooltip="Close", on_root_hub=self.dismiss)
+        return Ring(items, hub_icon="window-close-symbolic",
+                    hub_tooltip="Close  [Esc]", on_root_hub=self.dismiss)
 
     # --- suggest mode --------------------------------------------------
     def _build_suggest_ring(self):

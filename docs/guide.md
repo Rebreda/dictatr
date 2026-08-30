@@ -228,9 +228,14 @@ The ask bubble (or `dictatr ask`) captures a spoken question and answers
 it with a local LLM via Lemonade: answer on the clipboard, notification
 preview, and optionally spoken aloud with Kokoro TTS (toggle in Settings
 or `speak_answers = false`). `dictate-chat` (the menu's "Ask the AI"
-bubble) is the continued-conversation flavor: your words stream into a
-floating pill as you speak, the answer appears beneath, and the mic
-re-opens for the follow-up, history and all, entirely by voice. Before answering, the question is
+bubble, or Ctrl+Alt+Q) is the continued-conversation flavor: your words
+stream into a floating pill as you speak, the answer appears beneath,
+and the mic re-opens for the follow-up, history and all. You can also
+type: the pill under the conversation takes a question on Enter, for
+when the answer is easier written than said, or the room is not yours to
+talk in. The card rises into place where the ring left off, drags from
+anywhere that is not a control, and its back satellite returns to the
+menu. Before answering, the question is
 semantically matched against your dictation archive (listenr's
 embed-once-and-cache approach, via Lemonade's `/embeddings` endpoint and
 the 75 MB nomic-embed-text model) and relevant past dictations are given

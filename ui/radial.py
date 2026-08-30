@@ -92,6 +92,9 @@ window {{ background: transparent; }}
 .bubble.on {{ background: alpha({GREEN}, 0.25); border-color: alpha({GREEN}, 0.6); }}
 .bubble.on image {{ color: {GREEN}; }}
 .hub:hover {{ background: alpha({RED}, 0.25); }}
+/* Going back is not a destructive act, so it does not wear the
+   danger colour the closing hub does. */
+.hub.back:hover {{ background: alpha({BLUE}, 0.25); }}
 .hub.back:hover {{ background: alpha({BLUE}, 0.28); }}
 """.encode()
 
@@ -158,8 +161,8 @@ class Ring(Gtk.Fixed):
     caller can close) and number keys for the visible ring.
     """
 
-    def __init__(self, items, hub_icon="audio-input-microphone-symbolic",
-                 hub_tooltip="Close", on_root_hub=None):
+    def __init__(self, items, hub_icon="window-close-symbolic",
+                 hub_tooltip="Close  [Esc]", on_root_hub=None):
         super().__init__()
         self.set_size_request(SIZE, SIZE)
         self._cx = self._cy = SIZE // 2
@@ -393,8 +396,8 @@ class Ring(Gtk.Fixed):
                     "clicked", lambda _b, idx=i: self.back(then=idx))
             self._stack.append((parent_sats, self.hub.get_icon_name(),
                                 self.hub.get_tooltip_text()))
-            self.hub.set_icon_name(chosen.icon)
-            self.hub.set_tooltip_text("Back  [Esc]")
+            self.hub.set_icon_name("go-previous-symbolic")
+            self.hub.set_tooltip_text(f"Back to {chosen.tooltip}  [Esc]")
             self.hub.add_css_class("back")
             self._sats = self._make_sats(chosen.children, below_hub=True)
 

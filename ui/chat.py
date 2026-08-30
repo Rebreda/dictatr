@@ -137,6 +137,18 @@ class Chat(Gtk.ApplicationWindow):
         status_row.append(self.status)
         stack.append(status_row)
 
+        # Typing is the quiet option: same conversation, no microphone,
+        # for when the answer is easier written than said (a path, a
+        # name) or the room is not yours to talk in.
+        self.entry = Gtk.Entry(placeholder_text="or type…",
+                               halign=Gtk.Align.CENTER)
+        self.entry.add_css_class("chat-entry")
+        self.entry.set_size_request(WIDTH - 90, -1)
+        self.entry.connect("activate", self.on_entry)
+        entry_row = Gtk.Box(halign=Gtk.Align.CENTER)
+        entry_row.append(self.entry)
+        stack.append(entry_row)
+
         hub_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
         back = Gtk.Button(icon_name="go-previous-symbolic",
                           valign=Gtk.Align.CENTER,
@@ -157,7 +169,8 @@ class Chat(Gtk.ApplicationWindow):
         stack.append(hub_row)
 
         self.stack = stack
-        self._hit_widgets = (self.scroll, status_row, hub_row)
+        self._hit_widgets = (self.scroll, status_row, entry_row,
+                             hub_row)
         if self.overlay:
             self.canvas = Gtk.Fixed()
             self.canvas.put(stack, 0, 0)
@@ -251,7 +264,24 @@ class Chat(Gtk.ApplicationWindow):
                  max(h - STACK_H - 12, 12))
         self._pos = (cx, cy)
         self.canvas.move(self.stack, cx, cy)
-        self.stack.set_opacity(1.0)
+        self._enter_from(cx, cy)
+
+    ENTER_S = 0.22
+
+    def _enter_from(self, cx, cy):
+        """Rise into place: the ring that opened this spiralled into its
+        hub, and a card that simply blinks on breaks that thread."""
+        start = self.get_frame_clock().get_frame_time() / 1e6
+
+        def tick(_w, clock):
+            p = min(1.0, (clock.get_frame_time() / 1e6 - start) / self.ENTER_S)
+            e = 1 - (1 - p) ** 3
+            self.stack.set_opacity(e)
+            self.canvas.move(self.stack, cx, cy + (1 - e) * 26)
+            return p < 1.0
+
+        self.stack.set_opacity(0.0)
+        self.add_tick_callback(tick)
 
     def _update_input_region(self):
         """Clip input to the visible pieces (pills, status, hub): clicks
@@ -340,16 +370,21 @@ class Chat(Gtk.ApplicationWindow):
                         "listening — just talk")
         asyncio.run_coroutine_threadsafe(self._turn(), self.aio)
 
-    def _hub_at(self, x, y):
+    def _draggable_at(self, x, y):
+        """Anywhere on the card that is not a control moves it: the hub
+        alone was a 58px target for repositioning a conversation."""
         target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        on_card = False
         while target is not None:
-            if target is self.mic_btn:
-                return True
+            if isinstance(target, (Gtk.Button, Gtk.Entry)):
+                return False
+            if target is self.stack:
+                on_card = True
             target = target.get_parent()
-        return False
+        return on_card
 
     def on_drag_begin(self, _g, x, y):
-        self._drag_from = self._pos if self._hub_at(x, y) else None
+        self._drag_from = self._pos if self._draggable_at(x, y) else None
 
     def on_drag_update(self, g, dx, dy):
         if self._drag_from is None:
@@ -363,6 +398,31 @@ class Chat(Gtk.ApplicationWindow):
         if self._drag_from is not None:
             self._pos = (self._drag_from[0] + dx, self._drag_from[1] + dy)
             self._drag_from = None
+
+    def on_entry(self, entry):
+        text = entry.get_text().strip()
+        if not text:
+            return
+        entry.set_text("")
+        # The mic was listening; this turn is typed, so drop whatever it
+        # had rather than letting the two interleave.
+        self._discard = True
+        self._commit_now()
+        GLib.timeout_add(180, self._typed_turn, text)
+
+    def _typed_turn(self, text):
+        if self._closing:
+            return False
+        self.mic_btn.remove_css_class("rec")
+        self.drop_bubble(self.live_label)
+        self.live_label = self.bubble("user")
+        self.live_label.set_label(text)
+        self.live_label = None
+        self.phase = "thinking"
+        self.set_status("thinking…")
+        self.think_label = self.bubble("ai")
+        asyncio.run_coroutine_threadsafe(self._answer(text, b""), self.aio)
+        return False
 
     def on_back(self, _btn):
         subprocess.Popen([str(REPO / "bin" / "dictate-menu")])
