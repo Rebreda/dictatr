@@ -330,6 +330,24 @@ class Bus:
                   "org.freedesktop.DBus", "AddMatch", "s", (rule,))
 
 
+def name_has_owner(name: str, timeout: float = 3.0) -> bool:
+    """Is anything answering to *name* on the session bus?
+
+    How a surface asks "is the tray running" without caring how it was
+    started or where its pidfile went."""
+    bus = session()
+    if bus is None:
+        return False
+    with bus:
+        try:
+            return bool(bus.call("org.freedesktop.DBus",
+                                 "/org/freedesktop/DBus",
+                                 "org.freedesktop.DBus", "NameHasOwner",
+                                 "s", (name,), timeout=timeout)[0])
+        except DBusError:
+            return False
+
+
 def session(timeout: float = 2.0) -> Bus | None:
     """Connect to the session bus, or None if there is not one.
 

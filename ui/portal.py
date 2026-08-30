@@ -5,7 +5,10 @@ tray for global shortcuts, the wizard for binding them, and the typing
 helper for RemoteDesktop. They drifted, which is how the private-bus fix
 below landed in two of them and not the third.
 
-Two things are subtle enough to be worth owning once:
+Two things are subtle enough to be worth owning once, and the
+GlobalShortcuts bind dance now lives here as well -- it was in the
+wizard, which is the surface that happens to run it, not the thing that
+knows how it works.
 
 *The connection.* The portal ties an app id to the connection that first
 speaks to it, and a connection can only be registered once. Anything
@@ -144,3 +147,83 @@ class Requests:
             what = "cancelled" if out["code"] == 1 else "refused"
             raise PortalError(f"{method}: {what} (response {out['code']})")
         return out["results"]
+
+
+def version(iface: str):
+    """The portal interface's version, or None if it is not there.
+
+    The wizard asks before offering to bind anything: a desktop with no
+    GlobalShortcuts portal needs to be told that, not shown a button
+    that fails."""
+    from gi.repository import Gio, GLib
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        return bus.call_sync(
+            BUS, PATH, "org.freedesktop.DBus.Properties", "Get",
+            GLib.Variant("(ss)", (iface, "version")), None,
+            Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+    except GLib.Error:
+        return None
+
+
+class ShortcutBinder:
+    """One GlobalShortcuts bind dance: CreateSession, BindShortcuts, read
+    back the triggers the desktop actually assigned, then close the
+    session. Async, so the desktop's dialog does not freeze the caller.
+
+    A binder's session is temporary on purpose. Binding and listening
+    are different jobs with different lifetimes: the tray holds a
+    session open for as long as it wants to hear the shortcuts fire,
+    while the wizard only wants the desktop to write them down.
+
+    *done* is called with (ok, shortcuts, message)."""
+
+    def __init__(self, done, shortcuts):
+        self.done = done
+        self.shortcuts = shortcuts
+        self.bus = session_bus()
+        self.req = Requests(self.bus, GLOBAL_SHORTCUTS)
+        self.session = None
+
+    def run(self):
+        from gi.repository import GLib  # noqa: F811
+        register(self.bus)
+        self._request("CreateSession", "(a{sv})", (),
+                      {"session_handle_token":
+                       GLib.Variant("s", "dictatrbind")},
+                      self._on_session)
+
+    def _request(self, method, sig, args, options, cb, timeout_s=180):
+        err = self.req.call(method, sig, args, options, cb, timeout_s)
+        if err is not None:
+            self.done(False, [], err)
+
+    def _on_session(self, code, results):
+        from gi.repository import GLib
+        self.session = results.get("session_handle")
+        if code or not self.session:
+            self.done(False, [], f"the session was refused ({code})")
+            return
+        shorts = [(sid, {"description": GLib.Variant("s", desc),
+                         "preferred_trigger": GLib.Variant("s", trig)})
+                  for sid, desc, trig, _cmd in self.shortcuts]
+        self._request("BindShortcuts", "(oa(sa{sv})sa{sv})",
+                      (self.session, shorts, ""), {}, self._on_bound)
+
+    def _on_bound(self, code, results):
+        self._close()
+        if code:
+            self.done(False, [], f"the request was refused ({code})")
+            return
+        self.done(True, results.get("shortcuts") or [], "")
+
+    def _close(self):
+        from gi.repository import Gio, GLib
+        if not self.session:
+            return
+        try:
+            self.bus.call_sync(BUS, self.session,
+                               "org.freedesktop.portal.Session", "Close",
+                               None, None, Gio.DBusCallFlags.NONE, 3000, None)
+        except GLib.Error:
+            pass
