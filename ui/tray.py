@@ -35,7 +35,7 @@ REPO = Path(__file__).resolve().parent.parent
 DICTATE = str(REPO / "bin" / "dictate")
 ICONS = REPO / "ui" / "icons"
 sys.path.insert(0, str(REPO / "src"))
-from dictatr import runstate  # noqa: E402
+from dictatr import deliver, runstate  # noqa: E402
 
 sys.path.insert(0, str(REPO / "ui"))
 import portal  # noqa: E402
@@ -311,8 +311,8 @@ class Tray:
             def run():
                 r = subprocess.run([DICTATE, "gc"], capture_output=True,
                                    text=True)
-                subprocess.run(["notify-send", "-a", "Dictate", "Archive gc",
-                                r.stdout.strip() or "done"], check=False)
+                deliver.notify(f"Archive gc: {r.stdout.strip() or 'done'}",
+                               category="toggles")
             GLib.Thread.new("gc", run)
         elif isinstance(action, list):
             subprocess.Popen([DICTATE, *action])

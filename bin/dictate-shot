@@ -4,7 +4,7 @@
 # The capture has to happen before the chat exists: a region selection is
 # a fullscreen grab, and it would otherwise photograph our own window.
 set -u
-here=$(dirname "$(dirname "$(readlink -f "$0")")")
+. "$(dirname "$(readlink -f "$0")")/_common.sh"
 shot=${XDG_RUNTIME_DIR:-/tmp}/dictatr/shot-$$.png
 mkdir -p "$(dirname "$shot")"
 
@@ -24,4 +24,4 @@ fi
 find "$(dirname "$shot")" -name 'shot-*.png' -mmin +60 -delete 2>/dev/null
 
 export DICTATE_SHOT=$shot
-exec "$here/bin/dictate-chat"
+exec "$repo/bin/dictate-chat"

@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# Setup wizard. Preload gtk4-layer-shell so the wizard floats as an
-# overlay like the menu and the chat (must load before GTK's wayland
-# connection); without it, it falls back to a plain centered window.
-repo=$(dirname "$(dirname "$(readlink -f "$0")")")
-for lib in /usr/lib64/libgtk4-layer-shell.so.0 /usr/lib/libgtk4-layer-shell.so.0; do
-    [[ -e $lib ]] && export LD_PRELOAD="$lib${LD_PRELOAD:+:$LD_PRELOAD}"
-done
-# PyGObject lives in the system python; a dev checkout's venv is on
-# PATH first and does not have it.
-py=python3
-"$py" -c 'import gi' 2>/dev/null || py=/usr/bin/python3
+# Setup wizard: an overlay like the menu and the chat where layer-shell
+# exists, a plain centered window where it does not.
+. "$(dirname "$(readlink -f "$0")")/_common.sh"
+preload_layer_shell
 exec "$py" "$repo/ui/setup.py" "$@"

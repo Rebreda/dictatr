@@ -206,8 +206,7 @@ class Radial(Gtk.ApplicationWindow):
             out = actions.run(action_id, text, arg)
         except Exception as e:
             out = ""
-            subprocess.run(["notify-send", "-a", "Dictate", "Dictate",
-                            f"Could not do that: {e}"], check=False)
+            deliver.notify(f"Could not do that: {e}", category="errors")
         if out:
             deliver.deliver(out)
         GLib.idle_add(self.close)
