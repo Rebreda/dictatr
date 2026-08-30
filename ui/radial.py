@@ -65,6 +65,11 @@ SUB_IN_S = 0.26     # ring bloom half of a submenu hop
 SUB_STAGGER_S = 0.04
 
 # progress arc geometry, shared by Ring's hub and ProgressBubble
+# A submenu keeps its parent ring on screen, pushed out and dimmed, so
+# the level you came from stays a click away instead of a memory.
+PARENT_RADIUS_K = 1.72   # times RADIUS
+PARENT_ALPHA = 0.34
+
 ARC_PAD = 5
 ARC_W = 3.0
 
@@ -78,6 +83,8 @@ window {{ background: transparent; }}
 }}
 .hub image {{ color: {BLUE}; }}
 .bubble image {{ color: {INK}; }}
+.bubble.parent {{ border-color: alpha(#ffffff, 0.06); }}
+.bubble.parent:hover {{ border-color: alpha({BLUE}, 0.5); }}
 .bubble:hover, .bubble:focus-visible {{
   background: alpha({BLUE}, 0.28);
   border-color: alpha({BLUE}, 0.6);
@@ -161,6 +168,7 @@ class Ring(Gtk.Fixed):
         self._state = "closed"   # closed|opening|open|busy|dismissing
         self._gen = 0            # bumping this cancels the running tick
         self._stack = []         # parent levels: (sats, hub_icon, hub_tip)
+        self._parent_handlers = {}   # dimmed parents -> click handler id
 
         self._sats = self._make_sats(items)   # satellites before the hub
         hub = Gtk.Button(icon_name=hub_icon, tooltip_text=hub_tooltip)
@@ -354,16 +362,16 @@ class Ring(Gtk.Fixed):
 
         others = [s for s in parent_sats if s[0] is not chosen_btn]
 
+        outer = RADIUS * PARENT_RADIUS_K
+
         def phase_a(t):
-            p = _clamp(t / SUB_OUT_S)
-            e = 1 - _ease_out(p)
+            p = _ease_out(_clamp(t / SUB_OUT_S))
             for b, angle, _ in others:
-                a = angle + (1 - e) * TWIRL_RAD
-                r = RADIUS * e
-                self.move(b, self._cx + r * math.cos(a) - BUBBLE / 2,
-                          self._cy + r * math.sin(a) - BUBBLE / 2)
-                b.set_opacity(e)
-            r = RADIUS * e   # the chosen bubble glides straight in
+                r = RADIUS + (outer - RADIUS) * p
+                self.move(b, self._cx + r * math.cos(angle) - BUBBLE / 2,
+                          self._cy + r * math.sin(angle) - BUBBLE / 2)
+                b.set_opacity(1.0 - (1.0 - PARENT_ALPHA) * p)
+            r = RADIUS * (1 - p)   # the chosen bubble glides straight in
             self.move(chosen_btn,
                       self._cx + r * math.cos(chosen_angle) - BUBBLE / 2,
                       self._cy + r * math.sin(chosen_angle) - BUBBLE / 2)
@@ -371,6 +379,18 @@ class Ring(Gtk.Fixed):
         def phase_b():
             chosen_btn.set_opacity(0.0)
             chosen_btn.insert_before(self, self.hub)
+            # The parents that stayed are now a way back: clicking one
+            # returns to their level and opens it, so a wrong turn costs
+            # one click instead of a trip through the hub.
+            for i, (b, _a, item) in enumerate(parent_sats):
+                if b is chosen_btn:
+                    continue
+                b.add_css_class("parent")
+                b.set_tooltip_text(f"Back to {item.tooltip}")
+                if b in self._parent_handlers:
+                    b.disconnect(self._parent_handlers.pop(b))
+                self._parent_handlers[b] = b.connect(
+                    "clicked", lambda _b, idx=i: self.back(then=idx))
             self._stack.append((parent_sats, self.hub.get_icon_name(),
                                 self.hub.get_tooltip_text()))
             self.hub.set_icon_name(chosen.icon)
@@ -432,12 +452,18 @@ class Ring(Gtk.Fixed):
         self._twirl_out(old, SUB_OUT_S, 0.0 if forward else SUB_STAGGER_S,
                         bloom)
 
-    def back(self):
-        """Collapse the submenu and twirl the parent ring back out."""
+    def back(self, then=None):
+        """Collapse the submenu and bring the parent ring back in.
+
+        *then* is a parent index to activate once the ring has settled,
+        which is what clicking a dimmed parent does: leave here and open
+        that instead, without a stop at the level in between."""
         if self._state != "open" or not self._stack:
             return
         self._state = "busy"
         children = self._sats
+        parents = self._stack[-1][0]
+        chosen_btn = self.hub   # the parent that became the hub, if any
 
         def phase_b():
             for b, _, _ in children:
@@ -448,13 +474,40 @@ class Ring(Gtk.Fixed):
             if not self._stack:
                 self.hub.remove_css_class("back")
             self._sats = sats
+            for i, (b, _a, item) in enumerate(sats):
+                b.remove_css_class("parent")
+                b.set_tooltip_text(f"{item.tooltip}  [{i + 1}]")
+                if b in self._parent_handlers:
+                    b.disconnect(self._parent_handlers.pop(b))
 
             def settled():
                 self._state = "open"
+                if then is not None:
+                    self.activate(then)
 
             self._twirl_in(self._sats, SUB_IN_S, SUB_STAGGER_S, settled)
 
-        self._twirl_out(children, SUB_OUT_S, 0.0, phase_b)
+        # The parents that stayed visible slide home; the ones that were
+        # never there (the level being left) twirl out as before.
+        staying = [s for s in parents if s[0] is not chosen_btn]
+        outer = RADIUS * PARENT_RADIUS_K
+
+        def phase_a(t):
+            p = _ease_out(_clamp(t / SUB_OUT_S))
+            for b, angle, _ in staying:
+                r = outer + (RADIUS - outer) * p
+                self.move(b, self._cx + r * math.cos(angle) - BUBBLE / 2,
+                          self._cy + r * math.sin(angle) - BUBBLE / 2)
+                b.set_opacity(PARENT_ALPHA + (1.0 - PARENT_ALPHA) * p)
+            e = 1 - p
+            for b, angle, _ in children:
+                a = angle + (1 - e) * TWIRL_RAD
+                r = RADIUS * e
+                self.move(b, self._cx + r * math.cos(a) - BUBBLE / 2,
+                          self._cy + r * math.sin(a) - BUBBLE / 2)
+                b.set_opacity(e)
+
+        self._drive(SUB_OUT_S, phase_a, phase_b)
 
     def _on_hub(self, _btn):
         if self._stack:

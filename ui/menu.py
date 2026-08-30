@@ -121,7 +121,7 @@ class Radial(Gtk.ApplicationWindow):
                    "Dictate (type at cursor)", self.run(["type"])),
             Bubble("edit-copy-symbolic", "Dictate to clipboard",
                    self.run(["clip"])),
-            Bubble("user-available-symbolic", "Ask the AI (voice chat)",
+            Bubble("dictatr-chat-symbolic", "Ask the AI (voice chat)",
                    self.chat),
             Bubble("media-record-symbolic", "Always-on capture (toggle)",
                    self.run(["listen", "--toggle"]), css=listen_css),
@@ -130,7 +130,7 @@ class Radial(Gtk.ApplicationWindow):
                        self.pick_file),
                 Bubble("user-trash-symbolic", "Clean up archive",
                        self.gc),
-                Bubble("emblem-system-symbolic", "Settings",
+                Bubble("preferences-system-symbolic", "Settings",
                        self.open_settings),
                 Bubble("dictatr-engine-symbolic", "Set up dictatr",
                        self.open_setup),
@@ -155,7 +155,7 @@ class Radial(Gtk.ApplicationWindow):
             break
         items = [Bubble(a.icon, a.label, self.act(a.id))
                  for a in actions.CATALOGUE[:5]]
-        items.append(Bubble("user-available-symbolic", "Ask about this",
+        items.append(Bubble("dictatr-chat-symbolic", "Ask about this",
                             self.chat))
         if self._suggest_text:
             threading.Thread(target=self._fetch_suggestions,
@@ -177,7 +177,7 @@ class Radial(Gtk.ApplicationWindow):
             return False
         items = [Bubble(p["icon"], p["label"], self.act(p["id"], p["arg"]))
                  for p in picks]
-        items.append(Bubble("user-available-symbolic", "Ask about this",
+        items.append(Bubble("dictatr-chat-symbolic", "Ask about this",
                             self.chat))
         items.append(Bubble("view-more-symbolic", "Everything else", children=[
             Bubble(a.icon, a.label, self.act(a.id))

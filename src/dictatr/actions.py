@@ -26,10 +26,10 @@ class Action:
 
 
 CATALOGUE = [
-    Action("summarize", "Summarise", "view-list-symbolic",
+    Action("summarize", "Summarise", "view-list-text-symbolic",
            "Summarise the text in at most three sentences. Reply with the "
            "summary only."),
-    Action("rewrite", "Rewrite", "edit-select-all-symbolic",
+    Action("rewrite", "Rewrite", "document-edit-symbolic",
            "Rewrite the text {arg}. Keep the meaning and the language. "
            "Reply with the rewritten text only.",
            "how to rewrite it, e.g. 'more formally', 'shorter', 'as bullet "
@@ -37,7 +37,7 @@ CATALOGUE = [
     Action("reply", "Draft a reply", "mail-reply-sender-symbolic",
            "Draft a reply to this message. Match its register, keep it "
            "short. Reply with the draft only."),
-    Action("todo", "Pull out tasks", "checkbox-symbolic",
+    Action("todo", "Pull out tasks", "view-task-symbolic",
            "List the actionable tasks in the text, one per line, each "
            "starting with '- '. Reply with the list only."),
     Action("explain", "Explain", "help-about-symbolic",

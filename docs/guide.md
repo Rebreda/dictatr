@@ -73,9 +73,12 @@ The menu appears at the cursor via a transparent layer-shell overlay when
 anywhere outside to dismiss). Without it, a small centered window. The
 ring holds dictate, clipboard, ask, always-on, More, and cancel. More
 folds file transcription, archive cleanup, and settings into a submenu:
-the ring twirls into the hub, the chosen bubble becomes the hub, and its
-children bloom out. The hub is then a back button; Escape backs out one
-level and number keys pick from the visible ring.
+the chosen bubble becomes the hub and its children bloom out, while the
+level you came from stays on screen, pushed out to a wider orbit and
+dimmed. That ring is not decoration: clicking one of those faded bubbles
+leaves the submenu and opens it, so a wrong turn costs one click rather
+than a trip back through the hub. The hub is still Back, Escape still
+backs out one level, and number keys pick from the bright ring.
 
 ## Global hotkeys
 
