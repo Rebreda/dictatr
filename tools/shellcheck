@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Check the resident shell's scene graph and the client that calls it.
+
+    tools/shellcheck        # exit 0 only when every assertion holds
+
+The shell is where the three surfaces stop being three processes, so
+what is worth pinning down is that the graph they share is well formed,
+that choosing a leaf does the thing rather than falling through, and
+that a client with no shell to talk to says so instead of hanging —
+because that is what a shim needs in order to fall back to the old
+surface.
+
+No window is presented. The shell's window is a layer-shell overlay and
+this runs on the machine someone is working on.
+"""
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "ui"))
+sys.path.insert(0, str(REPO / "src"))
+
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gtk  # noqa: E402
+
+Gtk.init()
+Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
+    str(REPO / "ui" / "icons" / "theme"))
+
+import canvas as C  # noqa: E402
+import graph as G  # noqa: E402
+import scenes  # noqa: E402
+import shell as S  # noqa: E402
+
+fails = []
+
+
+def check(msg, ok):
+    if not ok:
+        fails.append(msg)
+    return ok
+
+
+def check_the_menu_graph_is_sound():
+    g = G.Graph(scenes.menu_nodes())     # raises on a cycle or a dangling id
+    root = g["menu"]
+    check(f"the menu offers {len(root.children)} choices, expected 6",
+          len(root.children) == 6)
+    check("More is not a branch", bool(g["more"].children))
+    check("Dictate should be a leaf", not g["dictate"].children)
+    every = {n for n in g.nodes}
+    reachable = set()
+
+    def walk(node_id):
+        reachable.add(node_id)
+        for child in g.nodes[node_id].children:
+            if child not in reachable:
+                walk(child)
+    walk("menu")
+    check(f"unreachable from the menu: {sorted(every - reachable)}",
+          every == reachable)
+    print(f"graph      : {len(every)} nodes, all reachable, no cycles")
+
+
+def check_every_leaf_does_something():
+    """A leaf with neither an action nor a scene is a dead end you can
+    still click, which is worse than one that is not there."""
+    g = G.Graph(scenes.menu_nodes())
+    dead = [n.id for n in g.nodes.values()
+            if not n.children and not n.data.get("action")
+            and not n.data.get("scene")]
+    check(f"leaves that do nothing: {dead}", not dead)
+    print(f"leaves     : {len([n for n in g.nodes.values() if not n.children])}"
+          f" leaves, every one wired")
+
+
+def check_choosing_a_leaf_reaches_the_surface():
+    g = G.Graph(scenes.menu_nodes())
+    seen = []
+    cv = C.Canvas(g, "menu", on_activate=seen.append)
+    cv._forced_view = (900, 900)
+    index = g["menu"].children.index("cancel")
+    check("a branch should zoom, not activate", cv.can_enter(
+        g["menu"].children.index("more")))
+    check("a leaf should not be enterable", not cv.can_enter(index))
+    cv.activate(index)
+    check(f"activating Cancel reached {seen}",
+          [n.id for n in seen] == ["cancel"])
+    print("activate   : branches zoom, leaves reach the surface")
+
+
+def check_a_scene_leaf_reaches_its_surface():
+    """The dispatch that replaces spawning a process — and the half of it
+    that is still spawning a process.
+
+    A scene this build has not written as nodes yet must open the program
+    that still owns it. Asking the shell for it instead is what used to
+    happen and what made four menu entries dead ends: shell.open() looked
+    the name up among the *node* ids, matched the leaf just clicked, and
+    zoomed the camera into a node with no children.
+
+    Popen is stubbed because this is a check, not a launcher: it ran for
+    real once and left a chat window on the screen.
+    """
+    g = G.Graph(scenes.menu_nodes())
+    asked, launched = [], []
+
+    class FakeShell:
+        def open(self, scene):
+            asked.append(scene)
+
+        def dismiss(self):
+            asked.append("dismiss")
+
+    real_popen = scenes.subprocess.Popen
+    scenes.subprocess.Popen = lambda cmd, **kw: launched.append(cmd)
+    try:
+        check("an unbuilt scene leaf did not open the surface that owns it",
+              scenes.activate(g["chat"], FakeShell())
+              and launched == [scenes.FALLBACK["chat"]]
+              and asked == ["dismiss"])
+        asked.clear()
+        launched.clear()
+        check("a built scene leaf did not move within the shell",
+              scenes.activate(G.Node("x", "X", "i", data={"scene": "menu"}),
+                              FakeShell())
+              and asked == ["menu"] and launched == [])
+        asked.clear()
+        check("an action leaf did not put the surface away",
+              scenes.activate(g["cancel"], FakeShell())
+              and asked == ["dismiss"])
+    finally:
+        scenes.subprocess.Popen = real_popen
+
+    check("a scene is both built and still spawned",
+          not (scenes.BUILT & set(scenes.FALLBACK)))
+    for node in g.nodes.values():
+        scene = node.data.get("scene")
+        check(f"scene {scene!r} on {node.id} is neither built nor spawned",
+              scene is None or scene in scenes.BUILT
+              or scene in scenes.FALLBACK)
+    print("dispatch   : built scenes zoom, unbuilt ones open their program")
+
+
+def check_a_client_with_no_shell_says_so():
+    """What lets bin/dictate-menu fall back to the old surface instead of
+    hanging on a bus name nobody owns."""
+    check("a client with no shell and no start should report failure",
+          S.call("Open", "menu", start=False) is False)
+    print("client     : no shell and no start -> False, so a shim can fall back")
+
+
+def check_the_shims_still_exist():
+    for shim in ("dictate-shell", "dictate-menu", "dictate-chat",
+                 "dictate-setup", "dictate-tray"):
+        path = REPO / "bin" / shim
+        check(f"{shim} is missing", path.exists())
+        check(f"{shim} is not executable", os.access(path, os.X_OK))
+    text = (REPO / "bin" / "dictate-menu").read_text()
+    check("dictate-menu lost its standalone escape hatch",
+          "--standalone" in text)
+    check("dictate-menu no longer preloads layer-shell",
+          "preload_layer_shell" in text)
+    print("shims      : all present, --standalone preserved")
+
+
+check_the_menu_graph_is_sound()
+check_every_leaf_does_something()
+check_choosing_a_leaf_reaches_the_surface()
+check_a_scene_leaf_reaches_its_surface()
+check_a_client_with_no_shell_says_so()
+check_the_shims_still_exist()
+
+print("\nFAILURES:" if fails else "\nall checks passed")
+for f in fails:
+    print("  -", f)
+sys.exit(1 if fails else 0)

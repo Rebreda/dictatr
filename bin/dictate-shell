@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# The resident shell: one process, one overlay, every scene.
+set -eu
+. "$(dirname "$(readlink -f "$0")")/_common.sh"
+preload_layer_shell
+exec "$py" "$repo/ui/shell.py" "$@"

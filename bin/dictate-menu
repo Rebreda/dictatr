@@ -1,5 +1,34 @@
-#!/bin/bash
-# Hotkey shim: launch (or toggle) the floating radial menu.
+#!/usr/bin/env bash
+# The menu. By default a client of the resident shell, so opening it is a
+# move inside a surface that is already up rather than a new process.
+#
+#   dictate-menu                # ask the shell (starting it if need be)
+#   dictate-menu --toggle       # ...and put it away if it is already up
+#   dictate-menu --standalone   # the old widget menu, in its own process
+#
+# --settings, --suggest and --file stay standalone: the settings window is
+# an ordinary window rather than an overlay, suggest is a different surface
+# with a different lifetime, and --file is a file dialog with no surface of
+# its own (the shell calls it until it draws a picker). They are also why
+# this passes "$@" on at all — it used to drop every argument, so the
+# tray's Settings item opened the radial menu instead of the settings
+# window.
+set -eu
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 preload_layer_shell
-exec "$py" "$repo/ui/menu.py"
+
+args=()
+standalone=0
+for arg in "$@"; do
+    case "$arg" in
+        --standalone)            standalone=1 ;;
+        --settings|--suggest|--file)
+                                 standalone=1; args+=("$arg") ;;
+        *)                       args+=("$arg") ;;
+    esac
+done
+
+if [ "$standalone" -eq 1 ]; then
+    exec "$py" "$repo/ui/menu.py" ${args+"${args[@]}"}
+fi
+exec "$py" "$repo/ui/shell.py" --client menu ${args+"${args[@]}"}

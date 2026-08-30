@@ -257,24 +257,7 @@ class Radial(Gtk.ApplicationWindow):
                       start_new_session=True)
 
     def pick_file(self):
-        dialog = Gtk.FileDialog(title="Transcribe audio file")
-        f = Gtk.FileFilter()
-        f.set_name("Audio files")
-        for m in ("audio/x-wav", "audio/mpeg", "audio/mp4", "audio/ogg",
-                  "audio/flac", "audio/webm"):
-            f.add_mime_type(m)
-        dialog.set_default_filter(f)
-
-        def done(d, res):
-            try:
-                gfile = d.open_finish(res)
-            except GLib.Error:
-                self.dismiss()
-                return
-            subprocess.Popen([DICTATE, "file", gfile.get_path()])
-            self.dismiss()
-
-        dialog.open(self, None, done)
+        choose_audio_file(self, lambda _path: self.dismiss())
 
 
 class SettingsWindow(Gtk.Window):
@@ -422,6 +405,34 @@ class SettingsWindow(Gtk.Window):
         self.close()
 
 
+def choose_audio_file(parent, done):
+    """Ask for an audio file and transcribe it; *done* gets the path, or
+    None if the dialog was dismissed.
+
+    Module level because two callers want it: the menu's More ring, and
+    `dictate-menu --file`, which the shell uses until it draws a picker
+    of its own. One dialog and one filter list, so the two cannot drift.
+    """
+    dialog = Gtk.FileDialog(title="Transcribe audio file")
+    f = Gtk.FileFilter()
+    f.set_name("Audio files")
+    for m in ("audio/x-wav", "audio/mpeg", "audio/mp4", "audio/ogg",
+              "audio/flac", "audio/webm"):
+        f.add_mime_type(m)
+    dialog.set_default_filter(f)
+
+    def _done(d, res):
+        try:
+            gfile = d.open_finish(res)
+        except GLib.Error:
+            done(None)
+            return
+        subprocess.Popen([DICTATE, "file", gfile.get_path()])
+        done(gfile.get_path())
+
+    dialog.open(parent, None, _done)
+
+
 class MenuApp(Gtk.Application):
     def __init__(self, mode="menu"):
         # Suggest is its own instance: it is a different surface with a
@@ -435,6 +446,13 @@ class MenuApp(Gtk.Application):
     def do_activate(self):
         if self.mode == "settings":
             SettingsWindow(self).present()
+            return
+        # No window of our own: the picker is the whole surface. Hold the
+        # application up while the dialog is open, since it answers on a
+        # callback and there is nothing else keeping the loop alive.
+        if self.mode == "file":
+            self.hold()
+            choose_audio_file(None, lambda _path: self.release())
             return
         # Single instance + toggle: a second hotkey press lands here in the
         # primary process; close the open menu instead of stacking another.
@@ -451,7 +469,8 @@ class MenuApp(Gtk.Application):
 
 
 def main():
-    flags = {"--settings": "settings", "--suggest": "suggest"}
+    flags = {"--settings": "settings", "--suggest": "suggest",
+             "--file": "file"}
     mode = next((m for f, m in flags.items() if f in sys.argv), "menu")
     sys.exit(MenuApp(mode).run([a for a in sys.argv if a not in flags]))
 

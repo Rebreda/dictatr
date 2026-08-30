@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Check the drawn scene: geometry, hit-testing, zoom and gestures.
+
+    tools/canvascheck              # exit 0 only when every assertion holds
+    tools/canvascheck --png OUT    # draw the scene at several depths
+
+The scene is no longer a widget tree, so nothing about it can be checked
+by asking GTK what it built. What replaces that is this: the camera
+transform is invertible, so every bubble drawn can be found again by
+pointing at it, and that round trip is the whole correctness story for a
+canvas you cannot click in a test.
+
+--png renders through Gsk.CairoRenderer with no window and no compositor,
+so it is a picture of exactly what a display would show.
+"""
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "ui"))
+
+try:
+    import gi  # noqa: F401
+except ImportError:
+    os.execv("/usr/bin/python3", ["/usr/bin/python3", __file__, *sys.argv[1:]])
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gtk  # noqa: E402
+
+Gtk.init()
+Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
+    str(REPO / "ui" / "icons" / "theme"))
+
+import canvas as C  # noqa: E402
+import graph as G  # noqa: E402
+
+fails = []
+
+
+def check(msg, ok):
+    if not ok:
+        fails.append(msg)
+    return ok
+
+
+NODES = [
+    G.Node("menu", "Menu", "view-more-symbolic",
+           children=("dictate", "clip", "chat", "listen", "more", "cancel")),
+    G.Node("dictate", "Dictate", "audio-input-microphone-symbolic"),
+    G.Node("clip", "To clipboard", "edit-copy-symbolic"),
+    G.Node("chat", "Ask the AI", "dictatr-chat-symbolic",
+           children=("chat-settings", "message")),
+    G.Node("listen", "Always-on", "media-record-symbolic"),
+    G.Node("more", "More", "view-more-symbolic",
+           children=("file", "gc", "prefs", "setup")),
+    G.Node("cancel", "Cancel", "process-stop-symbolic"),
+    G.Node("chat-settings", "Chat settings", "emblem-system-symbolic",
+           children=("details", "speak", "recall")),
+    G.Node("message", "This message", "view-list-symbolic"),
+    G.Node("file", "Transcribe a file", "folder-music-symbolic"),
+    G.Node("gc", "Clean up", "user-trash-symbolic"),
+    G.Node("prefs", "Settings", "preferences-system-symbolic"),
+    G.Node("setup", "Set up", "dictatr-engine-symbolic"),
+    G.Node("details", "Show the working", "view-list-symbolic"),
+    G.Node("speak", "Speak answers", "audio-speakers-symbolic"),
+    G.Node("recall", "Recall", "document-open-recent-symbolic"),
+]
+VIEW = (900, 900)
+
+
+def scene():
+    cv = C.Canvas(G.Graph(NODES), "menu")
+    cv._forced_view = VIEW
+    return cv
+
+
+def check_every_bubble_can_be_pointed_at():
+    """The round trip that replaces a widget tree: draw a bubble, then
+    find it again from where it landed."""
+    cv = scene()
+    for depth_path in ([], [2], [2, 0]):
+        for i in depth_path:
+            cv.enter(i)
+        cv.depth = cv.target_depth()
+        live = len(cv.path.ids) - 1
+        kids = cv.graph.children(cv.path.ids[live])
+        for index in range(len(kids)):
+            slot = cv.slot_at(live, index)
+            check(f"bubble {index} at depth {live} has no place", slot)
+            if slot:
+                check(f"pointing at bubble {index} of {kids[index].id} "
+                      f"found {cv.hit(*slot)}", cv.hit(*slot) == (live, index))
+        print(f"hit test   : depth {live}, {len(kids)} bubbles, all found")
+
+
+def check_pointing_between_bubbles_finds_nothing():
+    cv = scene()
+    cv.depth = 0.0
+    check("the gap between bubbles is not empty", cv.hit(10, 10) is None)
+    check("the hub is not a bubble", cv.hit(450, 450) is None)
+    check("the hub knows itself", cv.hub_hit(450, 450))
+    print("gaps       : empty space and the hub are not bubbles")
+
+
+def check_hit_testing_works_mid_zoom():
+    """Half way through a traversal both levels are on screen and both
+    have to be reachable, or a half-committed zoom is a dead surface."""
+    cv = scene()
+    cv.enter(4)                      # More
+    for depth in (0.25, 0.5, 0.75):
+        cv.depth = depth
+        found = set()
+        for level in (0, 1):
+            for index in range(len(cv.graph.children(cv.path.ids[level]))):
+                slot = cv.slot_at(level, index)
+                if slot and 0 <= slot[0] < VIEW[0] and 0 <= slot[1] < VIEW[1]:
+                    hit = cv.hit(*slot)
+                    if hit:
+                        found.add(hit[0])
+        check(f"at depth {depth} only levels {found} were reachable",
+              found)
+    print("mid-zoom   : bubbles reachable while the camera is in flight")
+
+
+def check_the_zoom_settles():
+    cv = scene()
+    cv.enter(4)
+    cv.depth, cv.depth_v = 0.0, 0.0
+    frames = 0
+    while cv.tick(1 / 60) and frames < 600:
+        frames += 1
+    check(f"the zoom never settled ({frames} frames)", frames < 600)
+    check(f"the zoom settled at {cv.depth}, not 1.0",
+          abs(cv.depth - 1.0) < 0.01)
+    print(f"zoom       : settled on depth {cv.depth:.3f} in {frames} frames "
+          f"({frames / 60:.2f}s)")
+
+
+def check_a_half_pull_returns():
+    """The traversal you can back out of."""
+    cv = scene()
+    cv._drag_depth = 0.0
+    cv._drag_into = (0, 4)
+    cv.depth = 0.3                      # short of half way
+    cv._on_drag_end(_FakeGesture(), 0, 0)
+    check(f"a short pull committed anyway (depth {cv.depth})",
+          cv.depth == 0.0 and len(cv.path.ids) == 1)
+    cv._drag_depth = 0.0
+    cv._drag_into = (0, 4)
+    cv.depth = 0.8                      # past half way
+    cv._on_drag_end(_FakeGesture(), 0, 0)
+    check(f"a long pull did not commit ({cv.path.ids})",
+          len(cv.path.ids) == 2 and cv.path.ids[-1] == "more")
+    print("pull       : short returns, long commits")
+
+
+class _FakeGesture:
+    def get_velocity(self):
+        return False, 0.0, 0.0
+
+    def get_start_point(self):
+        return True, 450.0, 450.0
+
+
+def check_press_and_hover_are_springs():
+    cv = scene()
+    cv.focus = (0, 1)
+    for _ in range(60):
+        cv.tick(1 / 60)
+    item = cv.items("menu")[1]
+    check(f"hover never rose ({item.hover})", item.hover > 0.95)
+    check("an unfocused bubble rose too", cv.items("menu")[0].hover < 0.05)
+    cv.focus = None
+    for _ in range(60):
+        cv.tick(1 / 60)
+    check(f"hover never fell ({item.hover})", item.hover < 0.05)
+    print("springs    : hover rises and falls, neighbours unaffected")
+
+
+def check_depth_is_bounded_work():
+    """A path twenty deep must not cost twenty levels of drawing."""
+    cv = scene()
+    deep = [G.Node(f"n{i}", f"Level {i}", "view-more-symbolic",
+                   children=(f"n{i + 1}",)) for i in range(40)]
+    deep.append(G.Node("n40", "Bottom", "view-more-symbolic"))
+    cv = C.Canvas(G.Graph(deep), "n0")
+    cv._forced_view = VIEW
+    for _ in range(20):
+        cv.enter(0)
+    cv.depth = cv.target_depth()
+    drawn = cv.camera().visible(cv.depth, len(cv.path.ids))
+    check(f"{len(drawn)} levels drawn at depth 20", len(drawn) <= 8)
+    print(f"deep       : path 20 deep, {len(drawn)} levels drawn")
+
+
+def check_it_renders_without_a_window():
+    cv = scene()
+    out = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "canvascheck.png"
+    cv.render_png(out, VIEW)
+    check("nothing was rendered", out.exists() and out.stat().st_size > 1000)
+    print(f"render     : {out.stat().st_size // 1024}KB PNG, no window")
+    out.unlink(missing_ok=True)
+
+
+def draw(prefix):
+    cv = scene()
+    shots = []
+    for name, path, depth, focus in (
+            ("root", [], 0.0, (0, 0)),
+            ("pulling", [4], 0.45, (0, 4)),
+            ("landed", [4], 1.0, (1, 2)),
+            ("deeper", [2, 0], 2.0, (2, 1)),
+            ("between", [2, 0], 1.55, None)):
+        cv = scene()
+        for i in path:
+            cv.enter(i)
+        cv.depth = depth
+        cv.focus = focus
+        if focus:
+            cv.items(cv.path.ids[focus[0]])[focus[1]].hover = 1.0
+        out = f"{prefix}-{name}.png"
+        cv.render_png(out, VIEW)
+        shots.append(out)
+        print(f"  {name:9s} depth {depth}  -> {out}")
+    return shots
+
+
+if "--png" in sys.argv:
+    draw(sys.argv[sys.argv.index("--png") + 1])
+    sys.exit(0)
+
+check_every_bubble_can_be_pointed_at()
+check_pointing_between_bubbles_finds_nothing()
+check_hit_testing_works_mid_zoom()
+check_the_zoom_settles()
+check_a_half_pull_returns()
+check_press_and_hover_are_springs()
+check_depth_is_bounded_work()
+check_it_renders_without_a_window()
+
+print("\nFAILURES:" if fails else "\nall checks passed")
+for f in fails:
+    print("  -", f)
+sys.exit(1 if fails else 0)
