@@ -26,6 +26,7 @@ inverted, which is cheaper than walking a widget tree; the rest is below.
 """
 
 import math
+import os
 import sys
 from pathlib import Path as _Path
 
@@ -55,6 +56,20 @@ RED = Gdk.RGBA()
 RED.parse("#f28b82")
 EDGE = Gdk.RGBA()
 EDGE.parse("#ffffff")
+
+
+def _trace(msg):
+    """One line per pointer event, when the shell debug topic is on.
+
+    The canvas does its own hit-testing, so when a bubble will not press
+    there is nothing to inspect: no widget to find, no handler to breakpoint.
+    This says whether the event arrived at all, where it landed, and what
+    was under it -- which is the difference between an input region that
+    never delivered the click and arithmetic that missed the bubble.
+    """
+    topics = os.environ.get("DICTATE_DEBUG", "")
+    if "shell" in topics or "all" in topics:
+        print(f"canvas: {msg}", file=sys.stderr, flush=True)
 
 
 def rgba(base, alpha):
@@ -410,12 +425,16 @@ class Canvas(Gtk.Widget):
 
     def _on_press(self, _g, _n, x, y):
         hit = self.hit(x, y)
+        _trace(f"press at ({x:.0f},{y:.0f}) view={self.viewport()} "
+               f"depth={self.depth:.2f} -> {hit}")
         self._set_focus(hit)
         self._pressed = hit
         self.queue_draw()
 
     def _on_release(self, _g, _n, x, y):
         pressed, self._pressed = self._pressed, None
+        _trace(f"release at ({x:.0f},{y:.0f}) pressed={pressed} "
+               f"dragged={self._dragged}")
         if pressed is None or self._dragged:
             return
         level, index = pressed
