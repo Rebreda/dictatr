@@ -121,7 +121,6 @@ that would need those is exercised by hand or on the demo stage instead.
 | `RADIAL_DEMO=layout` | `python3 ui/radial.py` is a playground for the ring's geometry: item count, grouping, arc, depth |
 | `RADIAL_DEMO=tether` | the same file shows the line that joins two surfaces during a handoff |
 | `DICTATR_FROM=x,y,pid` | set by a surface handing over; the one arriving tethers back to that point and signals that pid |
-| `RADIAL_DEMO=progress` | the same file shows the progress bubble on its own |
 
 There is a scripted Lemonade stand-in at `docs/demo/lib/stub_lemonade.py`:
 it answers health, models, transcriptions, chat and speech from a JSON

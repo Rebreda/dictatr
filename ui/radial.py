@@ -9,7 +9,6 @@ Pieces:
   Hub             what the middle button shows and does
   Ring            hub + satellites, at any count and any depth
   Overlay         a surface that floats where the pointer is
-  ProgressBubble  a bubble wearing a progress arc (determinate or spinning)
 
 Every surface uses the same Ring: the menu is one, the chat card hangs
 one off its bottom with the microphone as its hub, and the wizard's Back
@@ -25,8 +24,8 @@ hidden rather than drawn invisibly. Depth is unbounded. Escape, or the
 hub, backs out one level; clicking a parked bubble returns to its level.
 
 `RADIAL_DEMO=layout python3 ui/radial.py` is a live playground for the
-layout (item count, grouping, arc, depth); `RADIAL_DEMO=progress` shows
-a ProgressBubble cycling through its modes, for stage capture.
+layout (item count, grouping, arc, depth); `RADIAL_DEMO=tether` shows
+the line that joins two surfaces during a handoff.
 """
 
 import math
@@ -1347,116 +1346,6 @@ class Overlay:
         return clip_input_region(self.win, self.hit_widgets())
 
 
-class ProgressBubble(Gtk.Overlay):
-    """A bubble wearing a progress arc: blue ring fills 0..1 clockwise
-    from the top, or spins when indeterminate. For onboarding and model
-    downloads."""
-
-    ARC_PAD = ARC_PAD
-    ARC_W = ARC_W
-
-    def __init__(self, icon="folder-download-symbolic",
-                 diameter=STYLE_MENU.bubble):
-        super().__init__()
-        self._fraction = 0.0
-        self._spinning = False
-        self._d = diameter
-        side = diameter + 2 * self.ARC_PAD
-        self.set_size_request(side, side)
-
-        # inner is public: callers restyle it (the setup wizard brightens
-        # its emblem, which sits on a dark page instead of a wallpaper).
-        self.inner = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        self.inner.add_css_class("bubble")
-        self.inner.set_size_request(diameter, diameter)
-        self._icon = Gtk.Image.new_from_icon_name(icon)
-        self._icon.set_hexpand(True)
-        self.inner.append(self._icon)
-        self.set_child(self.inner)
-
-        self._arc = Gtk.DrawingArea()
-        self._arc.set_can_target(False)
-        self._arc.set_draw_func(self._draw)
-        self.add_overlay(self._arc)
-
-    def set_icon(self, icon):
-        self._icon.set_from_icon_name(icon)
-
-    def set_icon_size(self, px):
-        self._icon.set_pixel_size(px)
-
-    def set_fraction(self, fraction):
-        self._fraction = _clamp(fraction)
-        self._spinning = False
-        self._arc.queue_draw()
-
-    def set_indeterminate(self, spinning=True):
-        if spinning and not self._spinning:
-            self._spinning = True
-            self._arc.add_tick_callback(self._spin_tick)
-        elif not spinning:
-            self._spinning = False
-            self._arc.queue_draw()   # the spin tick is gone; repaint once
-
-    def _spin_tick(self, _w, _clock):
-        self._arc.queue_draw()
-        return self._spinning
-
-    def _draw(self, area, cr, w, h):
-        cx, cy = w / 2, h / 2
-        r = self._d / 2 + self.ARC_PAD - self.ARC_W / 2
-        cr.set_line_width(self.ARC_W)
-        cr.set_line_cap(cairo.LINE_CAP_ROUND)
-        # faint full track
-        cr.set_source_rgba(1, 1, 1, 0.10)
-        cr.arc(cx, cy, r, 0, 2 * math.pi)
-        cr.stroke()
-        cr.set_source_rgba(0x8a / 255, 0xb4 / 255, 0xf8 / 255, 1.0)
-        if self._spinning:
-            phase = (GLib.get_monotonic_time() / 1e6) * 1.6 * math.pi
-            cr.arc(cx, cy, r, phase, phase + 0.55 * math.pi)
-            cr.stroke()
-        elif self._fraction > 0:
-            top = -math.pi / 2
-            cr.arc(cx, cy, r, top, top + 2 * math.pi * self._fraction)
-            cr.stroke()
-
-
-def _progress_demo():
-    """RADIAL_DEMO=progress: a ProgressBubble cycling on a dark square,
-    for capture on the demo stage."""
-
-    def activate(app):
-        win = Gtk.ApplicationWindow(application=app, decorated=False,
-                                    default_width=180, default_height=120)
-        apply_css()
-        box = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                      spacing=24)
-        det = ProgressBubble()
-        det.set_fraction(0.0)
-        spin = ProgressBubble(icon="emblem-synchronizing-symbolic")
-        spin.set_indeterminate(True)
-        box.append(det)
-        box.append(spin)
-        win.set_child(box)
-
-        state = {"f": 0.0}
-
-        def step():
-            state["f"] += 0.01
-            if state["f"] > 1.0:
-                state["f"] = 0.0
-            det.set_fraction(state["f"])
-            return True
-
-        GLib.timeout_add(50, step)
-        win.present()
-
-    app = Gtk.Application(application_id="io.github.rebreda.dictatr.radial")
-    app.connect("activate", activate)
-    app.run([])
-
-
 def _layout_demo():
     """A ring you can push around, for judging what no test can.
 
@@ -1620,14 +1509,11 @@ def _tether_demo():
 
 if __name__ == "__main__":
     demo = os.environ.get("RADIAL_DEMO")
-    if demo == "progress":
-        _progress_demo()
-    elif demo == "layout":
+    if demo == "layout":
         _layout_demo()
     elif demo == "tether":
         _tether_demo()
     else:
         print("radial.py is a library. RADIAL_DEMO=layout is a playground "
-              "for the ring's geometry, RADIAL_DEMO=tether shows the line "
-              "that joins two surfaces, RADIAL_DEMO=progress shows the "
-              "progress bubble.")
+              "for the ring's geometry, and RADIAL_DEMO=tether shows the "
+              "line that joins two surfaces during a handoff.")
