@@ -441,7 +441,12 @@ class Canvas(Gtk.Widget):
         self._drag_into = self.hit(x, y)
 
     def _on_drag_update(self, _g, dx, dy):
-        if abs(dx) + abs(dy) > 6:
+        # Per axis, against the same slop radial.Overlay uses and the
+        # desktop's own drag threshold. Summing the two axes at 6 meant a
+        # 4px-by-3px wobble between press and release counted as a drag,
+        # _on_release discarded the click, and no bubble could be pressed
+        # with a hand rather than a keyboard.
+        if abs(dx) > self.DRAG_SLOP or abs(dy) > self.DRAG_SLOP:
             self._dragged = True
         if self._drag_from is None:
             return
@@ -492,6 +497,8 @@ class Canvas(Gtk.Widget):
                                   0.0, float(len(self.path.ids) - 1))
         self.queue_draw()
         return True
+
+    DRAG_SLOP = 8    # movement below this is still a click
 
     _pressed = None
     _dragged = False

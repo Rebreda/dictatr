@@ -222,3 +222,47 @@ def test_a_child_ring_is_exactly_bubble_sized_from_its_parent():
     left = cam.to_viewport(1, 0, (-110.0, 0.0), view)
     right = cam.to_viewport(1, 0, (110.0, 0.0), view)
     assert right[0] - left[0] == pytest.approx(52.0)
+
+
+# --- the click that a drag detector must not eat ----------------------
+#
+# canvas.py cannot be imported here (it needs GTK), so the rule is read
+# out of the source, the way tests/test_gestures.py reads the KWin
+# script's thresholds: what is pinned is that the two kits agree, and
+# that neither of them is tighter than the desktop a hand is using.
+
+import pathlib
+import re
+
+UI = pathlib.Path(__file__).resolve().parents[1] / "ui"
+
+
+def slop(name):
+    src = (UI / name).read_text()
+    return int(re.search(r"DRAG_SLOP = (\d+)", src).group(1))
+
+
+def rule(name):
+    """The comparison itself, normalised."""
+    src = (UI / name).read_text()
+    return re.search(r"if (abs\(dx\)[^\n:]*?):\n\s+self\._dragged = True", src) \
+        or re.search(r"if (abs\(dx\)[^\n:]*?):", src)
+
+
+def test_the_two_kits_agree_on_what_is_still_a_click():
+    assert slop("canvas.py") == slop("radial.py")
+
+
+def test_neither_kit_is_tighter_than_the_desktop():
+    """GTK's own drag threshold is 8. Below that, a press-and-release
+    with an ordinary hand registers as a drag."""
+    assert slop("canvas.py") >= 8 and slop("radial.py") >= 8
+
+
+def test_the_axes_are_judged_separately():
+    """Summing them is the bug this guards: abs(dx) + abs(dy) > 6 makes a
+    4-by-3 wobble a drag, so every bubble in the menu became unpressable
+    while the keyboard still worked."""
+    text = rule("canvas.py").group(1)
+    assert "+" not in text, f"canvas.py sums the axes: {text!r}"
+    assert "or" in text, f"canvas.py should judge each axis: {text!r}"
