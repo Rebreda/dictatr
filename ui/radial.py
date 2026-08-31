@@ -1163,6 +1163,7 @@ class Overlay:
         self._drag_test = None
         self._polls = 0
         self._ticks = 0
+        self._armed = False
 
     # --- setup ---------------------------------------------------------
     def start(self):
@@ -1194,6 +1195,7 @@ class Overlay:
         # the surface where the pointer is. wlroots answers only after a
         # pointer event, which cannot happen before the first frame is up,
         # so the give-up countdown waits for paint.
+        self._armed = True
         self.win.add_tick_callback(self._painted)
         GLib.timeout_add(50, self._poll_pointer)
         if self.hit_widgets is not None:
@@ -1217,6 +1219,7 @@ class Overlay:
 
     def _poll_pointer(self):
         if self.placed or self.canvas is None:
+            self._armed = False
             return False
         surface = self.win.get_surface()
         if surface is not None and self.win.get_width() > 0:
@@ -1224,6 +1227,7 @@ class Overlay:
             ok, x, y, _mask = surface.get_device_position(seat.get_pointer())
             if ok and (x or y):
                 self.place_at(x, y)
+                self._armed = False
                 return False
             if self._ticks >= 2:
                 self._polls += 1
@@ -1231,6 +1235,7 @@ class Overlay:
             # Pointer is on another output, or the query is unsupported.
             self.place_at(self.win.get_width() / 2,
                           self.win.get_height() / 2)
+            self._armed = False
             return False
         return True
 
@@ -1272,6 +1277,19 @@ class Overlay:
         self._ticks = 0
         if self.canvas is None:
             return
+        # Ask once, here and now, in case the surface can already
+        # answer: then the child is placed before it is ever drawn
+        # again, and nothing is seen at the old position.
+        if not self._poll_pointer():
+            return
+        # It could not. A hidden window reports no size, so the pointer
+        # cannot be found until it is back on screen and painted. Park
+        # the child out of view for those few frames rather than start
+        # the showing at the last one's position and jump.
+        self._place_children(-self.w - 1, -self.h - 1)
+        if self._armed:
+            return
+        self._armed = True
         self.win.add_tick_callback(self._painted)
         GLib.timeout_add(50, self._poll_pointer)
 
