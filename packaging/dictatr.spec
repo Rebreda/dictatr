@@ -1,5 +1,5 @@
 Name:           dictatr
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Hotkey voice dictation for Wayland desktops
 License:        MIT
@@ -78,6 +78,38 @@ bash packaging/stage.sh %{buildroot}
 %{_mandir}/man1/dictate*.1*
 
 %changelog
+* Sun Aug 30 2026 Rebreda - 0.5.1-1
+- The menu, the selection actions and the settings are one surface now.
+  A single resident process draws all three, so opening the settings
+  from the menu is a movement inside the ring you are already looking
+  at rather than a window from a different program appearing beside it
+- The settings are bubbles rather than a form: speaking answers aloud,
+  what Ask may read, the models, how long a pause ends a segment,
+  notifications, the archive. There is no Save button -- a setting is
+  written the moment you press it, and every dictatr process reads it
+  on its next use
+- The menu can be used with a mouse again: bubbles light up under the
+  pointer and give under a press, the middle backs out of a submenu or
+  closes, a click on the desktop behind it dismisses, and it appears
+  where the pointer is however long ago it was last opened
+- It also arrives and leaves rather than blinking: the bubbles spiral
+  out of the middle when it opens and back into it when it closes, and
+  catching one mid-flight turns it around instead of starting over
+- Opening a submenu no longer leaves the menu you came from sitting on
+  top of it at four times its size. The level you have flown through
+  fades as you pass it and leaves one faint trace of where you came from
+- dictate file says why a file could not be transcribed instead of
+  failing silently
+- A malformed number in the config is reported once and the default is
+  used, rather than raising from whichever line happened to read it next
+- The launchers no longer exit before launching anything on distributions
+  that keep gtk4-layer-shell in /usr/lib64, which is what "the hotkey
+  does nothing" looked like from the outside
+- The voice chat takes the keyboard when it opens, so its field can be
+  typed into without clicking it first
+- Dictation no longer types a revision while the hotkey chord is still
+  held down
+
 * Sun Aug 30 2026 Rebreda - 0.5.0-1
 - Recordings move to ~/.local/share/dictatr/archive, out of listenr's
   directory. An existing ~/.listenr/dictation is left where it is until
