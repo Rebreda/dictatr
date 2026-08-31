@@ -114,6 +114,9 @@ class Shell(Gtk.ApplicationWindow):
         rather than a fresh one — which is what a resident shell buys.
         """
         self.showing = False
+        # Next time, find the pointer again rather than reappearing
+        # where this showing happened to land.
+        self.ov.rearm()
         self.set_visible(False)
         return False
 

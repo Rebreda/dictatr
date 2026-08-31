@@ -149,11 +149,21 @@ def check_a_scene_leaf_reaches_its_surface():
     print("dispatch   : built scenes zoom, unbuilt ones open their program")
 
 
-def check_a_client_with_no_shell_says_so():
+def check_a_client_says_what_it_found():
     """What lets bin/dictate-menu fall back to the old surface instead of
-    hanging on a bus name nobody owns."""
+    hanging on a bus name nobody owns.
+
+    Which answer is correct depends on whether a shell happens to be up,
+    and now that the launcher works one usually is -- this asserted the
+    empty case unconditionally and so failed on any machine actually
+    running dictatr, which is not a thing a check should do.
+    """
+    up = S.call("Open", "menu", start=False)
+    if up:
+        print("client     : a shell is up and answered (start=False)")
+        return
     check("a client with no shell and no start should report failure",
-          S.call("Open", "menu", start=False) is False)
+          up is False)
     print("client     : no shell and no start -> False, so a shim can fall back")
 
 
@@ -175,7 +185,7 @@ check_the_menu_graph_is_sound()
 check_every_leaf_does_something()
 check_choosing_a_leaf_reaches_the_surface()
 check_a_scene_leaf_reaches_its_surface()
-check_a_client_with_no_shell_says_so()
+check_a_client_says_what_it_found()
 check_the_shims_still_exist()
 
 print("\nFAILURES:" if fails else "\nall checks passed")
