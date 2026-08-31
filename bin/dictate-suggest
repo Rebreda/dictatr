@@ -1,5 +1,7 @@
 #!/bin/bash
-# Suggested actions for the text you have selected, as a radial.
+# Suggested actions for the text you have selected, as a scene in the
+# resident shell -- so asking for it while the menu is up is a move
+# inside one surface rather than a second overlay on top of it.
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 preload_layer_shell
-exec "$py" "$repo/ui/menu.py" --suggest
+exec "$py" "$repo/ui/shell.py" --client suggest

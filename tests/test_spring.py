@@ -11,7 +11,7 @@ import pytest
 
 import motion as M
 
-SPRINGS = [M.SNAPPY, M.GLIDE, M.FLING, M.ZOOM,
+SPRINGS = [M.SNAPPY, M.GLIDE, M.FLING, M.ZOOM, M.BLOOM, M.FOLD,
            M.Spring(response=0.2, damping=0.5),
            M.Spring(response=0.6, damping=1.0),
            M.Spring(response=0.4, damping=1.8)]

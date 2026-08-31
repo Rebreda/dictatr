@@ -34,6 +34,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Gsk", "4.0")
 from gi.repository import (Gdk, GLib, Gsk, Gtk,  # noqa: E402
                            Graphene, Pango)
 
@@ -79,6 +80,23 @@ def rgba(base, alpha):
     return out
 
 
+def mix(frm, to, t):
+    """Between two colours, alpha included.
+
+    Because a hover is a spring and a colour that switched at some
+    threshold on the way would be the one part of the bubble that jumped
+    while the rest of it swelled -- which is exactly what reads as
+    unfinished, however good the easing on everything else is.
+    """
+    t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
+    out = Gdk.RGBA()
+    out.red = frm.red + (to.red - frm.red) * t
+    out.green = frm.green + (to.green - frm.green) * t
+    out.blue = frm.blue + (to.blue - frm.blue) * t
+    out.alpha = frm.alpha + (to.alpha - frm.alpha) * t
+    return out
+
+
 def circle(cx, cy, r):
     builder = Gsk.PathBuilder()
     builder.add_circle(Graphene.Point().init(cx, cy), r)
@@ -94,12 +112,32 @@ class Item:
     highlights.
     """
 
-    __slots__ = ("node", "hover", "press", "hover_v", "press_v")
+    __slots__ = ("node", "hover", "press", "out",
+                 "hover_v", "press_v", "out_v")
 
     def __init__(self, node):
         self.node = node
         self.hover = self.press = 0.0
-        self.hover_v = self.press_v = 0.0
+        self.hover_v = self.press_v = self.out_v = 0.0
+        # Already on its orbit, because that is the resting truth: a
+        # level deeper in the path has been drawn inside its own bubble
+        # since before you went near it, and a bubble that had to bloom
+        # on first sight would be a bubble that was not there when the
+        # fractal said it was. Only a surface arriving winds them back.
+        self.out = 1.0
+
+    def carry(self, other):
+        """Take another Item's state: same node, same feeling.
+
+        A scene that redraws itself under you (a settings toggle) builds
+        new Items, and a bubble that lost its hover and its press the
+        instant it was pressed would flicker exactly where the feedback
+        matters most.
+        """
+        self.hover, self.hover_v = other.hover, other.hover_v
+        self.press, self.press_v = other.press, other.press_v
+        self.out, self.out_v = other.out, other.out_v
+        return self
 
 
 class Canvas(Gtk.Widget):
@@ -107,13 +145,24 @@ class Canvas(Gtk.Widget):
 
     __gtype_name__ = "DictatrCanvas"
 
-    def __init__(self, graph, root, style=L.STYLE_MENU, on_activate=None):
+    HUB = "hub"       # what _pressed holds when the middle is held down
+
+    def __init__(self, graph, root, style=L.STYLE_MENU, on_activate=None,
+                 on_hub=None, on_void=None):
         super().__init__()
         self.graph = graph
         self.path = G.Path(graph, root)
         # What to do when a node with no children is chosen. Branches
         # zoom; leaves are the end of the road and belong to the surface.
         self.on_activate = on_activate
+        # The middle, and everywhere that is neither a bubble nor the
+        # middle. The widget ring had both -- its hub closed the surface
+        # or backed out of a level, and a press on the overlay around it
+        # dismissed -- and a drawn ring that swallows every click and
+        # answers none of them is a ring you cannot get out of without
+        # knowing that Escape works.
+        self.on_hub = on_hub
+        self.on_void = on_void
         self.style = style
         self.depth = 0.0            # fractional: the camera's position
         self.depth_v = 0.0          # ...and how fast it is moving
@@ -209,10 +258,8 @@ class Canvas(Gtk.Widget):
 
         self._hub(snapshot, self.graph[node_id], live)
         for i, (item, angle) in enumerate(zip(kids, m.angles)):
-            turn = angle + (self.spin if live else 0.0)
-            self._bubble(snapshot, item, m,
-                         m.radius * math.cos(turn), m.radius * math.sin(turn),
-                         live and self.focus == (level, i))
+            cx, cy = self.where(item, m, angle, live)
+            self._bubble(snapshot, item, m, cx, cy)
         if live:
             self._captions(snapshot, m, kids)
         if blurred:
@@ -220,47 +267,97 @@ class Canvas(Gtk.Widget):
         snapshot.restore()
         snapshot.pop()
 
+    def where(self, item, m, angle, live):
+        """Where a bubble actually is, in its level's own space.
+
+        Its orbit, the ring's spin, and how far out of the hub it has
+        travelled -- which is one thing while a surface is arriving and
+        1.0 for the rest of the time. One function because drawing,
+        hit-testing and the drag that pulls a level in all have to agree
+        about it, and three copies of this arithmetic is how a bubble
+        ends up somewhere other than where it can be pressed.
+        """
+        out = max(0.0, item.out)
+        turn = angle + (self.spin if live else 0.0) + L.TWIRL_RAD * (1.0 - out)
+        reach = m.radius * out
+        return reach * math.cos(turn), reach * math.sin(turn)
+
     def _captions(self, snapshot, m, kids):
         """What the level is, under the hub; what you are pointing at,
         beside its bubble. Every name at once would be a wall of type."""
         node = self.path.node
         if node.title:
             self._text(snapshot, node.title, 0, self.style.hub / 2 + 13,
-                       rgba(INK, 0.55), size=11.5)
-        if self.focus is None or self.focus[0] != len(self.path.ids) - 1:
+                       rgba(INK, 0.55 * max(0.0, min(self.hub_out, 1.0))),
+                       size=11.5)
+        # Whichever bubble is most hovered, at however hovered it is --
+        # rather than whichever one self.focus names, at full strength.
+        # The label then arrives and leaves with the swell instead of
+        # blinking on at the threshold and off again the moment the
+        # pointer crosses out, and moving between two bubbles crosses
+        # the two labels over rather than cutting.
+        best, lit = None, 0.02
+        for index, item in enumerate(kids):
+            if index < len(m.angles) and item.hover > lit:
+                best, lit = index, item.hover
+        if best is None:
             return
-        index = self.focus[1]
-        if index >= len(m.angles) or index >= len(kids):
-            return
-        turn = m.angles[index] + self.spin
-        away = m.radius + m.bubble / 2 + 15
-        self._text(snapshot, kids[index].node.title,
-                   away * math.cos(turn), away * math.sin(turn),
-                   rgba(INK, 0.92), size=12.5)
+        item = kids[best]
+        cx, cy = self.where(item, m, m.angles[best], True)
+        away = (m.bubble / 2 + 15) / max(math.hypot(cx, cy), 1.0)
+        self._text(snapshot, item.node.title,
+                   cx * (1.0 + away), cy * (1.0 + away),
+                   rgba(INK, 0.92 * min(lit, 1.0) * max(0.0, item.out)),
+                   size=12.5)
 
     def _hub(self, snapshot, node, live):
-        r = self.style.hub / 2
+        out = max(0.0, min(self.hub_out, 1.0))
+        r = self.style.hub / 2 * out * (1.0 - 0.11 * self.hub_press)
+        if r < 0.5:
+            return
         snapshot.append_fill(circle(0, 0, r), Gsk.FillRule.WINDING,
                              rgba(CHARCOAL, 0.93))
         self._ring_stroke(snapshot, 0, 0, r, rgba(BLUE if live else EDGE,
                                                   0.55 if live else 0.10))
-        if node.icon:
-            self._icon(snapshot, node.icon, 0, 0,
-                       self.style.hub * self.style.icon_ratio, BLUE)
+        # The live hub is a control, not a label: it backs out of a level
+        # or it leaves, which is what the widget ring's hub did and what
+        # Escape does. A parked ancestor keeps its own icon, because
+        # there it is context rather than a button.
+        icon = node.icon
+        if live:
+            icon = ("go-previous-symbolic" if len(self.path.ids) > 1
+                    else "window-close-symbolic")
+        if icon:
+            self._icon(snapshot, icon, 0, 0,
+                       self.style.hub * self.style.icon_ratio * out, BLUE)
 
-    def _bubble(self, snapshot, item, m, cx, cy, focused):
-        # Press pushes it in, hover lifts it: one radius, two springs.
-        r = m.bubble / 2 * (1.0 + 0.09 * item.hover - 0.11 * item.press)
-        fill = rgba(BLUE, 0.28) if item.hover > 0.01 else rgba(CHARCOAL, 0.93)
+    def _bubble(self, snapshot, item, m, cx, cy):
+        # Press pushes it in, hover lifts it, arriving grows it out of
+        # nothing: one radius, three springs.
+        out = max(0.0, item.out)
+        r = (m.bubble / 2 * min(out, 1.0)
+             * (1.0 + 0.09 * item.hover - 0.11 * item.press))
+        if r < 0.5:
+            return                      # still inside the hub
+        # Something that is running right now wears the live colour, so
+        # the always-on toggle says which way it is pointing without
+        # being opened. The widget ring did this with a CSS class.
+        on = bool(item.node.data.get("on"))
+        accent = GREEN if on else BLUE
+        lit = item.hover
+        fill = mix(rgba(GREEN, 0.22) if on else rgba(CHARCOAL, 0.93),
+                   rgba(accent, 0.28), lit)
         snapshot.append_fill(circle(cx, cy, r), Gsk.FillRule.WINDING, fill)
         self._ring_stroke(snapshot, cx, cy, r,
-                          rgba(BLUE, 0.60) if item.hover > 0.01
-                          else rgba(EDGE, 0.10))
-        if focused:
-            self._ring_stroke(snapshot, cx, cy, r + 4, rgba(BLUE, 0.7), 1.5)
+                          mix(rgba(accent, 0.60) if on else rgba(EDGE, 0.10),
+                              rgba(accent, 0.60), lit))
+        if lit > 0.01:
+            self._ring_stroke(snapshot, cx, cy, r + 4,
+                              rgba(BLUE, 0.7 * min(lit, 1.0)), 1.5)
         if item.node.icon:
             self._icon(snapshot, item.node.icon, cx, cy,
-                       m.bubble * self.style.icon_ratio, INK)
+                       m.bubble * self.style.icon_ratio * min(out, 1.0),
+                       GREEN if on else INK)
 
     def _ring_stroke(self, snapshot, cx, cy, r, colour, width=1.0):
         stroke = Gsk.Stroke.new(width)
@@ -317,6 +414,8 @@ class Canvas(Gtk.Widget):
         The camera transform inverted, then the ring's own geometry — no
         widget tree to search, and it works at any fractional depth.
         """
+        if self._leaving:
+            return None           # on its way out; nothing here to press
         cam = self.camera()
         view = self.viewport()
         for level, scale, alpha in cam.visible(self.depth, len(self.path.ids)):
@@ -324,33 +423,41 @@ class Canvas(Gtk.Widget):
                 continue          # too faint to be aiming at
             node_id = self.path.ids[level]
             m = self.metrics(node_id)
+            kids = self.items(node_id)
             live = level == len(self.path.ids) - 1
             lx, ly = cam.from_viewport(level, self.depth, (px, py), view)
             for i, angle in enumerate(m.angles):
-                turn = angle + (self.spin if live else 0.0)
-                dx = lx - m.radius * math.cos(turn)
-                dy = ly - m.radius * math.sin(turn)
-                if dx * dx + dy * dy <= (m.bubble / 2) ** 2:
+                if i >= len(kids):
+                    break
+                item = kids[i]
+                cx, cy = self.where(item, m, angle, live)
+                # A bubble half way out of the hub is half a target: the
+                # reachable area is what is drawn, not what will be.
+                r = m.bubble / 2 * max(0.0, min(item.out, 1.0))
+                if (lx - cx) ** 2 + (ly - cy) ** 2 <= r * r:
                     return level, i
         return None
 
     def hub_hit(self, px, py):
+        if self._leaving:
+            return False
         cam = self.camera()
         view = self.viewport()
         level = len(self.path.ids) - 1
         lx, ly = cam.from_viewport(level, self.depth, (px, py), view)
-        return math.hypot(lx, ly) <= self.style.hub / 2
+        return math.hypot(lx, ly) <= self.style.hub / 2 * max(self.hub_out, 0)
 
     def slot_at(self, level, index):
         """Where a bubble is, in viewport pixels."""
-        m = self.metrics(self.path.ids[level])
-        if index >= len(m.angles):
+        node_id = self.path.ids[level]
+        m = self.metrics(node_id)
+        kids = self.items(node_id)
+        if index >= len(m.angles) or index >= len(kids):
             return None
-        turn = m.angles[index] + (
-            self.spin if level == len(self.path.ids) - 1 else 0.0)
+        live = level == len(self.path.ids) - 1
         return self.camera().to_viewport(
             level, self.depth,
-            (m.radius * math.cos(turn), m.radius * math.sin(turn)),
+            self.where(kids[index], m, m.angles[index], live),
             self.viewport())
 
     # --- navigation ------------------------------------------------------
@@ -383,6 +490,152 @@ class Canvas(Gtk.Widget):
             return False
         self.announce()
         return True
+
+    def set_scene(self, graph, root):
+        """Show a different graph, or a different root within one.
+
+        A scene whose contents are worked out when it is opened is a new
+        graph every time: the suggest ring depends on the text in front
+        of you, and then again on what the model makes of it, and nodes
+        are frozen so new children mean a new graph. The caches are
+        keyed by node id, so they have to go with it -- kept, they would
+        hand the old ring's bubbles back under the new ring's names.
+        """
+        self.graph = graph
+        self._items.clear()
+        self._metrics.clear()
+        self.path = G.Path(graph, root)
+        self.depth = self.depth_v = 0.0
+        self.spin = self.spin_v = 0.0
+        self.focus = self._pressed = None
+        self.announce()
+        self.bloom()
+
+    # --- arriving and leaving --------------------------------------------
+    HUB_LEAD = 0.06     # the hub is out before the first bubble follows
+    GONE = 0.02         # travel below which nothing is drawn anyway
+
+    def bloom(self):
+        """Wind every bubble back into the hub and throw them out again.
+
+        Not the same act as going a level deeper. That is a zoom, and
+        the level was always there, drawn inside the bubble standing in
+        for it; this is the surface itself arriving, which happens once
+        per showing however many levels are on screen.
+        """
+        for node_id in self.path.ids:
+            for item in self.items(node_id):
+                item.out, item.out_v = 0.0, 0.0
+        self.hub_out, self.hub_out_v = 0.0, 0.0
+        self._arriving, self._leaving, self._then = 0.0, False, None
+        self._changed()
+
+    def fold(self, then=None):
+        """Spiral back into the hub, then call *then*. False if one is
+        already under way -- mashing a hotkey should close the surface,
+        not keep it open by asking twice."""
+        if self._leaving:
+            return False
+        self._arriving, self._leaving, self._then = 0.0, True, then
+        self._pressed = None
+        self._set_focus(None)
+        self._changed()
+        return True
+
+    def _travel(self, dt):
+        """Advance an arrival or a departure, and say if it is still on.
+
+        A spring has no delay, so the stagger lives in the target: an
+        item is told to go once the clock has passed its turn and to
+        stay exactly where it is until then, which costs nothing because
+        a spring already at its target is already settled.
+        """
+        self._arriving += dt
+        leaving = self._leaving
+        end = 0.0 if leaving else 1.0
+        spring = motion.FOLD if leaving else motion.BLOOM
+        total, per = (L.timing(len(self.items(self.path.ids[-1])),
+                               L.OUT_S, L.SUB_STAGGER_S) if leaving
+                      else L.timing(len(self.items(self.path.ids[-1]))))
+        lead = 0.0 if leaving else self.HUB_LEAD
+        moving = False
+        last = 0.0
+
+        for node_id in self.path.ids:
+            kids = self.items(node_id)
+            for i, item in enumerate(kids):
+                # Out in order, in from the outside back: leaving is not
+                # arriving played backwards, and a ring that collapsed
+                # in the order it bloomed would unzip rather than close.
+                order = (len(kids) - 1 - i) if leaving else i
+                at = lead + per * order
+                last = max(last, at)
+                # Before its turn a bubble holds where it is, not where
+                # its turn would have started from. A departure that
+                # catches an arrival finds bubbles still inside the hub,
+                # and telling those to wait at 1.0 threw them out of it
+                # on the way to being put away.
+                want = end if self._arriving >= at else item.out
+                if spring.settled(item.out, want, item.out_v):
+                    continue
+                item.out, item.out_v = spring.at(item.out, want,
+                                                 item.out_v, dt)
+                moving = True
+
+        hub_at = per * max(len(self.items(self.path.ids[-1])) - 1, 0) \
+            if leaving else 0.0
+        last = max(last, hub_at)
+        want = end if self._arriving >= hub_at else self.hub_out
+        if not spring.settled(self.hub_out, want, self.hub_out_v):
+            self.hub_out, self.hub_out_v = spring.at(
+                self.hub_out, want, self.hub_out_v, dt)
+            moving = True
+
+        if leaving:
+            # Done when there is nothing left to see, not when the
+            # springs have finished converging on zero. A bubble under
+            # half a pixel is not drawn at all, so waiting for the last
+            # thousandth is a fifth of a second of hidden window.
+            if (self._arriving < last
+                    or self.hub_out > self.GONE
+                    or any(i.out > self.GONE for node_id in self.path.ids
+                           for i in self.items(node_id))):
+                return True
+        elif moving or self._arriving < last + total:
+            return True
+        then, self._then = self._then, None
+        self._arriving, self._leaving = None, False
+        if then is not None:
+            then()
+        return False
+
+    def refresh(self, graph):
+        """New nodes, same place.
+
+        set_scene() is for arriving somewhere; this is for a scene
+        redrawing itself under you -- a toggle changes what its own
+        bubble says, and the level you are looking at, the depth the
+        camera is at and the spin you gave the ring are all still the
+        ones you left. Only a choice that no longer exists ends the
+        descent early.
+        """
+        ids, choices = self.path.ids, self.path.choices
+        was = {i.node.id: i for kids in self._items.values() for i in kids}
+        self.graph = graph
+        self._items.clear()
+        self._metrics.clear()
+        self.path = G.Path(graph, ids[0])
+        for node_id in graph.nodes:
+            kids = [Item(n) for n in graph.children(node_id)]
+            if any(i.node.id in was for i in kids):
+                self._items[node_id] = [
+                    i.carry(was[i.node.id]) if i.node.id in was else i
+                    for i in kids]
+        for index in choices:
+            if not self.path.enter(index):
+                break
+        self.announce()
+        self._changed()
 
     def target_depth(self):
         return float(len(self.path.ids) - 1)
@@ -431,28 +684,55 @@ class Canvas(Gtk.Widget):
         scroll.connect("scroll", self._on_scroll)
         self.add_controller(scroll)
 
+    def _changed(self):
+        """Something moved: draw now, and keep the frame clock running
+        until the springs it disturbed have settled.
+
+        queue_draw() on its own is not enough. Hover and press are
+        springs, a spring only advances in tick(), and tick() only runs
+        while animate() is asking for frames -- which it stops doing the
+        moment the scene is at rest, i.e. in every gap between one
+        gesture and the next. So a bubble drew its focus ring and its
+        caption but never swelled and never gave, and the demo below hid
+        that behind a 25Hz timer kicking animate() forever.
+        """
+        self.queue_draw()
+        self.animate()
+
     def _set_focus(self, hit):
         if hit == self.focus:
             return
         self.focus = hit
-        self.queue_draw()
+        self._changed()
 
     def _on_motion(self, _c, x, y):
         self._set_focus(self.hit(x, y))
 
     def _on_press(self, _g, _n, x, y):
         hit = self.hit(x, y)
-        _trace(f"press at ({x:.0f},{y:.0f}) view={self.viewport()} "
-               f"depth={self.depth:.2f} -> {hit}")
         self._set_focus(hit)
-        self._pressed = hit
-        self.queue_draw()
+        self._pressed = hit if hit is not None else (
+            self.HUB if self.hub_hit(x, y) else None)
+        _trace(f"press at ({x:.0f},{y:.0f}) view={self.viewport()} "
+               f"depth={self.depth:.2f} -> {self._pressed}")
+        self._changed()
 
     def _on_release(self, _g, _n, x, y):
         pressed, self._pressed = self._pressed, None
         _trace(f"release at ({x:.0f},{y:.0f}) pressed={pressed} "
                f"dragged={self._dragged}")
-        if pressed is None or self._dragged:
+        if self._dragged:
+            return
+        if pressed is None:
+            # Nothing under it: the way out of a surface that covers the
+            # whole screen, and the one the pointer finds by itself.
+            if self.on_void is not None:
+                self.on_void()
+            return
+        if pressed is self.HUB:
+            if self.on_hub is not None:
+                self.on_hub()
+            self._changed()
             return
         level, index = pressed
         if level != len(self.path.ids) - 1:
@@ -461,7 +741,7 @@ class Canvas(Gtk.Widget):
             self.enter(index)
         else:
             self.activate(index)
-        self.queue_draw()
+        self._changed()
 
     def go_to_level(self, level):
         while len(self.path.ids) - 1 > level:
@@ -475,6 +755,8 @@ class Canvas(Gtk.Widget):
         self._drag_depth = self.depth
         self._dragged = False
         self._drag_into = self.hit(x, y)
+        self._spin_at = None
+        self.spin_v = 0.0
 
     def _on_drag_update(self, _g, dx, dy):
         # Per axis, against the same slop radial.Overlay uses and the
@@ -497,7 +779,7 @@ class Canvas(Gtk.Widget):
                 reach = max(math.hypot(slot[0] - cx, slot[1] - cy), 1.0)
                 along = (dx * (slot[0] - cx) + dy * (slot[1] - cy)) / reach
                 self.depth = self._drag_depth + motion.clamp(along / reach)
-                self.queue_draw()
+                self._changed()
                 return
         # Otherwise the drag turns the ring, with the far side moving less.
         cx, cy = self.viewport()[0] / 2, self.viewport()[1] / 2
@@ -505,9 +787,21 @@ class Canvas(Gtk.Widget):
         before = math.atan2(y0 - cy, x0 - cx)
         after = math.atan2(y0 + dy - cy, x0 + dx - cx)
         self.spin = self._drag_spin + (after - before)
-        self.queue_draw()
+        # How fast the ring is turning, kept as we turn it: the release
+        # needs an angular velocity to fling with, and asking the
+        # gesture for one at that point is not a thing GTK4 offers --
+        # get_velocity() belongs to GtkGestureSwipe, so the call there
+        # raised on the end of every drag, which is the end of every
+        # click, and the fling never happened.
+        now = GLib.get_monotonic_time() / 1e6
+        if self._spin_at is not None:
+            elapsed = now - self._spin_at[1]
+            if elapsed > 1e-4:
+                self.spin_v = (self.spin - self._spin_at[0]) / elapsed
+        self._spin_at = (self.spin, now)
+        self._changed()
 
-    def _on_drag_end(self, gesture, dx, dy):
+    def _on_drag_end(self, _g, dx, dy):
         into = self._drag_into
         self._drag_from = self._drag_into = None
         live = len(self.path.ids) - 1
@@ -516,22 +810,17 @@ class Canvas(Gtk.Widget):
                 self.enter(into[1])          # committed
             else:
                 self.depth = self._drag_depth
-            self.queue_draw()
+            self._changed()
             return
-        ok, vx, vy = gesture.get_velocity()
-        if ok:
-            cx, cy = self.viewport()[0] / 2, self.viewport()[1] / 2
-            x0, y0 = gesture.get_start_point()[1:]
-            reach = max(math.hypot(x0 - cx, y0 - cy), 1.0)
-            # Tangential velocity, as radians per second.
-            self.spin_v = (vx * -(y0 - cy) + vy * (x0 - cx)) / (reach * reach)
-        self.queue_draw()
+        # Nothing to work out here: spin_v was measured while turning,
+        # and it is already in the radians per second the fling wants.
+        self._changed()
 
     def _on_scroll(self, _c, _dx, dy):
         """The wheel is the same axis as pulling a level in."""
         self.depth = motion.clamp(self.depth - dy * 0.18,
                                   0.0, float(len(self.path.ids) - 1))
-        self.queue_draw()
+        self._changed()
         return True
 
     DRAG_SLOP = 8    # movement below this is still a click
@@ -542,6 +831,14 @@ class Canvas(Gtk.Widget):
     _drag_into = None
     _drag_spin = 0.0
     _drag_depth = 0.0
+    _spin_at = None
+    hub_press = 0.0
+    hub_press_v = 0.0
+    hub_out = 1.0
+    hub_out_v = 0.0
+    _arriving = None      # seconds into an arrival or a departure
+    _leaving = False
+    _then = None
 
     # --- the frame -------------------------------------------------------
     def tick(self, dt):
@@ -551,6 +848,13 @@ class Canvas(Gtk.Widget):
         asking for frames when the scene has settled.
         """
         moving = False
+        if self._arriving is not None:
+            moving = self._travel(dt)
+        want = 1.0 if self._pressed is self.HUB else 0.0
+        if not motion.SNAPPY.settled(self.hub_press, want, self.hub_press_v):
+            self.hub_press, self.hub_press_v = motion.SNAPPY.at(
+                self.hub_press, want, self.hub_press_v, dt)
+            moving = True
         target = self.target_depth()
         if not motion.ZOOM.settled(self.depth, target, self.depth_v):
             self.depth, self.depth_v = motion.ZOOM.at(
@@ -681,10 +985,10 @@ def demo():
 
         keys.connect("key-pressed", on_key)
         win.add_controller(keys)
-        # Anything that changes the scene asks for frames; the canvas
-        # stops asking once everything has settled, so a scene at rest
-        # is not burning a frame clock.
-        GLib.timeout_add(40, lambda: (cv.animate(), True)[1])
+        # No frame timer here on purpose: anything that changes the
+        # scene asks for frames itself, and the canvas stops asking once
+        # everything has settled. A timer would put a scene at rest back
+        # on the frame clock, and would hide it if it ever stopped.
         win.present()
 
     app = Gtk.Application(application_id="io.github.rebreda.dictatr.canvas")

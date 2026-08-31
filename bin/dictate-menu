@@ -2,33 +2,34 @@
 # The menu. By default a client of the resident shell, so opening it is a
 # move inside a surface that is already up rather than a new process.
 #
-#   dictate-menu                # ask the shell (starting it if need be)
-#   dictate-menu --toggle       # ...and put it away if it is already up
-#   dictate-menu --standalone   # the old widget menu, in its own process
+#   dictate-menu                           ask the shell (starting it if need be)
+#   dictate-menu --toggle                  ...and put it away if it is already up
+#   dictate-menu --settings                the settings scene
+#   dictate-menu --suggest                 the suggest scene
+#   dictate-menu --standalone [--settings] the same surface, in its own process
 #
-# --settings, --suggest and --file stay standalone: the settings window is
-# an ordinary window rather than an overlay, suggest is a different surface
-# with a different lifetime, and --file is a file dialog with no surface of
-# its own (the shell calls it until it draws a picker). They are also why
-# this passes "$@" on at all — it used to drop every argument, so the
-# tray's Settings item opened the radial menu instead of the settings
-# window.
+# --file stays in a process of its own: it is a file dialog with no
+# surface at all, which the shell calls until it draws a picker. That is
+# also why this passes "$@" on -- it used to drop every argument, so the
+# tray's Settings item opened the menu instead of the settings scene.
 set -eu
 . "$(dirname "$(readlink -f "$0")")/_common.sh"
 preload_layer_shell
 
 args=()
 standalone=0
+scene=menu
 for arg in "$@"; do
     case "$arg" in
         --standalone)            standalone=1 ;;
-        --settings|--suggest|--file)
-                                 standalone=1; args+=("$arg") ;;
+        --file)                  standalone=1; args+=("$arg") ;;
+        --settings)              scene=settings; args+=("$arg") ;;
+        --suggest)               scene=suggest;  args+=("$arg") ;;
         *)                       args+=("$arg") ;;
     esac
 done
 
 if [ "$standalone" -eq 1 ]; then
-    exec "$py" "$repo/ui/menu.py" ${args+"${args[@]}"}
+    exec "$py" "$repo/ui/menu.py" --standalone ${args+"${args[@]}"}
 fi
-exec "$py" "$repo/ui/shell.py" --client menu ${args+"${args[@]}"}
+exec "$py" "$repo/ui/shell.py" --client "$scene"

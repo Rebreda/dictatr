@@ -13,7 +13,6 @@ import time
 from director import Director
 from session import DEMO, REPO, STAGE, W, H
 
-MENU_APP_ID = "io.github.rebreda.dictatr.menu"
 
 # Editor placement, shared with the hero video scene. Sized so the
 # notes fill the window instead of floating in an empty slab.
@@ -117,19 +116,27 @@ def setup(d: Director, out: str, step: int = 2):
 
 
 def settings(d: Director, out: str):
-    # Launch without bin/dictate-menu: its gtk4-layer-shell LD_PRELOAD
-    # turns even this plain window into a fullscreen layer surface on
-    # the demo stage. The settings window needs no layer-shell.
-    # Sanitized paths for the shot: a fake HOME and an empty
-    # XDG_CONFIG_HOME make the archive/config rows read like a fresh
-    # install instead of leaking demo-runtime paths.
-    d.run_app(["python3", str(REPO / "ui/menu.py"), "--settings"],
+    """The settings ring on the same desk.
+
+    A scene in the shell rather than a window of dropdowns, so sway's
+    window tree cannot see it and there is nothing to move: like the
+    menu and the wizard, it is the clock and the cursor. Standalone with
+    a scratch config, so the archive row reads like a fresh install
+    instead of leaking this stage's runtime paths.
+    """
+    cx, cy = W // 2, 371
+    d.move_to(cx, cy)
+    time.sleep(0.2)
+    d.run_app([str(REPO / "bin/dictate-menu"), "--standalone", "--settings"],
               HOME="/home/user", XDG_CONFIG_HOME="", DICTATE_ARCHIVE="")
-    rect = d.wait_window(MENU_APP_ID)
-    # Center-right so the editor stays visible behind it.
-    d.swaymsg(f'[app_id="{MENU_APP_ID}"] move position '
-              f'{W - rect["width"] - 90} '
-              f'{(H - rect["height"]) // 2}')
-    d.move_to(W - 120, H - 160)   # park the cursor on open wallpaper
-    time.sleep(1.8)               # model list fetch (stub) + first paint
+    # Jiggle while it maps: sway only tells an overlay where the cursor
+    # is via a motion event, and the ring blooms wherever the first one
+    # lands. Long enough to cover the model list arriving as well.
+    for i in range(45):
+        d.move_to(cx + i % 2, cy)
+        time.sleep(0.08)
+    time.sleep(1.2)
+    d.glide_to(cx + 38, cy - 38, 0.4)
+    time.sleep(0.3)
     d.screenshot(out, scale=(W, H))
+

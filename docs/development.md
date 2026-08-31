@@ -193,8 +193,12 @@ ring's bubbles one at a time, so clicks elsewhere fall through.
 | `ui/radial_layout.py` | where the bubbles go: arcs, packing, grouping, depth. No GTK, so `tests/test_radial_layout.py` covers it |
 | `ui/motion.py` | how anything moves: easing, `Track`/`Timeline`, the tether's outline. No GTK either; `tests/test_motion.py` |
 | `ui/handoff.py` | one surface handing over to the next, with a tether across the gap |
-| `ui/radial.py` | the visual kit: palette, bubbles, ring, overlay, transitions, progress arc, icon theme |
-| `ui/menu.py` | radial menu and the settings window |
+| `ui/graph.py` | the scene as a graph, and the fractal zoom that moves through it. No GTK; `tests/test_graph.py` |
+| `ui/scenes.py` | what each scene is, as nodes, and what its leaves do. No GTK at import; `tests/test_scenes.py` |
+| `ui/canvas.py` | one widget that draws the whole scene: render nodes, a camera, and its own hit-testing |
+| `ui/shell.py` | the resident process every drawn surface lives in, and the bus its shims call |
+| `ui/radial.py` | the visual kit: palette, overlay, transitions, tether, icon theme — and the widget ring `ui/chat.py` still uses |
+| `ui/menu.py` | the audio file picker, and the shell's surface in a process of its own |
 | `ui/setup.py` | setup wizard |
 | `ui/tray.py` | tray icon and the hotkey portal host |
 | `ui/chat.py` | floating voice chat |
@@ -204,14 +208,23 @@ ring's bubbles one at a time, so clicks elsewhere fall through.
 | `packaging/` | `stage.sh`, the two builders, and `check.sh` (build + lint + install in a container) |
 | `docs/demo/` | the capture harness (see its own README) |
 
+A new surface is a scene, not a program: a handful of `graph.Node`
+records in `ui/scenes.py`, drawn by the canvas in the resident shell.
+Nodes name their children rather than owning them, so a node two scenes
+both want is one node — which is what stops the surfaces from
+reinventing each other. A leaf carries what choosing it does; see
+`activate()` for the four kinds.
+
 Anything that draws should paint with `ui/radial.py`: import the palette
 and a `Style` rather than restating hex codes or pixel sizes, and call
-`radial.apply_css()` so the bundled symbolic icons resolve. A surface
-that needs a hub and satellites mounts a `Ring` — it takes items, a
-style and, if something is in the way, the widgets to lay itself out
-around. It should never work out an angle or a radius for itself; that
-is what `ui/radial_layout.py` is, and a second copy of it is how the
-surfaces drifted apart the last time.
+`radial.apply_css()` so the bundled symbolic icons resolve. It should
+never work out an angle or a radius for itself; that is what
+`ui/radial_layout.py` is, and a second copy of it is how the surfaces
+drifted apart the last time.
+
+`ui/chat.py` is still a tree of widgets around a `radial.Ring`, and is
+the only thing keeping that class alive. When it becomes a scene the
+ring goes with it.
 
 Nothing outside `ui/radial.py` should write a tick callback. `drive`,
 `fade`, `grow`, `crossfade`, `scroll_to` and `play` are the animator, and
@@ -219,6 +232,15 @@ they settle instantly on a widget with no frame clock — motion is a way
 of arriving somewhere, and somewhere is where it has to end up even when
 nobody watches. That is also what lets the check tools drive these
 surfaces without a window on screen.
+
+The drawn side does not animate widgets at all: everything on the canvas
+is a value on a `motion.Spring`, advanced once per frame in
+`Canvas.tick`, and the canvas asks for frames only while something is
+still moving. Anything you can grab or interrupt belongs on a spring —
+a fixed-duration curve restarts from nothing when it is caught, which is
+what makes an interface feel mechanical. `tools/shellcheck` steps the
+canvas by hand, with no window, because the springs are solved
+analytically rather than integrated.
 
 Surfaces are separate processes, so handing over is a protocol rather
 than a call: `handoff.leave` holds the old surface open and spawns the

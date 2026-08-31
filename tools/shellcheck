@@ -181,10 +181,166 @@ def check_the_shims_still_exist():
     print("shims      : all present, --standalone preserved")
 
 
+def check_the_ring_arrives_and_leaves():
+    """A surface that appears fully formed and vanishes is the least
+    fluid thing an interface can do, and it is what this drew until the
+    bubbles were given a way out of the hub and back into it.
+
+    No window: the canvas is stepped by hand, which is the point of
+    solving the springs analytically rather than reading a frame clock.
+    """
+    def step(cv, seconds, dt=1 / 60):
+        t = 0.0
+        while cv._arriving is not None and t < seconds:
+            cv.tick(dt)
+            t += dt
+        return t
+
+    cv = C.Canvas(G.Graph(scenes.menu_nodes()), "menu")
+    cv._forced_view = (700, 700)
+    kids = cv.items("menu")
+    cv.bloom()
+    check("a bloom does not start from the hub",
+          all(i.out == 0.0 for i in kids) and cv.hub_out == 0.0)
+    step(cv, 0.30 - 1 / 60)
+    check("every bubble arrives at once, so there is no stagger",
+          kids[0].out > kids[-1].out + 0.5)
+    took = 0.30 + step(cv, 3.0)
+    check(f"the ring never settles on its orbit ({took:.2f}s)",
+          all(abs(i.out - 1.0) < 0.01 for i in kids))
+
+    landed = []
+    check("a fold was refused on a ring that is standing still",
+          cv.fold(then=lambda: landed.append(True)))
+    check("a second fold queued another departure", not cv.fold())
+    gone = step(cv, 3.0)
+    check("leaving never finished", bool(landed))
+    check("a bubble left through the far side of the hub",
+          all(i.out > -0.01 for i in kids))
+    check(f"leaving takes {gone:.2f}s, which is a wait rather than an exit",
+          gone < 0.5)
+    print(f"arrival    : out in {took:.2f}s, back in {gone:.2f}s, in order")
+
+
+def check_leaving_catches_an_arrival_in_flight():
+    """The whole reason these are springs. Ask a ring to leave while it
+    is still arriving and it turns around carrying the speed it had; a
+    fixed-duration curve would snap back to full size and play the exit
+    from the beginning."""
+    cv = C.Canvas(G.Graph(scenes.menu_nodes()), "menu")
+    cv._forced_view = (700, 700)
+    cv.bloom()
+    for _ in range(12):
+        cv.tick(1 / 60)
+    mid = [i.out for i in cv.items("menu")]
+    check("nothing had moved to interrupt", max(mid) > 0.2)
+    check("the whole ring was already out, so nothing was in flight",
+          min(mid) == 0.0)
+    cv.fold()
+    cv.tick(1 / 60)
+    after = [i.out for i in cv.items("menu")]
+    # One frame cannot move far: what is being ruled out is a jump back
+    # to full size and the exit playing from the beginning.
+    check("the reversal jumped rather than turned",
+          all(abs(a - b) < 0.08 for a, b in zip(after, mid)))
+    # And the regression that found this: a bubble still inside the hub
+    # was told to wait at 1.0 for its turn to leave, so a departure that
+    # caught an arrival threw the rest of the ring out on its way in.
+    check("a departure threw a bubble out of the hub on the way out",
+          all(a == 0.0 for a, b in zip(after, mid) if b == 0.0))
+    t = 0.0
+    while cv._arriving is not None and t < 3.0:
+        cv.tick(1 / 60)
+        t += 1 / 60
+        check("a bubble left through the far side of the hub",
+              all(i.out > -0.01 for i in cv.items("menu")))
+    check("an interrupted arrival never finished leaving",
+          cv._arriving is None)
+    print("reversal   : a departure catches an arrival mid-flight")
+
+
+def check_a_redraw_keeps_the_bubble_you_are_touching():
+    """A settings toggle rebuilds the scene. The bubble under the
+    pointer has to stay under the pointer, still hovered and still on
+    its orbit -- a bubble that flickered the instant it was pressed
+    would lose the feedback exactly where it is wanted."""
+    cv = C.Canvas(G.Graph(scenes.settings_nodes()), "settings")
+    cv._forced_view = (700, 700)
+    kids = cv.items("settings")
+    kids[0].hover, kids[0].press = 0.8, 0.5
+    cv.refresh(G.Graph(scenes.settings_nodes()))
+    now = cv.items("settings")[0]
+    check("a redraw threw away the hover", abs(now.hover - 0.8) < 1e-9)
+    check("a redraw threw away the press", abs(now.press - 0.5) < 1e-9)
+    check("a redraw put the bubble back in the hub", now.out == 1.0)
+    print("redraw     : springs survive a scene rebuilding under you")
+
+
+def check_every_bubble_has_an_icon():
+    """A name the theme has never heard of draws nothing at all.
+
+    The canvas looks an icon up and returns quietly when there is none,
+    which is right at runtime -- a missing icon should not take the
+    surface down -- and useless at review time, because the result is a
+    bubble that is simply blank and no line anywhere saying so. Every
+    scene this build can draw, checked against the theme that will draw
+    it, plus the two the hub supplies itself.
+    """
+    theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+    names = {"go-previous-symbolic", "window-close-symbolic"}
+    for nodes in (scenes.menu_nodes(), scenes.suggest_nodes("some text"),
+                  scenes.suggest_nodes("some text", []),
+                  scenes.settings_nodes()):
+        names |= {n.icon for n in nodes if n.icon}
+    missing = []
+    for name in sorted(names):
+        icon = theme.lookup_icon(name, None, 24, 1, Gtk.TextDirection.NONE,
+                                 Gtk.IconLookupFlags.FORCE_SYMBOLIC)
+        path = icon.get_file().get_path() if icon and icon.get_file() else ""
+        if not path or "image-missing" in path:
+            missing.append(name)
+    check(f"icons this theme cannot draw: {missing}", not missing)
+    print(f"icons      : {len(names)} names, all drawable")
+
+
+def check_a_setting_writes_one_thing():
+    """The settings ring has no Save: a bubble writes as it is pressed,
+    so what has to hold is that pressing one writes exactly the key it
+    is about and nothing else. Writes are intercepted -- this runs on
+    the machine someone is working on, and their config is theirs.
+    """
+    written = []
+    real, scenes.write_config = scenes.write_config, written.append
+    try:
+        nodes = {n.id: n for n in scenes.settings_nodes()}
+        for node in nodes.values():
+            if node.children or node.id == "settings":
+                continue
+            if "set" not in node.data:
+                check(f"{node.id} changes nothing", "folder" in node.data)
+                continue
+            before = len(written)
+            node.data["set"]()
+            check(f"{node.id} wrote {len(written) - before} updates",
+                  len(written) - before == 1)
+            check(f"{node.id} wrote {len(written[-1])} keys at once",
+                  len(written[-1]) == 1)
+    finally:
+        scenes.write_config = real
+    check("the archive key was written as a boolean",
+          not any(isinstance(u.get("archive"), bool) for u in written))
+    print(f"settings   : {len(written)} bubbles, one key each, nothing saved")
+
+
 check_the_menu_graph_is_sound()
 check_every_leaf_does_something()
 check_choosing_a_leaf_reaches_the_surface()
 check_a_scene_leaf_reaches_its_surface()
+check_the_ring_arrives_and_leaves()
+check_leaving_catches_an_arrival_in_flight()
+check_a_redraw_keeps_the_bubble_you_are_touching()
+check_every_bubble_has_an_icon()
+check_a_setting_writes_one_thing()
 check_a_client_says_what_it_found()
 check_the_shims_still_exist()
 

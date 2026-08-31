@@ -68,9 +68,9 @@ class Shell(Gtk.ApplicationWindow):
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
             str(REPO / "ui" / "icons" / "theme"))
 
-        self.graph = G.Graph(scenes.menu_nodes())
-        self.canvas = C.Canvas(self.graph, "menu",
-                               on_activate=lambda n: scenes.activate(n, self))
+        self.canvas = C.Canvas(G.Graph(scenes.menu_nodes()), "menu",
+                               on_activate=lambda n: scenes.activate(n, self),
+                               on_hub=self.on_hub, on_void=self.dismiss)
         self.canvas.install_gestures()
         self.canvas.set_hexpand(True)
         self.canvas.set_vexpand(True)
@@ -78,6 +78,7 @@ class Shell(Gtk.ApplicationWindow):
         self.ov = radial.Overlay(self, self.canvas, (900, 900),
                                  on_place=self._placed)
         self.showing = False
+        self.scene = "menu"
         if not self.ov.start():
             self.set_default_size(900, 900)
             self.set_child(self.canvas)
@@ -94,12 +95,40 @@ class Shell(Gtk.ApplicationWindow):
         Moving rather than reopening is the whole point: if the surface
         is already on screen, going somewhere else in it is a zoom.
         """
-        if scene in self.graph:
-            self.canvas.path.go(scene)
-            self.canvas.announce()
+        if not self.showing:
+            # Find the pointer again, but only for a showing that is
+            # actually starting: Open on a surface already up is a move
+            # to another scene, and a scene change is not a reason to
+            # pick the whole overlay up and drop it somewhere else.
+            self.ov.rearm()
+            self._go(scene)
+        elif scene != self.scene and scene in scenes.ROOTS:
+            # Already up, and asked for somewhere else: this ring goes
+            # back into the hub and the next one comes out of it, so the
+            # hub is the one thing that never leaves. If it is already
+            # on its way out, do not queue a second departure behind it.
+            if not self.canvas.fold(then=lambda: self._go(scene)):
+                self._go(scene)
+        else:
+            self._go(scene)
         self.showing = True
         self.canvas.animate()
         self.present()
+
+    def _go(self, scene):
+        """Put a scene up: a root this build knows how to make, or a
+        node to walk to inside the one already there."""
+        root = scenes.ROOTS.get(scene)
+        if root is not None:
+            self.scene = scene
+            root(self)
+        elif scene in self.canvas.graph:
+            self.canvas.path.go(scene)
+            self.canvas.announce()
+
+    def set_scene(self, graph, root):
+        """Put a whole scene up. What a root does when it is opened."""
+        self.canvas.set_scene(graph, root)
 
     def toggle(self, scene="menu"):
         if self.showing and self.get_visible():
@@ -110,15 +139,53 @@ class Shell(Gtk.ApplicationWindow):
     def dismiss(self):
         """Put the surface away without ending the process.
 
-        The scene keeps its shape, so opening it again is the same scene
-        rather than a fresh one — which is what a resident shell buys.
+        The bubbles spiral back into the hub first, so leaving is an act
+        rather than a disappearance. A second request while that is
+        under way closes at once: mashing the hotkey should put the
+        surface away, not keep it up by asking twice.
+
+        What survives is the window, the canvas and the frame clock, not
+        the scene: a root is built again when it is opened, because the
+        always-on bubble is only right if runstate is asked afresh and
+        the suggest ring is about the text in front of you now rather
+        than the text that was there last time.
         """
-        self.showing = False
-        # Next time, find the pointer again rather than reappearing
-        # where this showing happened to land.
-        self.ov.rearm()
-        self.set_visible(False)
+        if not self.canvas.fold(then=self.hide):
+            self.hide()
+        self.canvas.animate()
         return False
+
+    def hide(self):
+        self.showing = False
+        # Rearming belongs to the next open(), not to this close. Armed
+        # here, the pointer poll spent the whole time the shell was put
+        # away asking a hidden surface where the pointer was -- which it
+        # cannot answer, so the poll simply ran at 20Hz until the shell
+        # came back, once per dismissal, forever.
+        self.set_visible(False)
+
+    def choose_folder(self, key):
+        """Ask for a directory and hand it to the scene.
+
+        A path is the one setting a ring cannot hold: every other one
+        here is a choice among a few, and a filesystem is not.
+        """
+        dialog = Gtk.FileDialog(title="Where to keep recordings")
+
+        def done(d, res):
+            try:
+                folder = d.select_folder_finish(res)
+            except GLib.Error:
+                return          # dismissed, which changes nothing
+            scenes.archive_chosen(folder.get_path())
+            scenes.rebuild(self)
+
+        dialog.select_folder(self, None, done)
+
+    def on_hub(self):
+        """The middle: out of this level, or out of the surface."""
+        if not self.canvas.back():
+            self.dismiss()
 
     def _placed(self, *_):
         self.canvas.animate()

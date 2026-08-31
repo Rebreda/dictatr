@@ -483,7 +483,7 @@ everything needing PyGObject lives in `ui/` and is shelled out to.
 |---|---|
 | `src/dictatr/backend/` | the provider seam: config, detection, managed lemond, client |
 | `ui/radial.py` | the shared visual kit: bubbles, twirl transitions, submenus, progress arcs |
-| `ui/menu.py`, `ui/chat.py`, `ui/tray.py` | the radial menu, voice chat, tray icon |
+| `ui/shell.py`, `ui/chat.py`, `ui/tray.py` | the resident shell that draws the menu, voice chat, tray icon |
 | `ui/setup.py`, `ui/setup_steps.py` | the setup wizard: the window, and what it says |
 | `ui/portal_typed.py` | RemoteDesktop portal typing helper |
 | `ui/annotate.py` | the screenshot editor: crop, box, arrow, ink, redact |

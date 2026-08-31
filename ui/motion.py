@@ -253,6 +253,13 @@ SNAPPY = Spring(response=0.24, damping=0.82)    # a bubble giving under a press
 GLIDE = Spring(response=0.42, damping=1.0)      # a level arriving, no overshoot
 FLING = Spring(response=0.55, damping=0.72)     # a released drag, settling
 ZOOM = Spring(response=0.50, damping=0.90)      # the camera between depths
+BLOOM = Spring(response=0.38, damping=0.66)     # a bubble thrown out of the hub
+# Leaving is not arriving played backwards. BLOOM overshoots its orbit
+# and settles back, which is what makes an arrival feel thrown; the same
+# overshoot on the way in would carry a bubble through the hub and out
+# the far side before it vanished. Critical, and quicker: going is not
+# the part worth watching.
+FOLD = Spring(response=0.22, damping=1.0)
 
 
 # --- the tether ---------------------------------------------------------
