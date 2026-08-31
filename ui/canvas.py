@@ -159,6 +159,23 @@ class Canvas(Gtk.Widget):
             steps.append(G.descend(slot, m.bubble, self.extent(child)))
         return G.Camera(steps)
 
+    def do_measure(self, orientation, _for_size):
+        """How big the scene wants to be.
+
+        A Gtk.Widget with no measure reports 0x0, and Overlay puts its
+        child in a Gtk.Fixed, which gives a child exactly its natural
+        size. The canvas therefore had a zero allocation: it still drew,
+        because viewport() falls back to 800 when get_width() is 0, but
+        GTK delivers no pointer event to a widget with no area -- so
+        every bubble was unclickable while the keyboard went on working,
+        the key controller being on the window rather than here.
+        """
+        side = self._forced_view or (self.SIDE, self.SIDE)
+        want = side[0] if orientation == Gtk.Orientation.HORIZONTAL else side[1]
+        return want, want, -1, -1
+
+    SIDE = 900        # natural size when nothing has been forced
+
     def viewport(self):
         if self._forced_view is not None:
             return self._forced_view

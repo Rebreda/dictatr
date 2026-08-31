@@ -1178,6 +1178,11 @@ class Overlay:
             ls.set_anchor(self.win, edge, True)
 
         self.canvas = Gtk.Fixed()
+        # A Fixed gives a child its natural size and nothing more, so a
+        # child that does not ask for one gets none -- and a widget with
+        # no area receives no pointer events, however well it draws. The
+        # overlay was told how big the surface is; say so.
+        self.child.set_size_request(self.w, self.h)
         self.canvas.put(self.child, 0, 0)
         self.win.set_child(self.canvas)
 
@@ -1250,6 +1255,25 @@ class Overlay:
         self.move(px, py)
         if self.on_place is not None:
             self.on_place(px, py)
+
+    def rearm(self):
+        """Forget where the child was put, so the next showing finds the
+        pointer again.
+
+        A surface that is its own process places itself once and dies
+        with the window. A resident one is shown and hidden over and
+        over, and `placed` outlived the hiding: the menu came back
+        wherever it had first appeared, however far the pointer had
+        moved since, which reads as a surface that ignores the pointer
+        or remembers a stale position.
+        """
+        self.placed = False
+        self._polls = 0
+        self._ticks = 0
+        if self.canvas is None:
+            return
+        self.win.add_tick_callback(self._painted)
+        GLib.timeout_add(50, self._poll_pointer)
 
     def move(self, x, y):
         self.pos = (x, y)
