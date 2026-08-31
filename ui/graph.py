@@ -34,9 +34,25 @@ EPS = 1e-9
 # a wall you are already through.
 MIN_SCALE = 0.02
 MAX_SCALE = 40.0
-# Where it fades, as a fraction of the way to those limits.
-FADE_IN = 4.0
+# Where a level too small to read yet fades in, as an apparent scale.
 FADE_OUT = 0.08
+# ...and where the one you are flying through fades out, as a fraction of
+# the descent rather than as a scale.
+#
+# Scale cannot say this. How big a parent looks at the moment you land on
+# its child is bubble/(2*child_extent) inverted -- a property of that one
+# ring's proportions, about 4x for these, and not of the traversal. Tuned
+# against a scale, the fade either finished before the movement did or,
+# as it did here, never finished at all: the level you had just flown
+# through sat over the one you had arrived at, four times life size and
+# still fully opaque, which reads as two menus at once rather than as
+# depth. Depth is what a descent is measured in, so measure it in depth.
+PASS_SOLID = 0.25       # the first quarter of a descent leaves it alone
+# ...and after that it decays, at a rate that leaves a level a tenth of
+# itself by the time you have landed on its child and gone by the time
+# you have landed on its grandchild. One faint ghost behind you, so where
+# you came from is still legible without competing with where you are.
+PASS_RATE = 3.2
 
 
 class Cycle(ValueError):
@@ -202,6 +218,27 @@ class Camera:
         self.steps = list(steps)
 
     # --- level frames ---------------------------------------------------
+    def between(self, base, level):
+        """(scale, dx, dy) taking a point in *level*'s space to *base*'s.
+
+        Relative, because absolute does not survive the depth this claims
+        to support. A frame's scale is one step's scale per level and a
+        step's scale is well under one, so an absolute frame underflows
+        somewhere around level fourteen and every ratio taken from it is
+        then nonsense or a division by zero. Everything ever drawn is
+        within a few levels of the eye, and between two nearby levels the
+        numbers are ordinary whatever the absolute depth is.
+        """
+        if level >= base:
+            scale, x, y = 1.0, 0.0, 0.0
+            for step in self.steps[base:level]:
+                x += scale * step.dx
+                y += scale * step.dy
+                scale *= step.scale
+            return scale, x, y
+        scale, x, y = self.between(level, base)     # ...and inverted
+        return 1.0 / scale, -x / scale, -y / scale
+
     def frame(self, level):
         """(scale, dx, dy) taking a point in *level*'s space to the root's.
 
@@ -209,40 +246,45 @@ class Camera:
         offset, because every step is a translate and a scale and those
         two compose to exactly that.
         """
-        scale, x, y = 1.0, 0.0, 0.0
-        for step in self.steps[:level]:
-            x += scale * step.dx
-            y += scale * step.dy
-            scale *= step.scale
-        return scale, x, y
+        return self.between(0, level)
 
     def to_root(self, level, point):
         scale, x, y = self.frame(level)
         return x + scale * point[0], y + scale * point[1]
 
     # --- the eye ---------------------------------------------------------
-    def eye(self, depth):
-        """(scale, dx, dy) of the frame the camera is resting in.
+    def _eye(self, depth, top=None):
+        """(base, (scale, dx, dy)) — the camera's frame, in base's space.
+
+        *base* is the level the camera is resting on or falling from, so
+        the transform returned is between identity and one step, whatever
+        the depth. That is the whole reason it is expressed this way.
 
         Between levels the scale is interpolated in log space, so a zoom
         reads as one steady movement rather than a rush that trails off:
         each doubling takes the same time as the last, which is what
         makes an unbounded zoom feel like a place rather than a fall.
         """
-        low = max(0, min(int(math.floor(depth)), len(self.steps)))
-        t = depth - low
-        s0, x0, y0 = self.frame(low)
-        if t <= EPS or low >= len(self.steps):
-            return s0, x0, y0
-        s1, x1, y1 = self.frame(low + 1)
-        return (math.exp(math.log(s0) + (math.log(s1) - math.log(s0)) * t),
-                x0 + (x1 - x0) * t,
-                y0 + (y1 - y0) * t)
+        last = len(self.steps) if top is None else min(len(self.steps), top)
+        base = max(0, min(int(math.floor(depth)), last))
+        t = depth - base
+        if t <= EPS or base >= len(self.steps):
+            return base, (1.0, 0.0, 0.0)
+        s1, x1, y1 = self.between(base, base + 1)
+        return base, (math.exp(math.log(s1) * t), x1 * t, y1 * t)
+
+    def eye(self, depth):
+        """(scale, dx, dy) of the frame the camera is resting in, in the
+        root's space. The absolute form, for anything asking where the
+        camera is rather than what to draw."""
+        base, (rs, rx, ry) = self._eye(depth)
+        s, x, y = self.frame(base)
+        return s * rs, x + s * rx, y + s * ry
 
     def scale_of(self, level, depth):
         """How big *level* looks from *depth*. 1.0 is at rest."""
-        eye_scale = self.eye(depth)[0]
-        return self.frame(level)[0] / max(eye_scale, EPS)
+        base, (es, _ex, _ey) = self._eye(depth)
+        return self.between(base, level)[0] / es
 
     def place(self, level, depth, viewport):
         """(scale, x, y) to draw *level* at, in viewport pixels.
@@ -250,12 +292,10 @@ class Camera:
         The transform a renderer applies before drawing that level in its
         own coordinates: scale about the origin, then translate.
         """
-        eye_scale, ex, ey = self.eye(depth)
-        scale, x, y = self.frame(level)
+        base, (es, ex, ey) = self._eye(depth)
+        scale, x, y = self.between(base, level)
         cx, cy = viewport[0] / 2, viewport[1] / 2
-        return (scale / eye_scale,
-                cx + (x - ex) / eye_scale,
-                cy + (y - ey) / eye_scale)
+        return scale / es, cx + (x - ex) / es, cy + (y - ey) / es
 
     def to_viewport(self, level, depth, point, viewport):
         scale, x, y = self.place(level, depth, viewport)
@@ -267,6 +307,24 @@ class Camera:
         return (point[0] - x) / max(scale, EPS), (point[1] - y) / max(scale, EPS)
 
     # --- what is worth drawing -------------------------------------------
+    def _row(self, level, depth, top):
+        """(level, scale, alpha) for one level, or None if it is not
+        worth drawing from here."""
+        scale = self.scale_of(level, depth)
+        if scale < MIN_SCALE or scale > MAX_SCALE:
+            return None
+        alpha = 1.0
+        past = depth - level
+        # The deepest level there is never counts as flown through,
+        # however far the camera has run past it: a spring overshooting,
+        # or the next level being pulled in before it has been committed
+        # to, would otherwise fade the only thing on screen to nothing.
+        if past > PASS_SOLID and level < top:
+            alpha = math.exp(-(past - PASS_SOLID) * PASS_RATE)
+        elif scale < FADE_OUT:                   # not yet legible
+            alpha = max(0.0, (scale - MIN_SCALE) / (FADE_OUT - MIN_SCALE))
+        return (level, scale, alpha) if alpha > 0.004 else None
+
     def visible(self, depth, levels=None):
         """[(level, scale, alpha)] worth drawing, nearest the eye first.
 
@@ -275,17 +333,23 @@ class Camera:
         can be unbounded without the frame cost being.
         """
         top = len(self.steps) if levels is None else levels - 1
+        base = max(0, min(int(math.floor(depth)), top))
         out = []
-        for level in range(0, top + 1):
-            scale = self.scale_of(level, depth)
-            if scale < MIN_SCALE or scale > MAX_SCALE:
-                continue
-            alpha = 1.0
-            if scale > FADE_IN:                      # zooming past it
-                alpha = max(0.0, 1.0 - (scale - FADE_IN) / (MAX_SCALE - FADE_IN))
-            elif scale < FADE_OUT:                   # not yet legible
-                alpha = max(0.0, (scale - MIN_SCALE) / (FADE_OUT - MIN_SCALE))
-            if alpha > 0.004:
-                out.append((level, scale, alpha))
+        # Outward from the eye in both directions, stopping at the first
+        # level not worth drawing. Scale falls off geometrically one way
+        # and opacity falls off the other, both monotonically, so the
+        # first level that fails is the last that could have passed --
+        # and the work per frame stops depending on how deep the path is
+        # rather than merely looking as though it does.
+        for level in range(base, top + 1):
+            row = self._row(level, depth, top)
+            if row is None:
+                break
+            out.append(row)
+        for level in range(base - 1, -1, -1):
+            row = self._row(level, depth, top)
+            if row is None:
+                break
+            out.append(row)
         out.sort(key=lambda row: abs(row[1] - 1.0))
         return out

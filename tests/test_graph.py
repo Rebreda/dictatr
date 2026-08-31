@@ -266,3 +266,63 @@ def test_the_axes_are_judged_separately():
     text = rule("canvas.py").group(1)
     assert "+" not in text, f"canvas.py sums the axes: {text!r}"
     assert "or" in text, f"canvas.py should judge each axis: {text!r}"
+
+
+# --- flying through a level --------------------------------------------
+
+def test_the_level_you_flew_through_is_gone_when_you_land():
+    """The bug this pins: the fade was tuned against apparent scale, and
+    how big a parent looks when you land on its child is a property of
+    that one ring's proportions -- about 4x here -- not of the descent.
+    So the parent arrived at 4x life size and 99% opacity and stayed
+    there, which reads as two menus at once rather than as depth."""
+    cam = G.Camera(steps(3))
+    alpha = dict((lvl, a) for lvl, _s, a in cam.visible(1))
+    assert alpha[1] == 1.0                     # where you have landed
+    assert alpha.get(0, 0.0) < 0.15            # where you came from
+
+
+def test_a_level_dims_as_you_pass_it_and_not_before():
+    cam = G.Camera(steps(3))
+
+    def alpha_of(level, depth):
+        return dict((lvl, a) for lvl, _s, a in cam.visible(depth)).get(level,
+                                                                       0.0)
+
+    assert alpha_of(0, 0.0) == 1.0             # standing on it
+    assert alpha_of(0, 0.2) == 1.0             # a nudge is not a descent
+    seen = [alpha_of(0, d / 20) for d in range(21)]
+    assert all(b <= a for a, b in zip(seen, seen[1:])), "dimming reverses"
+
+
+def test_where_you_came_from_is_still_faintly_there():
+    """One ghost, not none and not a stack of them: the level behind you
+    says where you came from, the one behind that has gone."""
+    cam = G.Camera(steps(12))
+    drawn = {lvl for lvl, _s, _a in cam.visible(6)}
+    assert 5 in drawn and 4 not in drawn
+
+
+@pytest.mark.parametrize("depth", [14, 99, 400, 999])
+def test_a_deep_zoom_still_draws_the_level_you_are_on(depth):
+    """An absolute frame is one step's scale multiplied per level, so it
+    underflows around level fourteen -- and every scale taken from it is
+    then zero, infinity, or a division by zero. The camera works
+    relative to the level it is resting on, which is why "depth is
+    unbounded" is a claim rather than a hope."""
+    cam = G.Camera(steps(1000))
+    drawn = dict((lvl, s) for lvl, s, _a in cam.visible(depth))
+    assert depth in drawn, f"nothing drawn at the eye at depth {depth}"
+    assert drawn[depth] == pytest.approx(1.0)
+
+
+def test_the_work_per_frame_does_not_grow_with_depth():
+    """visible() used to ask every level from the root down whether it
+    was worth drawing, which is O(depth) per frame however few levels
+    came back. It walks out from the eye now and stops."""
+    cam = G.Camera(steps(1000))
+    calls = []
+    real = cam.scale_of
+    cam.scale_of = lambda lvl, d: (calls.append(lvl), real(lvl, d))[1]
+    cam.visible(700)
+    assert len(calls) <= 10, f"{len(calls)} levels considered"
